@@ -56,6 +56,13 @@ using BitTorrent::Session;
 
 namespace
 {
+    const QString ENGLISH_FUNNY_LEVEL_KEY =
+        QStringLiteral("Appearance/EnglishFunnyLevel");
+    const QString CANTONESE_FUNNY_LEVEL_KEY =
+        QStringLiteral("Appearance/CantoneseFunnyLevel");
+    constexpr int DEFAULT_ENGLISH_FUNNY_LEVEL = 1;
+    constexpr int DEFAULT_CANTONESE_FUNNY_LEVEL = 3;
+
     /// Staged keys whose change only takes effect after an application restart.
     const QSet<QString> RESTART_KEYS = {
         QStringLiteral("style"),
@@ -948,6 +955,10 @@ void OptionsController::loadBehavior()
     auto *theme = ThemeManager::instance();
 
     stage(QStringLiteral("language"), pref->getLanguageMode());
+    stage(QStringLiteral("englishFunnyLevel"), pref->value(
+        ENGLISH_FUNNY_LEVEL_KEY, DEFAULT_ENGLISH_FUNNY_LEVEL).toInt());
+    stage(QStringLiteral("cantoneseFunnyLevel"), pref->value(
+        CANTONESE_FUNNY_LEVEL_KEY, DEFAULT_CANTONESE_FUNNY_LEVEL).toInt());
     stage(QStringLiteral("style"), pref->getStyle());
     stage(QStringLiteral("colorScheme"), static_cast<int>(theme->colorScheme()));
     stage(QStringLiteral("useCustomTheme"), pref->useCustomUITheme());
@@ -1330,13 +1341,31 @@ void OptionsController::applyBehavior()
     auto *session = Session::instance();
     auto *theme = ThemeManager::instance();
 
-    const int newLanguage = staged(QStringLiteral("language"), 0).toInt();
-    if (newLanguage != pref->getLanguageMode())
+    const int newLanguage = std::clamp(staged(QStringLiteral("language"), 0).toInt(), 0, 2);
+    const int newEnglishFunnyLevel = std::clamp(
+        staged(QStringLiteral("englishFunnyLevel"), DEFAULT_ENGLISH_FUNNY_LEVEL).toInt(), 1, 5);
+    const int newCantoneseFunnyLevel = std::clamp(
+        staged(QStringLiteral("cantoneseFunnyLevel"), DEFAULT_CANTONESE_FUNNY_LEVEL).toInt(), 1, 5);
+    const bool languageChanged = (newLanguage != pref->getLanguageMode());
+    const bool englishFunnyLevelChanged = (newEnglishFunnyLevel != pref->value(
+        ENGLISH_FUNNY_LEVEL_KEY, DEFAULT_ENGLISH_FUNNY_LEVEL).toInt());
+    const bool cantoneseFunnyLevelChanged = (newCantoneseFunnyLevel != pref->value(
+        CANTONESE_FUNNY_LEVEL_KEY, DEFAULT_CANTONESE_FUNNY_LEVEL).toInt());
+
+    if (languageChanged || englishFunnyLevelChanged || cantoneseFunnyLevelChanged)
     {
-        qCInfo(lcUi) << "OptionsController: language mode ->" << newLanguage;
+        qCInfo(lcUi) << "OptionsController: language settings ->"
+                     << newLanguage << newEnglishFunnyLevel << newCantoneseFunnyLevel;
         pref->setLanguageMode(newLanguage);
-        // The live retranslate is performed by the QML layer via I18n.
-        emit languageChangeRequested(newLanguage);
+        pref->setValue(ENGLISH_FUNNY_LEVEL_KEY, newEnglishFunnyLevel);
+        pref->setValue(CANTONESE_FUNNY_LEVEL_KEY, newCantoneseFunnyLevel);
+
+        // The live retranslate is performed atomically by the QML I18n bridge.
+        emit languageSettingsChangeRequested(newLanguage, newEnglishFunnyLevel,
+                                             newCantoneseFunnyLevel);
+        // Preserve the existing signal for compatibility with external views.
+        if (languageChanged)
+            emit languageChangeRequested(newLanguage);
     }
 
     pref->setStyle(staged(QStringLiteral("style")).toString());

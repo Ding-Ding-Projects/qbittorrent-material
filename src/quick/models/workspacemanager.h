@@ -28,8 +28,13 @@ class WorkspaceManager : public QAbstractListModel
     Q_PROPERTY(QString appDisplayName READ appDisplayName WRITE setAppDisplayName
         NOTIFY appDisplayNameChanged)
     Q_PROPERTY(int count READ count NOTIFY countChanged)
+    Q_PROPERTY(int pinnedCount READ pinnedCount NOTIFY tabsChanged)
     Q_PROPERTY(int activeIndex READ activeIndex WRITE setActiveIndex NOTIFY activeIndexChanged)
     Q_PROPERTY(QString activeTabId READ activeTabId NOTIFY activeIndexChanged)
+    Q_PROPERTY(QVariantList tabItems READ tabItems NOTIFY tabsChanged)
+    Q_PROPERTY(QVariantList groups READ groups NOTIFY groupsChanged)
+    Q_PROPERTY(QVariantMap globalAppearance READ globalAppearance NOTIFY appearanceChanged)
+    Q_PROPERTY(QVariantList appearancePresets READ appearancePresets NOTIFY appearanceChanged)
     Q_PROPERTY(QString repositoryPath READ repositoryPath CONSTANT)
     Q_PROPERTY(QUrl repositoryUrl READ repositoryUrl CONSTANT)
     Q_PROPERTY(QString repositoryStatus READ repositoryStatus NOTIFY repositoryStatusChanged)
@@ -49,6 +54,12 @@ public:
         BoldRole,
         ItalicRole,
         FontColorRole,
+        PinnedRole,
+        GroupIdRole,
+        GroupNameRole,
+        GroupColorRole,
+        GroupCollapsedRole,
+        AppearanceRole,
         CreatedAtRole,
         UpdatedAtRole
     };
@@ -68,6 +79,7 @@ public:
     [[nodiscard]] QString appDisplayName() const;
     void setAppDisplayName(const QString &name);
     [[nodiscard]] int count() const;
+    [[nodiscard]] int pinnedCount() const;
     [[nodiscard]] int activeIndex() const;
     void setActiveIndex(int index);
     [[nodiscard]] QString activeTabId() const;
@@ -77,6 +89,10 @@ public:
     [[nodiscard]] QString lastCommitId() const;
     [[nodiscard]] bool dirty() const;
     [[nodiscard]] bool writable() const;
+    [[nodiscard]] QVariantList tabItems() const;
+    [[nodiscard]] QVariantList groups() const;
+    [[nodiscard]] QVariantMap globalAppearance() const;
+    [[nodiscard]] QVariantList appearancePresets() const;
 
     Q_INVOKABLE QVariantMap tabAt(int index) const;
     Q_INVOKABLE QVariantMap tabById(const QString &tabId) const;
@@ -85,10 +101,49 @@ public:
     Q_INVOKABLE bool closeTab(int index);
     Q_INVOKABLE bool closeOtherTabs(int index);
     Q_INVOKABLE bool moveTab(int from, int to);
+    Q_INVOKABLE bool setTabPinned(int index, bool pinned);
+    Q_INVOKABLE bool assignTabToGroup(int index, const QString &groupId);
+    Q_INVOKABLE QString createGroup(const QString &name, const QString &color = {});
+    Q_INVOKABLE bool updateGroup(const QString &groupId, const QString &name,
+        const QString &color);
+    Q_INVOKABLE bool setGroupCollapsed(const QString &groupId, bool collapsed);
+    Q_INVOKABLE bool moveGroup(int from, int to);
+    Q_INVOKABLE bool removeGroup(const QString &groupId);
+    Q_INVOKABLE QVariantMap groupById(const QString &groupId) const;
     Q_INVOKABLE bool setTabContent(const QString &tabId, const QString &content);
     Q_INVOKABLE bool updateTab(const QString &tabId, const QString &name,
         const QString &fontFamily, const QString &fontStyle, double fontPointSize,
         bool bold, bool italic, const QString &fontColor);
+    Q_INVOKABLE bool updateTabAppearance(const QString &tabId,
+        const QVariantMap &appearance);
+    Q_INVOKABLE bool updateGroupAppearance(const QString &groupId,
+        const QVariantMap &appearance);
+    Q_INVOKABLE bool updateGlobalAppearance(const QVariantMap &appearance);
+    Q_INVOKABLE bool resetTabAppearance(const QString &tabId,
+        const QString &propertyName = {});
+    Q_INVOKABLE bool resetGroupAppearance(const QString &groupId,
+        const QString &propertyName = {});
+    Q_INVOKABLE bool resetGlobalAppearance(const QString &propertyName = {});
+    Q_INVOKABLE bool saveAppearancePreset(const QString &name,
+        const QVariantMap &appearance);
+    Q_INVOKABLE bool removeAppearancePreset(const QString &name);
+    Q_INVOKABLE bool exportAppearancePreset(const QString &name, const QUrl &destination);
+    Q_INVOKABLE bool importAppearancePreset(const QUrl &source);
+
+    Q_INVOKABLE QVariantMap validatePattern(const QString &pattern,
+        const QString &flags = {}) const;
+    Q_INVOKABLE QVariantMap evaluateRegularExpression(const QString &pattern,
+        const QString &flags, const QString &sampleText) const;
+    Q_INVOKABLE QVariantMap searchTabs(const QString &query, bool regex,
+        const QString &flags = {}, const QString &groupId = {}) const;
+    Q_INVOKABLE QVariantMap searchGroups(const QString &query, bool regex,
+        const QString &flags = {}) const;
+    Q_INVOKABLE QVariantMap previewCloseTabs(const QString &query, bool regex,
+        const QString &flags, bool inverse, bool includePinned,
+        const QString &groupId = {}) const;
+    Q_INVOKABLE bool closeTabsByText(const QString &query, bool regex,
+        const QString &flags, bool inverse, bool includePinned,
+        const QString &groupId = {});
 
     Q_INVOKABLE QStringList fontFamilies() const;
     Q_INVOKABLE QStringList fontStyles(const QString &family) const;
@@ -109,6 +164,9 @@ signals:
     void repositoryStatusChanged();
     void dirtyChanged();
     void writableChanged();
+    void tabsChanged();
+    void groupsChanged();
+    void appearanceChanged();
     void operationFinished(bool success, const QString &message, const QUrl &location);
 
 private:
@@ -123,8 +181,20 @@ private:
         bool bold = false;
         bool italic = false;
         QString fontColor = QStringLiteral("#FF6750A4");
+        bool pinned = false;
+        QString groupId;
+        QVariantMap appearance;
         QDateTime createdAt;
         QDateTime updatedAt;
+    };
+
+    struct Group
+    {
+        QString id;
+        QString name;
+        QString color = QStringLiteral("#FF6750A4");
+        bool collapsed = false;
+        QVariantMap appearance;
     };
 
     struct Snapshot
@@ -132,6 +202,9 @@ private:
         QString appDisplayName;
         QString activeTabId;
         QVector<Tab> tabs;
+        QVector<Group> groups;
+        QVariantMap globalAppearance;
+        QVariantList appearancePresets;
     };
 
     [[nodiscard]] static QString localPath(const QUrl &url);
@@ -144,7 +217,21 @@ private:
     [[nodiscard]] static bool containsReparsePoint(const QString &path, const QString &root);
 
     [[nodiscard]] QVariantMap tabMap(const Tab &tab) const;
+    [[nodiscard]] QVariantMap groupMap(const Group &group) const;
     [[nodiscard]] int indexOfTab(const QString &tabId) const;
+    [[nodiscard]] int indexOfGroup(const QString &groupId) const;
+    [[nodiscard]] QString groupName(const QString &groupId) const;
+    [[nodiscard]] QString groupColor(const QString &groupId) const;
+    [[nodiscard]] bool groupCollapsed(const QString &groupId) const;
+    [[nodiscard]] static QVariantMap normalizedAppearance(const QVariantMap &appearance);
+    [[nodiscard]] static QRegularExpression regularExpression(const QString &pattern,
+        const QString &flags, QString *error = nullptr);
+    [[nodiscard]] QVariantMap queryTabs(const QString &query, bool regex,
+        const QString &flags, const QString &groupId, bool inverse,
+        bool includePinned, bool closingPreview) const;
+    void normalizePinnedOrder();
+    [[nodiscard]] QSet<QString> nonEmptyGroupIds() const;
+    void pruneNewlyEmptyGroups(const QSet<QString> &previouslyNonEmpty);
     [[nodiscard]] QJsonObject tabObject(const Tab &tab, bool includeContent) const;
     [[nodiscard]] QJsonObject workspaceObject(bool exportMetadata) const;
     [[nodiscard]] bool parseWorkspace(const QByteArray &bytes, Snapshot *snapshot,
@@ -174,6 +261,9 @@ private:
         bool allowUnbornMain = false);
 
     QVector<Tab> m_tabs;
+    QVector<Group> m_groups;
+    QVariantMap m_globalAppearance;
+    QVariantList m_appearancePresets;
     QString m_appDisplayName;
     QString m_repositoryPath;
     QString m_repositoryStatus;

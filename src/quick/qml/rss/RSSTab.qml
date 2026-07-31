@@ -313,7 +313,7 @@ Item {
                 ? RSSController.setFeedURL(path, url, intervalSeconds)
                 : RSSController.addFeed(url, feedDialog.destFolder)
             if (err && err.length > 0)
-                Snackbar.show(err)
+                NotificationCenter.notify(err, "error")
         }
     }
 
@@ -330,7 +330,7 @@ Item {
         onAccepted: (newName) => {
             const err = RSSController.renameItem(path, newName)
             if (err && err.length > 0)
-                Snackbar.show(qsTr("Rename failed") + ": " + err)
+                NotificationCenter.notify(qsTr("Rename failed") + ": " + err, "error")
         }
     }
 
@@ -343,7 +343,7 @@ Item {
             const dest = RSSController.newSubscriptionDestination(feedsTree.currentPath)
             const err = RSSController.addFolder(name, dest)
             if (err && err.length > 0)
-                Snackbar.show(err)
+                NotificationCenter.notify(err, "error")
         }
     }
 
@@ -355,7 +355,7 @@ Item {
         onAccepted: {
             const err = RSSController.removeItem(feedsTree.currentPath)
             if (err && err.length > 0)
-                Snackbar.show(err)
+                NotificationCenter.notify(err, "error")
         }
     }
 
@@ -367,9 +367,9 @@ Item {
 
     Connections {
         target: RSSController
-        function onErrorOccurred(message) { Snackbar.show(message) }
+        function onErrorOccurred(message) { NotificationCenter.notify(message, "error") }
         function onArticleUrlBlocked(link) {
-            Snackbar.show(qsTr("Blocked opening a local-file article URL."))
+            NotificationCenter.notify(qsTr("Blocked opening a local-file article URL."), "warning")
         }
     }
 }

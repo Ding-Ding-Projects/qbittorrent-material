@@ -21,9 +21,9 @@ import qBittorrent
 
     Rebuilds the Interface, Transfer List, double-click actions, Torrent Content
     View, Status Bar, Desktop / system-tray, Power Management and Log Files groups.
-    Hosts the runtime LANGUAGE selector (bound to \c I18n.setLanguage) and the
-    color-scheme selector (bound to \c ThemeManager). All other controls stage
-    through \c OptionsController.
+    Hosts staged language and per-language funny-level controls, applying them
+    atomically through \c I18n when OptionsController commits. The color-scheme
+    selector remains bound to \c ThemeManager; other controls stage normally.
 */
 Flickable {
     id: root
@@ -50,6 +50,13 @@ Flickable {
     }
 
     Component.onCompleted: Log.debug("ui", "BehaviorPage ready")
+
+    Connections {
+        target: OptionsController
+        function onLanguageSettingsChangeRequested(mode, englishLevel, cantoneseLevel) {
+            I18n.setLanguageSettings(mode, englishLevel, cantoneseLevel)
+        }
+    }
 
     ColumnLayout {
         id: layout
@@ -79,11 +86,93 @@ Flickable {
                 ComboBox {
                     id: languageBox
                     Layout.fillWidth: true
-                    model: [ qsTr("English"), qsTr("Cantonese (HK)"), qsTr("Bilingual") ]
-                    currentIndex: I18n.language
+                    Accessible.name: qsTr("Language")
+                    model: [ I18n.displayName(0), I18n.displayName(1), I18n.displayName(2) ]
+                    currentIndex: (root.rev, OptionsController.value("language", I18n.language))
                     onActivated: (i) => {
-                        Log.info("i18n", "User changed language to index " + i)
-                        I18n.setLanguage(i)
+                        Log.info("i18n", "User staged language index " + i)
+                        OptionsController.setValue("language", i)
+                    }
+                }
+            }
+
+            LabeledField {
+                label: qsTr("English funny level:")
+                labelWidth: 180
+                Layout.fillWidth: true
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Spacing.sm
+                    Slider {
+                        id: englishFunnySlider
+                        Layout.fillWidth: true
+                        from: 1
+                        to: 5
+                        stepSize: 1
+                        snapMode: Slider.SnapAlways
+                        value: (root.rev, OptionsController.value("englishFunnyLevel", 1))
+                        Accessible.name: qsTr("English funny level")
+                        Accessible.description: qsTr("1 is fully professional and 5 is maximum playfulness")
+                        onMoved: OptionsController.setValue("englishFunnyLevel", Math.round(value))
+                    }
+                    Label {
+                        text: Math.round(englishFunnySlider.value) + " / 5"
+                        font: Typography.labelMedium
+                        Layout.minimumWidth: 42
+                        horizontalAlignment: Text.AlignRight
+                        Accessible.name: qsTr("English funny level %1 of 5").arg(Math.round(englishFunnySlider.value))
+                    }
+                }
+            }
+
+            LabeledField {
+                label: qsTr("Cantonese funny level:")
+                labelWidth: 180
+                Layout.fillWidth: true
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Spacing.sm
+                    Slider {
+                        id: cantoneseFunnySlider
+                        Layout.fillWidth: true
+                        from: 1
+                        to: 5
+                        stepSize: 1
+                        snapMode: Slider.SnapAlways
+                        value: (root.rev, OptionsController.value("cantoneseFunnyLevel", 3))
+                        Accessible.name: qsTr("Cantonese funny level")
+                        Accessible.description: qsTr("1 is fully professional and 5 is maximum playfulness")
+                        onMoved: OptionsController.setValue("cantoneseFunnyLevel", Math.round(value))
+                    }
+                    Label {
+                        text: Math.round(cantoneseFunnySlider.value) + " / 5"
+                        font: Typography.labelMedium
+                        Layout.minimumWidth: 42
+                        horizontalAlignment: Text.AlignRight
+                        Accessible.name: qsTr("Cantonese funny level %1 of 5").arg(Math.round(cantoneseFunnySlider.value))
+                    }
+                }
+            }
+
+            Label {
+                text: qsTr("Funny levels style every message, including errors and warnings. They never change the facts, and you can reset them at any time.")
+                font: Typography.labelSmall
+                color: Theme.color("onSurfaceVariant")
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+                Accessible.name: text
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                Button {
+                    text: qsTr("Reset funny levels")
+                    flat: true
+                    Accessible.name: text
+                    onClicked: {
+                        OptionsController.setValue("englishFunnyLevel", 1)
+                        OptionsController.setValue("cantoneseFunnyLevel", 3)
                     }
                 }
             }

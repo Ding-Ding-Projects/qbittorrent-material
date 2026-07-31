@@ -95,7 +95,7 @@ Rectangle {
 
         function onRenameFailed(errorMessage) {
             Log.warning("ui", "Content rename failed: " + errorMessage)
-            Snackbar.show(errorMessage)
+            NotificationCenter.notify(errorMessage, "error")
         }
 
         // Show the top-level folder expanded once metadata arrives.
@@ -644,7 +644,7 @@ Rectangle {
         sourceModel: root.contentModel
         onApplied: (count) => {
             Log.info("ui", "Content batch rename applied to " + count + " file(s)")
-            Snackbar.show(qsTr("Renamed %1 file(s)").arg(count))
+            NotificationCenter.notify(qsTr("Renamed %1 file(s)").arg(count), "success")
         }
     }
 }

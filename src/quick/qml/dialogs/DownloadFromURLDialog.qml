@@ -107,7 +107,7 @@ Dialog {
         }
         if (urls.length === 0) {
             Log.warning("ui", "DownloadFromURLDialog: no URL entered")
-            Snackbar.show(qsTr("Please type at least one URL."))
+            NotificationCenter.notify(qsTr("Please type at least one URL."), "warning")
             return
         }
         Log.info("ui", "DownloadFromURLDialog submitting " + urls.length + " URL(s)")

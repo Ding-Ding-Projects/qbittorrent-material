@@ -142,7 +142,7 @@ Dialog {
                             ? table.selectedRows
                             : (table.currentRow >= 0 ? [table.currentRow] : [])
                     if (rows.length === 0) {
-                        Snackbar.show(qsTr("Select a cookie to remove."))
+                        NotificationCenter.notify(qsTr("Select a cookie to remove."), "warning")
                         return
                     }
                     cookiesModel.removeRows(rows)

@@ -32,14 +32,15 @@ QtObject {
     // Canonical 4px rhythm. The legacy short names remain source-compatible;
     // explicit spaceNN aliases make the complete 4/8/12/16/20/24/32/48 scale
     // available to new shell and component work.
-    readonly property int xs: 4
-    readonly property int sm: 8
-    readonly property int md: 12
-    readonly property int lg: 16
-    readonly property int space20: 20
-    readonly property int xl: 24
-    readonly property int xxl: 32
-    readonly property int space48: 48
+    readonly property real density: ThemeManager.densityScale
+    readonly property int xs: Math.round(4 * density)
+    readonly property int sm: Math.round(8 * density)
+    readonly property int md: Math.round(12 * density)
+    readonly property int lg: Math.round(16 * density)
+    readonly property int space20: Math.round(20 * density)
+    readonly property int xl: Math.round(24 * density)
+    readonly property int xxl: Math.round(32 * density)
+    readonly property int space48: Math.round(48 * density)
 
     readonly property int xs4: xs
     readonly property int sm8: sm
@@ -79,8 +80,8 @@ QtObject {
     readonly property int topBarHeight: 64
     readonly property int navigationWidth: 248
     readonly property int statusBarHeight: 32
-    readonly property int controlHeight: 40
-    readonly property int pagePadding: 24
+    readonly property int controlHeight: Math.round(40 * density)
+    readonly property int pagePadding: Math.round(24 * density)
     readonly property int panelHeaderPaddingVertical: 16
     readonly property int panelHeaderPaddingHorizontal: 20
     readonly property int tableCellPaddingVertical: 14
@@ -94,10 +95,10 @@ QtObject {
     readonly property real raisedShadowOpacity: 0.18
 
     // ---- Motion ---------------------------------------------------------------
-    readonly property int motionFast: 150
-    readonly property int motionBase: 250
-    readonly property int motionProgress: 480
-    readonly property int motionRowStagger: 45
+    readonly property int motionFast: ThemeManager.reducedMotion ? 0 : 150
+    readonly property int motionBase: ThemeManager.reducedMotion ? 0 : 250
+    readonly property int motionProgress: ThemeManager.reducedMotion ? 0 : 480
+    readonly property int motionRowStagger: ThemeManager.reducedMotion ? 0 : 45
     //! Easing.BezierSpline control points for cubic-bezier(.2, 0, 0, 1).
     readonly property var easeStandard: [0.2, 0.0, 0.0, 1.0, 1.0, 1.0]
 

@@ -13,6 +13,7 @@
 #include "thememanager.h"
 
 #include <QFile>
+#include <QFontDatabase>
 #include <QGuiApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -28,6 +29,12 @@ namespace
     const QString kColorSchemeKey = u"Appearance/ColorScheme"_s;
     const QString kTrayIconStyleKey = u"Appearance/TrayIconStyle"_s;
     const QString kUiStyleKey = u"Appearance/UiStyle"_s;
+    const QString kDensityKey = u"Appearance/DensityScale"_s;
+    const QString kSeedKey = u"Appearance/SeedColor"_s;
+    const QString kFontFamilyKey = u"Appearance/FontFamily"_s;
+    const QString kFontScaleKey = u"Appearance/FontScale"_s;
+    const QString kFontWeightKey = u"Appearance/FontWeight"_s;
+    const QString kReducedMotionKey = u"Appearance/ReducedMotion"_s;
 
     QColor parseColor(const QString &hex)
     {
@@ -74,6 +81,14 @@ ThemeManager::ThemeManager(QObject *parent)
         const QString style = prefs->value(kUiStyleKey, u"TonalRail"_s).toString();
         m_uiStyle = (style == u"SplitDock"_s) ? SplitDock
             : (style == u"CardFlow"_s) ? CardFlow : TonalRail;
+        m_densityScale = qBound<qreal>(0.75, prefs->value(kDensityKey, 1.0).toReal(), 1.5);
+        const QColor seed(prefs->value(kSeedKey).toString());
+        if (seed.isValid())
+            m_seedColor = seed;
+        m_uiFontFamily = prefs->value(kFontFamilyKey).toString();
+        m_uiFontScale = qBound<qreal>(0.75, prefs->value(kFontScaleKey, 1.0).toReal(), 1.75);
+        m_uiFontWeight = qBound(100, prefs->value(kFontWeightKey, 400).toInt(), 900);
+        m_reducedMotion = prefs->value(kReducedMotionKey, false).toBool();
     }
 
     buildPalette();
@@ -189,6 +204,129 @@ QString ThemeManager::styleLetter() const
     case CardFlow: return u"C"_s;
     case TonalRail:
     default: return u"A"_s;
+    }
+}
+
+qreal ThemeManager::densityScale() const
+{
+    return m_densityScale;
+}
+
+void ThemeManager::setDensityScale(const qreal value)
+{
+    const qreal bounded = qBound<qreal>(0.75, value, 1.5);
+    if (qFuzzyCompare(m_densityScale, bounded))
+        return;
+    m_densityScale = bounded;
+    persistAppearance();
+    emit appearanceChanged();
+}
+
+QColor ThemeManager::seedColor() const
+{
+    return m_seedColor.isValid() ? m_seedColor : color(u"primary"_s);
+}
+
+void ThemeManager::setSeedColor(const QColor &value)
+{
+    if (!value.isValid() || m_seedColor == value)
+        return;
+    m_seedColor = value;
+    buildStylePalette();
+    persistAppearance();
+    emit appearanceChanged();
+    emit themeChanged();
+}
+
+QString ThemeManager::uiFontFamily() const
+{
+    return m_uiFontFamily;
+}
+
+void ThemeManager::setUiFontFamily(const QString &value)
+{
+    const QString trimmed = value.trimmed();
+    if (m_uiFontFamily == trimmed)
+        return;
+    m_uiFontFamily = trimmed;
+    persistAppearance();
+    emit appearanceChanged();
+}
+
+qreal ThemeManager::uiFontScale() const
+{
+    return m_uiFontScale;
+}
+
+void ThemeManager::setUiFontScale(const qreal value)
+{
+    const qreal bounded = qBound<qreal>(0.75, value, 1.75);
+    if (qFuzzyCompare(m_uiFontScale, bounded))
+        return;
+    m_uiFontScale = bounded;
+    persistAppearance();
+    emit appearanceChanged();
+}
+
+int ThemeManager::uiFontWeight() const
+{
+    return m_uiFontWeight;
+}
+
+void ThemeManager::setUiFontWeight(const int value)
+{
+    const int bounded = qBound(100, value, 900);
+    if (m_uiFontWeight == bounded)
+        return;
+    m_uiFontWeight = bounded;
+    persistAppearance();
+    emit appearanceChanged();
+}
+
+bool ThemeManager::reducedMotion() const
+{
+    return m_reducedMotion;
+}
+
+void ThemeManager::setReducedMotion(const bool value)
+{
+    if (m_reducedMotion == value)
+        return;
+    m_reducedMotion = value;
+    persistAppearance();
+    emit appearanceChanged();
+}
+
+QStringList ThemeManager::installedFontFamilies() const
+{
+    return QFontDatabase::families();
+}
+
+void ThemeManager::resetAppearance()
+{
+    m_densityScale = 1.0;
+    m_seedColor = {};
+    m_uiFontFamily.clear();
+    m_uiFontScale = 1.0;
+    m_uiFontWeight = 400;
+    m_reducedMotion = false;
+    buildStylePalette();
+    persistAppearance();
+    emit appearanceChanged();
+    emit themeChanged();
+}
+
+void ThemeManager::persistAppearance() const
+{
+    if (auto *prefs = Preferences::instance())
+    {
+        prefs->setValue(kDensityKey, m_densityScale);
+        prefs->setValue(kSeedKey, m_seedColor.isValid() ? m_seedColor.name(QColor::HexArgb) : QString());
+        prefs->setValue(kFontFamilyKey, m_uiFontFamily);
+        prefs->setValue(kFontScaleKey, m_uiFontScale);
+        prefs->setValue(kFontWeightKey, m_uiFontWeight);
+        prefs->setValue(kReducedMotionKey, m_reducedMotion);
+        prefs->apply();
     }
 }
 
@@ -528,9 +666,36 @@ void ThemeManager::buildStylePalette()
 
     fill(m_lightPalette, styleLight[style], statusLight, false);
     fill(m_darkPalette, styleDark[style], statusDark, true);
+    applySeedColor();
 
     qCDebug(lcTheme) << "Style palette built for style" << m_uiStyle << ":"
         << m_lightPalette.size() << "roles";
+}
+
+void ThemeManager::applySeedColor()
+{
+    if (!m_seedColor.isValid())
+        return;
+
+    const auto apply = [this](QHash<QString, QColor> &palette, const bool dark)
+    {
+        QColor primary = dark ? m_seedColor.lighter(135) : m_seedColor;
+        primary.setAlpha(255);
+        const QColor onPrimary = qGray(primary.rgb()) < 145 ? QColor(Qt::white) : QColor(0x20, 0x21, 0x24);
+        QColor container = dark ? primary.darker(210) : primary.lighter(185);
+        container.setAlpha(255);
+        palette.insert(u"primary"_s, primary);
+        palette.insert(u"onPrimary"_s, onPrimary);
+        palette.insert(u"primaryContainer"_s, container);
+        palette.insert(u"onPrimaryContainer"_s,
+            qGray(container.rgb()) < 145 ? QColor(Qt::white) : QColor(0x20, 0x21, 0x24));
+        palette.insert(u"primaryHover"_s, dark ? primary.lighter(110) : primary.darker(110));
+        palette.insert(u"primaryPressed"_s, dark ? primary.lighter(120) : primary.darker(120));
+        palette.insert(u"primaryEmphasis"_s, primary);
+        palette.insert(u"focusRing"_s, withAlpha(primary, dark ? 0.32 : 0.24));
+    };
+    apply(m_lightPalette, false);
+    apply(m_darkPalette, true);
 }
 
 void ThemeManager::buildNamedIdMap()

@@ -51,7 +51,7 @@ Item {
         var pattern = searchField.text.trim()
         if (pattern.length === 0) {
             Log.warning("search", "Search clicked with empty pattern")
-            Snackbar.show(qsTr("Please type a search pattern first"))
+            NotificationCenter.notify(qsTr("Please type a search pattern first"), "warning")
             return
         }
         Log.info("search", "Search clicked: '" + pattern + "' scope=" + root.currentScope +
@@ -95,7 +95,7 @@ Item {
             pluginsDialog.open()
         }
         function onNotify(message) {
-            Snackbar.show(message)
+            NotificationCenter.notify(message, "info")
         }
     }
 

@@ -2,8 +2,8 @@
 
 The **Workspace** area is a persistent, browser-style collection of plain-text
 pages inside qBittorrent Material. Each inner tab owns its content and visual
-style, while the application display name, tab order, active tab, and complete
-page collection survive restarts.
+style, while the application display name, physical and pinned order, groups,
+collapse state, active tab, and complete page collection survive restarts.
 
 The workspace is stored in a managed local Git repository. Saving and committing
 use the libgit2 library shipped with the application, so the Git command-line
@@ -18,13 +18,40 @@ inside that view behaves like a browser tab strip:
 - Select **+** or press `Ctrl+T` to create a page.
 - Select a tab's close button, middle-click it, or press `Ctrl+W` while the
   Workspace view is active to close it.
-- Right-click a tab to customize, duplicate, close the other tabs, or close it.
-- Double-click a tab to open its name and appearance dialog.
+- Right-click a tab to pin, group, customize, duplicate, close other tabs, or
+  close it.
+- Shift+right-click a tab or group to open its anchored appearance editor
+  directly; `Ctrl+Shift+A` is the keyboard path.
+- Use the overflow action whenever ordinary tabs do not fit. Pinned tabs remain
+  in their stable region.
 
 Closing every tab is supported. The empty view offers a **Create tab** action to
 start again. A workspace can contain up to 100 tabs.
 
 ![Persistent browser-style Workspace tabs](images/app/09-custom-workspace-tabs.png)
+
+## Pin, group, search, and bulk close
+
+Schema 2 persists individual pin state, pinned and ordinary order, up to 32
+groups, group names/colors/order/collapse, and membership. Schema 1 remains
+readable and is upgraded on the next save.
+
+Groups can be created, renamed, colored, reordered, collapsed, expanded, and
+removed. Tabs move into or out of a group by pointer or explicit context action.
+Removing a group does not silently delete its member pages. Pinning applies to
+individual tabs rather than a complete group.
+
+The discovery panel provides four independent searches: current strip, one per
+group, group names, and a master search across the app-owned Workspace tabs.
+Each field defaults to plain text and has its own adjacent full Qt/PCRE2 builder.
+Activating a result from a collapsed group reveals the page without changing
+the saved collapse preference.
+
+**Close tabs containing text** and **Close tabs not containing text** use the
+same visible-label predicate. An empty query or invalid pattern cannot run.
+Review the affected set before confirming; pinned tabs are excluded unless the
+preview's include-pinned choice is explicitly enabled. Dirty state is
+checkpointed into local Git before destructive close.
 
 ## Rename the application display
 
@@ -39,18 +66,21 @@ repository path.
 
 ## Customize a page
 
-Right-click a tab and choose **Name & appearance**, or double-click the tab. Each
-page stores these settings independently:
+Open **Edit appearance…** from a tab or group context menu. Sparse overrides
+inherit in this order: app default, Workspace global, group, then tab. The
+editor covers installed-font typography, direction/alignment, spacing,
+geometry, icons/badges, and state colors. Its continuous color studio translates
+named, HEX8, RGBA, HSLA, HSVA, HWB, Lab/LCH, OKLab/OKLCH, and CMYK values while
+preserving alpha and showing contrast/clipping evidence.
 
-- tab name;
-- installed font family and the styles supplied by that family;
-- font size from 6 to 144 points;
-- bold and italic emphasis;
-- font color, including alpha.
+Reset one working property, one persisted target, or global Workspace
+appearance. Save, apply, remove, import, or export up to 32 named presets in the
+versioned preset JSON format.
 
-The color editor is unrestricted: adjust hue, saturation, value, and alpha, or
-enter `#RRGGBB` or `#AARRGGBB` directly. Its preview shows the combined font and
-color settings before **Apply** is selected.
+Qt Quick renders double strike and shadow approximately. Custom underline,
+outline, and glow values remain visible and persisted as metadata but are not
+all rendered; arbitrary variable-font axes remain backend-dependent. The app
+states these limits instead of silently dropping the user's value.
 
 Pages use a plain-text editor. Their repository files use the `.md` extension so
 they remain convenient to inspect and diff, but the application does not render
@@ -71,7 +101,7 @@ manager. The repository contains:
 workspace-tabs/
 |-- .git/                 Complete automatic local history
 |-- README.md             Description of the managed repository
-|-- workspace.json        Display name, tab order, active tab, and appearance
+|-- workspace.json        Display name, orders, groups, active tab, and appearance
 `-- tabs/
     `-- <tab-uuid>.md      One UTF-8 plain-text page per tab
 ```
@@ -91,7 +121,7 @@ The portability menu and the **Workspace** application menu offer two formats:
 
 | Format | Includes | Best for |
 | --- | --- | --- |
-| Workspace JSON | Display name, active tab, ordered pages, content, timestamps, and appearance | A compact snapshot or exchange with another profile |
+| Workspace JSON | Display name, active tab, ordered/pinned pages, groups, content, timestamps, appearance, and presets | A compact snapshot or exchange with another profile |
 | Complete Git repository | `workspace.json`, page files, README, and the entire `.git` history | Backup, migration, or continued version history on another computer |
 
 ### Export or import JSON
@@ -180,9 +210,13 @@ Imports enforce the current schema, unique UUID tab identifiers, valid colors,
 font-size bounds, and these resource limits:
 
 - 100 tabs;
+- 32 groups and 32 named appearance presets;
 - 4 MB of text per page;
 - 32 MB per workspace JSON file;
 - 256 MB per complete repository transfer.
+
+Interactive regex evaluation additionally limits patterns to 4,096 characters,
+sample text to 64 KiB, and returned matches to 200, with PCRE2 match/depth caps.
 
 Unsafe symbolic-link or reparse-point paths are rejected, as are repository
 folders nested inside the managed repository. Imported JSON and repository data
@@ -197,7 +231,13 @@ replacing a workspace you care about.
 | `Ctrl+T` | Create a workspace tab |
 | `Ctrl+W` | Close the active workspace tab when Workspace is active |
 | `Ctrl+S` | Save and commit pending workspace changes when Workspace is active |
+| `Ctrl+Shift+A` | Open appearance for the focused Workspace tab or group |
 
 See the [Workspace Tabs wiki guide](wiki/Workspace-Tabs.md) for the short
 task-oriented walkthrough and [Troubleshooting](wiki/Troubleshooting.md) for
 recovery guidance.
+
+For feature-level behavior, failure modes, privacy, and verification, see
+[Tab management and discovery](features/workspace/tab-management.md),
+[Search and regex builder](features/workspace/search-and-regex.md), and
+[Runtime appearance](features/appearance/runtime-appearance.md).

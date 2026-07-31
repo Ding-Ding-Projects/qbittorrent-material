@@ -14,6 +14,7 @@ Item {
     id: root
     objectName: "workspaceView"
     Accessible.name: qsTr("Custom workspace")
+    property string revealedTabId: ""
 
     function createTab() {
         WorkspaceManager.createTab(qsTr("New tab"))
@@ -189,7 +190,38 @@ Item {
             }
         }
 
+        WorkspaceTabStrip {
+            id: modernTabStrip
+            Layout.fillWidth: true
+            revealedTabId: root.revealedTabId
+            onContextRequested: function(index, anchorItem) {
+                tabContextMenu.targetIndex = index
+                tabContextMenu.popup()
+            }
+            onAppearanceRequested: function(index, anchorItem) {
+                tabSettings.openForIndex(index, anchorItem)
+            }
+            onGroupAppearanceRequested: function(groupId, anchorItem) {
+                tabSettings.openForGroup(groupId, anchorItem)
+            }
+            onGroupContextRequested: function(groupId, anchorItem) {
+                groupContextMenu.targetGroupId = groupId
+                groupContextMenu.popup()
+            }
+            onSearchRequested: function(anchorItem, groupId) {
+                workspaceSearch.openFrom(anchorItem, groupId)
+            }
+            onOverflowRequested: function(anchorItem) {
+                overflowPopup.returnFocusItem = anchorItem
+                overflowPopup.open()
+                overflowSearch.forceActiveFocus()
+            }
+        }
+
         Rectangle {
+            visible: false
+            enabled: false
+            Layout.preferredHeight: 0
             Layout.fillWidth: true
             implicitHeight: Spacing.controlHeight + Spacing.sm
             color: Theme.color("surfaceWarm")
@@ -333,6 +365,8 @@ Item {
                     required property bool bold
                     required property bool italic
                     required property string fontColor
+                    required property string groupId
+                    required property var appearance
                     required property string updatedAt
 
                     WorkspacePage {
@@ -346,6 +380,8 @@ Item {
                         bold: parent.bold
                         italic: parent.italic
                         fontColor: parent.fontColor
+                        groupId: parent.groupId
+                        appearance: parent.appearance
                         updatedAt: parent.updatedAt
                     }
                 }
@@ -401,6 +437,7 @@ Item {
         id: tabContextMenu
         objectName: "workspaceTabContextMenu"
         property int targetIndex: -1
+        readonly property var targetTab: WorkspaceManager.tabAt(targetIndex)
         Material.elevation: Spacing.elevationMenu
         background: Rectangle {
             implicitWidth: 260
@@ -413,17 +450,58 @@ Item {
         MenuItem {
             id: customizeTabAction
             objectName: "workspaceCustomizeTabAction"
-            text: qsTr("Name && appearance…")
+            text: qsTr("Edit tab appearance…")
             enabled: WorkspaceManager.writable
             onTriggered: tabSettings.openForIndex(tabContextMenu.targetIndex)
+        }
+        MenuItem {
+            text: tabContextMenu.targetTab.pinned ? qsTr("Unpin tab") : qsTr("Pin tab")
+            enabled: WorkspaceManager.writable
+            onTriggered: WorkspaceManager.setTabPinned(tabContextMenu.targetIndex,
+                !tabContextMenu.targetTab.pinned)
         }
         MenuItem {
             text: qsTr("Duplicate tab")
             enabled: WorkspaceManager.writable
             onTriggered: WorkspaceManager.duplicateTab(tabContextMenu.targetIndex)
         }
+        Menu {
+            title: qsTr("Move to group")
+            MenuItem {
+                text: qsTr("Ungrouped")
+                checkable: true
+                checked: !tabContextMenu.targetTab.groupId
+                onTriggered: WorkspaceManager.assignTabToGroup(
+                    tabContextMenu.targetIndex, "")
+            }
+            MenuSeparator {}
+            Repeater {
+                model: WorkspaceManager.groups
+                delegate: MenuItem {
+                    required property var modelData
+                    text: modelData.name
+                    checkable: true
+                    checked: tabContextMenu.targetTab.groupId === modelData.groupId
+                    onTriggered: WorkspaceManager.assignTabToGroup(
+                        tabContextMenu.targetIndex, modelData.groupId)
+                }
+            }
+        }
         MenuItem {
-            text: qsTr("Close other tabs")
+            text: qsTr("Move left")
+            enabled: WorkspaceManager.writable && tabContextMenu.targetIndex > 0
+            onTriggered: WorkspaceManager.moveTab(tabContextMenu.targetIndex,
+                tabContextMenu.targetIndex - 1)
+        }
+        MenuItem {
+            text: qsTr("Move right")
+            enabled: WorkspaceManager.writable
+                && tabContextMenu.targetIndex < WorkspaceManager.count - 1
+            onTriggered: WorkspaceManager.moveTab(tabContextMenu.targetIndex,
+                tabContextMenu.targetIndex + 1)
+        }
+        MenuItem {
+            text: qsTr("Close other ordinary tabs (keep pinned)")
             enabled: WorkspaceManager.writable && WorkspaceManager.count > 1
             onTriggered: WorkspaceManager.closeOtherTabs(tabContextMenu.targetIndex)
         }
@@ -433,6 +511,160 @@ Item {
             enabled: WorkspaceManager.writable
             onTriggered: WorkspaceManager.closeTab(tabContextMenu.targetIndex)
         }
+    }
+
+    Menu {
+        id: groupContextMenu
+        property string targetGroupId: ""
+        readonly property var targetGroup: WorkspaceManager.groupById(targetGroupId)
+        readonly property int targetGroupIndex: WorkspaceManager.groups.findIndex(function(group) {
+            return group.groupId === targetGroupId
+        })
+        Material.elevation: Spacing.elevationMenu
+
+        MenuItem {
+            text: qsTr("Search inside group…")
+            onTriggered: workspaceSearch.openFrom(modernTabStrip,
+                groupContextMenu.targetGroupId)
+        }
+        MenuItem {
+            text: qsTr("Edit group appearance…")
+            enabled: WorkspaceManager.writable
+            onTriggered: tabSettings.openForGroup(groupContextMenu.targetGroupId)
+        }
+        MenuItem {
+            text: groupContextMenu.targetGroup.collapsed
+                ? qsTr("Expand group") : qsTr("Collapse group")
+            enabled: WorkspaceManager.writable
+            onTriggered: WorkspaceManager.setGroupCollapsed(
+                groupContextMenu.targetGroupId,
+                !groupContextMenu.targetGroup.collapsed)
+        }
+        MenuSeparator {}
+        MenuItem {
+            text: qsTr("Move group left")
+            enabled: WorkspaceManager.writable && groupContextMenu.targetGroupIndex > 0
+            onTriggered: WorkspaceManager.moveGroup(groupContextMenu.targetGroupIndex,
+                groupContextMenu.targetGroupIndex - 1)
+        }
+        MenuItem {
+            text: qsTr("Move group right")
+            enabled: WorkspaceManager.writable && groupContextMenu.targetGroupIndex >= 0
+                && groupContextMenu.targetGroupIndex < WorkspaceManager.groups.length - 1
+            onTriggered: WorkspaceManager.moveGroup(groupContextMenu.targetGroupIndex,
+                groupContextMenu.targetGroupIndex + 1)
+        }
+        MenuSeparator {}
+        MenuItem {
+            text: qsTr("Remove group (keep tabs)")
+            enabled: WorkspaceManager.writable
+            onTriggered: WorkspaceManager.removeGroup(groupContextMenu.targetGroupId)
+        }
+    }
+
+    Popup {
+        id: overflowPopup
+        property Item returnFocusItem: null
+        parent: root
+        x: Math.max(Spacing.lg, root.width - width - Spacing.lg)
+        y: Math.min(root.height - height - Spacing.lg, 150)
+        width: Math.min(520, root.width - Spacing.xl * 2)
+        height: Math.min(540, root.height - Spacing.xl * 2)
+        modal: false
+        focus: true
+        closePolicy: Popup.CloseOnEscape
+        padding: Spacing.md
+        Material.elevation: 12
+        onClosed: if (returnFocusItem) returnFocusItem.forceActiveFocus()
+
+        readonly property var result: WorkspaceManager.searchTabs(
+            overflowSearch.text, overflowSearch.regexEnabled,
+            overflowSearch.regexFlags, "")
+
+        background: Rectangle {
+            radius: Spacing.radiusDialog
+            color: Theme.color("surface")
+            border.width: 1
+            border.color: Theme.color("outlineVariant")
+        }
+        contentItem: ColumnLayout {
+            spacing: Spacing.sm
+            Accessible.name: qsTr("Searchable workspace tab overflow")
+            Accessible.role: Accessible.Dialog
+            RowLayout {
+                Layout.fillWidth: true
+                Label {
+                    Layout.fillWidth: true
+                    text: qsTr("All workspace tabs")
+                    font: Typography.titleLarge
+                }
+                IconButton {
+                    symbol: Icons.close
+                    tooltip: qsTr("Close overflow and return to tab strip")
+                    onClicked: overflowPopup.close()
+                }
+            }
+            FilterTextField {
+                id: overflowSearch
+                Layout.fillWidth: true
+                placeholder: qsTr("Search overflowed and visible tabs")
+                builderTitle: qsTr("Overflow tab-list Regex Builder")
+                builderSampleText: WorkspaceManager.tabItems.map(function(tab) {
+                    return tab.name
+                }).join("\n")
+            }
+            Label {
+                text: qsTr("%1 result(s) · pinned tabs stay protected and visible")
+                    .arg(overflowPopup.result.count)
+                font: Typography.bodySmall
+                color: Theme.color("onSurfaceVariant")
+            }
+            ListView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                spacing: Spacing.xs
+                model: overflowPopup.result.items || []
+                Accessible.name: qsTr("All workspace tab results")
+                Accessible.role: Accessible.List
+                delegate: ItemDelegate {
+                    required property var modelData
+                    width: ListView.view.width
+                    text: qsTr("%1 · %2%3%4")
+                        .arg(modelData.name)
+                        .arg(modelData.location)
+                        .arg(modelData.pinned ? qsTr(" · Pinned") : "")
+                        .arg(modelData.groupCollapsed ? qsTr(" · Collapsed group") : "")
+                    onClicked: {
+                        WorkspaceManager.activeIndex = modelData.index
+                        root.revealedTabId = modelData.tabId
+                        revealTimer.restart()
+                        overflowSearch.forceActiveFocus()
+                    }
+                }
+            }
+        }
+    }
+
+    WorkspaceSearchPanel {
+        id: workspaceSearch
+        parent: root
+        x: Math.max(Spacing.lg, root.width - width - Spacing.lg)
+        y: Math.max(Spacing.lg, (root.height - height) / 2)
+        onRevealTab: function(tabId) {
+            root.revealedTabId = tabId
+            revealTimer.restart()
+        }
+        onEditGroupAppearance: function(groupId, anchorItem) {
+            tabSettings.openForGroup(groupId, anchorItem)
+        }
+    }
+
+    Timer {
+        id: revealTimer
+        interval: 8000
+        repeat: false
+        onTriggered: root.revealedTabId = ""
     }
 
     Menu {
@@ -474,6 +706,11 @@ Item {
             text: qsTr("Rename application…")
             enabled: WorkspaceManager.writable
             onTriggered: root.renameApplication()
+        }
+        MenuItem {
+            text: qsTr("Edit workspace appearance…")
+            enabled: WorkspaceManager.writable
+            onTriggered: tabSettings.openForGlobal()
         }
         MenuItem {
             text: qsTr("Open managed repository")

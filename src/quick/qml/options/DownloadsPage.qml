@@ -501,7 +501,7 @@ Flickable {
         target: OptionsController
         function onActionFeedback(action, success, message) {
             if (action === "testEmail")
-                Snackbar.show(message)
+                NotificationCenter.notify(message, success ? "success" : "error")
         }
     }
 }

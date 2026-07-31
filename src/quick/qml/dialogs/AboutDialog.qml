@@ -20,7 +20,7 @@ import qBittorrent
     \brief Material rebuild of the legacy \c AboutDialog.
 
     A tabbed "About" dialog (About / Authors / Special Thanks / Translation /
-    License). The License tab renders the bundled GPL notice supplied through
+    License / Changelog). The License tab renders the bundled GPL notice supplied through
     the application context from \c :/html/gpl.html, rather than pasting it
     inline in QML. External links are opened in the system browser via
     \c Qt.openUrlExternally.
@@ -40,7 +40,7 @@ Dialog {
     modal: true
     parent: Overlay.overlay
     anchors.centerIn: parent
-    width: Math.min(640, (parent ? parent.width : 640) * 0.9)
+    width: Math.min(860, (parent ? parent.width : 860) * 0.94)
     height: Math.min(560, (parent ? parent.height : 560) * 0.9)
     padding: Spacing.lg
 
@@ -109,6 +109,7 @@ Dialog {
             TabButton { text: qsTr("Special Thanks") }
             TabButton { text: qsTr("Translation") }
             TabButton { text: qsTr("License") }
+            TabButton { text: qsTr("Changelog") }
         }
 
         StackLayout {
@@ -310,6 +311,9 @@ Dialog {
                     onLinkActivated: (link) => Qt.openUrlExternally(link)
                 }
             }
+
+            // ---- Changelog -------------------------------------------------
+            ChangelogPage { }
         }
     }
 

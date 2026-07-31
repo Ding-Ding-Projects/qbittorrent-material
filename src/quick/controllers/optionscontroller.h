@@ -49,10 +49,9 @@ class WatchedFoldersModel;
  * Their staged state participates in this controller's `modified`, `apply()` and
  * `reset()` contract, so QML has one atomic transaction for the entire dialog.
  *
- * Language is special: it maps to the @c I18n singleton. On @ref apply, if the
- * staged `language` differs, the controller persists it and emits
- * @ref languageChangeRequested so the QML layer calls `I18n.setLanguage(...)` for
- * a live retranslate (keeping the I18n dependency in the view layer).
+ * Language and its two funny levels are staged like every other option. On
+ * @ref apply, the controller persists all three and emits one atomic bridge
+ * signal so the QML layer can live-retranslate without stale OK/Cancel state.
  */
 class OptionsController : public QObject
 {
@@ -164,9 +163,11 @@ signals:
 
     /// Emitted by @ref apply after a successful commit.
     void applied();
-    /// Emitted when @ref apply persists a different language; the QML layer wires
-    /// this to `I18n.setLanguage(mode)` for a live retranslate.
+    /// Compatibility notification emitted when Apply changes the language mode.
     void languageChangeRequested(int mode);
+    /// Atomic language + voice bridge used by the desktop Options page.
+    void languageSettingsChangeRequested(int mode, int englishFunnyLevel,
+                                         int cantoneseFunnyLevel);
     /// Emitted when @ref apply cannot proceed; @p tab is the offending @ref Tab.
     void validationFailed(int tab, const QString &message);
 

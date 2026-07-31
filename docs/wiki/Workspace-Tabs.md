@@ -1,21 +1,22 @@
 # Workspace Tabs
 
 Workspace tabs are persistent plain-text pages that behave like browser tabs.
-Every page can have its own name, font, font style, size, emphasis, and color,
-and every change is saved into a managed local Git repository.
+Schema 2 saves individual pin state, tab/group order, group membership and
+collapse, sparse appearance, and every page change in a managed local Git
+repository.
 
 ## Quick start
 
 1. Select **Workspace** in the persistent application navigation or press `Alt+5`.
 2. Select **+** or press `Ctrl+T` to add a page.
 3. Write in the page editor; the status changes while the edit is being saved.
-4. Right-click the tab and choose **Name & appearance**.
-5. Choose a font family and style, a 6–144 point size, bold or italic, and any
-   font color with the HSV/alpha controls or a hex value.
+4. Right-click the tab for pin/group/close actions or **Edit appearance…**.
+5. Use the installed-font typography controls, continuous color translator,
+   geometry/state controls, inheritance, resets, and optional named presets.
 6. Press `Ctrl+S` whenever you want to save and commit immediately.
 
-Tab order, the selected page, open and closed tabs, content, and appearance are
-restored the next time the application starts.
+Pinned and ordinary order, groups, the selected page, open and closed tabs,
+content, and appearance are restored the next time the application starts.
 
 ![Persistent browser-style Workspace tabs](images/app/09-custom-workspace-tabs.png)
 
@@ -24,9 +25,22 @@ restored the next time the application starts.
 - Click a tab to select it.
 - Click its close button or middle-click it to close it.
 - Double-click it to customize its name and appearance.
-- Right-click it to customize, duplicate, close other tabs, or close the tab.
+- Right-click it to pin, group, customize, duplicate, close other tabs, or
+  close the tab.
+- Shift+right-click it to open appearance directly, or press `Ctrl+Shift+A`.
+- Use the overflow action rather than losing ordinary tabs at narrow widths.
 - Close every tab if you want an empty workspace; select **Create tab** to begin
   again.
+
+## Find and organize tabs
+
+Create, rename, color, reorder, collapse, expand, and remove groups. Search the
+current strip, one group, group names, or all app-owned Workspace tabs. Each
+search has its own adjacent Qt/PCRE2 builder and remains plain-text-first.
+
+Containing and inverse bulk close match visible labels, reject empty or invalid
+input, preview the exact affected set, and exclude pinned tabs by default.
+Dirty state is committed before a destructive close.
 
 ## Rename the app
 
@@ -53,7 +67,7 @@ an interrupted close and removed without reopening the tab.
 
 | Choose | When you need |
 | --- | --- |
-| **Export workspace JSON** | One compact snapshot of the current app name, tabs, text, and appearance |
+| **Export workspace JSON** | One compact snapshot of the current app name, pinned/grouped tabs, text, appearance, and presets |
 | **Export complete Git repository** | The current workspace plus every local commit |
 | **Import workspace JSON** | To replace the live workspace but continue using its current local history |
 | **Import complete Git repository** | To activate an exported workspace and history while retaining the previous repository as a hidden recovery copy |
@@ -86,3 +100,8 @@ Workspace Git is local only. It does not push to GitHub or another remote.
 
 For the file layout, limits, validation rules, and detailed migration behavior,
 read [Custom Workspace Tabs](../WORKSPACE_TABS.md).
+
+The detailed feature articles cover
+[tab management](https://ding-ding-projects.github.io/qbittorrent-material/wiki.html#wiki/features-workspace-tab-management),
+[search and regex](https://ding-ding-projects.github.io/qbittorrent-material/wiki.html#wiki/features-workspace-search-and-regex),
+and [runtime appearance](https://ding-ding-projects.github.io/qbittorrent-material/wiki.html#wiki/features-appearance-runtime-appearance).

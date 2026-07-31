@@ -1,0 +1,325 @@
+[CmdletBinding()]
+param(
+    [string] $RepositoryRoot
+)
+
+$ErrorActionPreference = "Stop"
+if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
+    $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
+    $RepositoryRoot = Split-Path -Parent $scriptDirectory
+}
+$RepositoryRoot = (Resolve-Path -LiteralPath $RepositoryRoot).Path
+$failures = [System.Collections.Generic.List[string]]::new()
+$checks = 0
+
+function Test-Policy {
+    param(
+        [bool] $Condition,
+        [string] $Description
+    )
+
+    $script:checks++
+    if ($Condition) {
+        Write-Host "[PASS] $Description"
+        return
+    }
+
+    $script:failures.Add($Description)
+    Write-Host "[FAIL] $Description"
+}
+
+function Get-RepositoryPath {
+    param([string] $RelativePath)
+    return Join-Path $RepositoryRoot ($RelativePath -replace '/', [IO.Path]::DirectorySeparatorChar)
+}
+
+function Read-JsonFile {
+    param(
+        [string] $RelativePath,
+        [switch] $AsHashtable
+    )
+
+    $path = Get-RepositoryPath $RelativePath
+    Test-Policy (Test-Path -LiteralPath $path -PathType Leaf) "$RelativePath exists"
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return $null
+    }
+
+    try {
+        $json = Get-Content -Raw -LiteralPath $path
+        $value = if ($AsHashtable) {
+            if ((Get-Command ConvertFrom-Json).Parameters.ContainsKey("AsHashtable")) {
+                $json | ConvertFrom-Json -AsHashtable
+            }
+            else {
+                # Windows PowerShell 5.1 treats case-only JSON keys as
+                # duplicates. JavaScriptSerializer preserves this flat
+                # translation catalog with ordinal dictionary keys instead.
+                Add-Type -AssemblyName System.Web.Extensions
+                $serializer = [Web.Script.Serialization.JavaScriptSerializer]::new()
+                $serializer.MaxJsonLength = [int]::MaxValue
+                $serializer.DeserializeObject($json)
+            }
+        }
+        else {
+            $json | ConvertFrom-Json
+        }
+        Test-Policy $true "$RelativePath contains valid JSON"
+        return $value
+    }
+    catch {
+        Test-Policy $false "$RelativePath contains valid JSON ($($_.Exception.Message))"
+        return $null
+    }
+}
+
+function Test-DecodablePng {
+    param([string] $RelativePath)
+
+    $path = Get-RepositoryPath $RelativePath
+    Test-Policy (Test-Path -LiteralPath $path -PathType Leaf) "$RelativePath exists"
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return
+    }
+
+    $bytes = [IO.File]::ReadAllBytes($path)
+    $signature = @(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+    $signatureValid = $bytes.Length -ge $signature.Count
+    for ($index = 0; $signatureValid -and $index -lt $signature.Count; $index++) {
+        $signatureValid = $bytes[$index] -eq $signature[$index]
+    }
+    Test-Policy $signatureValid "$RelativePath has a PNG signature"
+
+    try {
+        $image = [Drawing.Image]::FromFile($path)
+        try {
+            Test-Policy (($image.Width -gt 0) -and ($image.Height -gt 0)) `
+                "$RelativePath decodes as a non-empty image"
+        }
+        finally {
+            $image.Dispose()
+        }
+    }
+    catch {
+        Test-Policy $false "$RelativePath decodes as a non-empty image ($($_.Exception.Message))"
+    }
+}
+
+$requiredDesktopFiles = @(
+    "src/quick/controllers/experiencecontroller.cpp",
+    "src/quick/controllers/experiencecontroller.h",
+    "src/quick/controllers/notificationcontroller.cpp",
+    "src/quick/controllers/notificationcontroller.h",
+    "src/quick/qml/components/Snackbar.qml",
+    "src/quick/qml/dialogs/ChangelogPage.qml",
+    "src/quick/qml/shell/DimSumSurprise.qml",
+    "src/quick/qml/shell/NotificationsSheet.qml",
+    "src/quick/qml/shell/RegexBuilderSheet.qml",
+    "src/quick/qml/shell/SettingsSheet.qml",
+    "src/quick/qml/workspace/WorkspaceSearchPanel.qml",
+    "src/quick/qml/workspace/WorkspaceTabStrip.qml",
+    "resources/experience/changelog.json",
+    "resources/experience/dim-sum.json"
+)
+foreach ($relativePath in $requiredDesktopFiles) {
+    Test-Policy (Test-Path -LiteralPath (Get-RepositoryPath $relativePath) -PathType Leaf) `
+        "$relativePath is present"
+}
+
+try {
+    Add-Type -AssemblyName System.Drawing
+    Test-Policy $true "the Windows image decoder is available"
+}
+catch {
+    Test-Policy $false "the Windows image decoder is available ($($_.Exception.Message))"
+}
+
+$dishes = Read-JsonFile "resources/experience/dim-sum.json"
+if ($null -ne $dishes) {
+    $dishList = @($dishes)
+    $requiredDishIds = @("har-gow", "siu-mai", "egg-tart")
+    Test-Policy ($dishList.Count -ge $requiredDishIds.Count) `
+        "the startup catalog preserves every shipped dish and can grow"
+    Test-Policy ((@($dishList.id | Sort-Object -Unique)).Count -eq $dishList.Count) `
+        "dim-sum identifiers are unique"
+    foreach ($requiredDishId in $requiredDishIds) {
+        Test-Policy (@($dishList.id) -contains $requiredDishId) `
+            "the startup catalog preserves '$requiredDishId'"
+    }
+
+    foreach ($dish in $dishList) {
+        $complete = -not [string]::IsNullOrWhiteSpace([string] $dish.id) `
+            -and -not [string]::IsNullOrWhiteSpace([string] $dish.english) `
+            -and -not [string]::IsNullOrWhiteSpace([string] $dish.cantonese) `
+            -and -not [string]::IsNullOrWhiteSpace([string] $dish.altEnglish) `
+            -and -not [string]::IsNullOrWhiteSpace([string] $dish.altCantonese)
+        Test-Policy $complete "dim-sum entry '$($dish.id)' has bilingual names and alt text"
+
+        $resourcePath = [string] $dish.image
+        Test-Policy ($resourcePath -match '^qrc:/dim-sum/[^/]+\.png$') `
+            "dim-sum entry '$($dish.id)' uses a bundled qrc PNG"
+        if ($resourcePath -match '^qrc:/(.+)$') {
+            Test-DecodablePng "resources/$($Matches[1])"
+        }
+    }
+}
+
+$changelog = Read-JsonFile "resources/experience/changelog.json"
+if ($null -ne $changelog) {
+    $releaseList = @($changelog)
+    $historicalVersions = @(
+        "build-48-8b68ae74", "build-47-b44229e4", "build-46-399e4350",
+        "build-45-430a6177", "build-44-af4cbf25", "build-43-0881ad0e",
+        "build-42-58164502", "build-41-a2ae836d", "build-40-c6d0e333",
+        "build-39-50c67897", "build-38-576c85c8", "build-37-21b0b2b6",
+        "build-26-3dc2ec00", "build-25-2eb40141", "build-24-e8e41838",
+        "build-23-83a81bc3", "build-22-41c2cea7", "build-21-69740550",
+        "build-20-74c4aa3c", "build-19-0c21fac4", "build-17-a07e3af8",
+        "build-16-47b984a4", "build-14-423929a0", "build-13-f64178cc",
+        "build-12-2e33d38c", "build-11-61616f2a", "build-10-33e5a062",
+        "build-9-ae9843a4", "build-8-3b9cd888", "build-7-60822258",
+        "build-6-98325da1", "build-5-476b6e7c", "build-4-9ce72b8b",
+        "build-3-510c365e"
+    )
+    $releaseVersions = @($releaseList.version)
+    $missingHistoricalVersions = @($historicalVersions | Where-Object {
+        $releaseVersions -notcontains $_
+    })
+    Test-Policy ($missingHistoricalVersions.Count -eq 0) `
+        "the changelog preserves the canonical 34-release history$($missingHistoricalVersions -join ', ')"
+    Test-Policy ((@($releaseList.version | Sort-Object -Unique)).Count -eq $releaseList.Count) `
+        "changelog release versions are unique"
+
+    foreach ($release in $releaseList) {
+        $releaseDate = [DateTime]::MinValue
+        $dateValid = [DateTime]::TryParseExact(
+            [string] $release.date,
+            "yyyy-MM-dd",
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::None,
+            [ref] $releaseDate)
+        $complete = -not [string]::IsNullOrWhiteSpace([string] $release.version) `
+            -and -not [string]::IsNullOrWhiteSpace([string] $release.title) `
+            -and @($release.changes).Count -gt 0 `
+            -and $dateValid
+        Test-Policy $complete "changelog entry '$($release.version)' has a date, title, and change list"
+    }
+}
+
+$cantonese = Read-JsonFile "resources/i18n/cantonese.json" -AsHashtable
+if ($null -ne $cantonese) {
+    $translationKeys = @($cantonese.Keys)
+    foreach ($requiredKey in @(
+        "1 is fully professional and 5 is maximum playfulness",
+        "Cantonese funny level",
+        "English funny level",
+        "Language"
+    )) {
+        Test-Policy ($translationKeys -contains $requiredKey) `
+            "the Cantonese catalog translates '$requiredKey'"
+    }
+}
+
+$sourceCMake = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/CMakeLists.txt")
+Test-Policy ($sourceCMake -match 'quick/qml/\*\.qml') "CMake discovers every desktop QML surface"
+Test-Policy ($sourceCMake -match 'experience/\*\.json') "CMake bundles the offline experience catalogs"
+Test-Policy ($sourceCMake -match 'dim-sum/\*\.png') "CMake bundles the local dim-sum images"
+
+$mainQml = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/Main.qml")
+foreach ($surface in @("DimSumSurprise", "NotificationsSheet", "RegexBuilderSheet", "SettingsSheet")) {
+    Test-Policy ($mainQml -match [regex]::Escape($surface)) "Main.qml wires $surface"
+}
+
+$legacySnackbarCalls = [System.Collections.Generic.List[string]]::new()
+Get-ChildItem -LiteralPath (Get-RepositoryPath "src/quick/qml") -Filter "*.qml" -File -Recurse |
+    ForEach-Object {
+        $matches = Select-String -LiteralPath $_.FullName `
+            -Pattern '(?<![A-Za-z0-9_])Snackbar\s*\.\s*show\s*\(' -AllMatches -CaseSensitive
+        foreach ($match in $matches) {
+            $legacySnackbarCalls.Add("$($_.FullName):$($match.LineNumber)")
+        }
+    }
+Test-Policy ($legacySnackbarCalls.Count -eq 0) `
+    "desktop QML contains no legacy static Snackbar.show calls$($legacySnackbarCalls -join ', ')"
+
+$workflowPath = Get-RepositoryPath ".github/workflows/release-every-push.yml"
+Test-Policy (Test-Path -LiteralPath $workflowPath -PathType Leaf) "the push release workflow exists"
+if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {
+    $workflow = Get-Content -Raw -LiteralPath $workflowPath
+    $workflowLines = @(Get-Content -LiteralPath $workflowPath)
+    $onLine = [Array]::IndexOf($workflowLines, "on:")
+    $nextRootLine = $workflowLines.Count
+    if ($onLine -ge 0) {
+        for ($index = $onLine + 1; $index -lt $workflowLines.Count; $index++) {
+            if ($workflowLines[$index] -match '^\S') {
+                $nextRootLine = $index
+                break
+            }
+        }
+    }
+    $onBlock = if ($onLine -ge 0) {
+        @($workflowLines[($onLine + 1)..($nextRootLine - 1)])
+    }
+    else { @() }
+    Test-Policy ($onLine -ge 0 -and $onBlock -match '^  push:\s*$') `
+        "the root workflow trigger includes push"
+    Test-Policy ($onLine -ge 0 -and $onBlock -match '^  workflow_dispatch:\s*$') `
+        "the root workflow trigger includes manual dispatch"
+
+    $stepLines = [ordered]@{}
+    for ($index = 0; $index -lt $workflowLines.Count; $index++) {
+        if ($workflowLines[$index] -match '^      - name: (.+?)\s*$') {
+            $stepLines[$Matches[1]] = $index
+        }
+    }
+    $policyStep = $stepLines["Run desktop policy and content-integrity tests"]
+    $buildStep = $stepLines["Build"]
+    $packageStep = $stepLines["Build and verify the NSIS installer"]
+    $publishStep = $stepLines["Publish one immutable non-draft release"]
+    Test-Policy ($null -ne $policyStep -and $null -ne $buildStep `
+            -and $null -ne $packageStep -and $null -ne $publishStep `
+            -and $policyStep -lt $buildStep -and $buildStep -lt $packageStep `
+            -and $packageStep -lt $publishStep) `
+        "policy, build, installed-package tests, and publication are strictly ordered"
+
+    $tokenPattern = 'secrets\.RELEASE_TOKEN\s*\|\|\s*secrets\.ORG_TOKEN\s*\|\|\s*secrets\.GITHUB_TOKEN'
+    Test-Policy (([regex]::Matches($workflow, $tokenPattern)).Count -eq 2) `
+        "both GitHub operations use RELEASE_TOKEN, ORG_TOKEN, GITHUB_TOKEN fallback order"
+    Test-Policy ($workflow -match 'Measure hosted runner resources') `
+        "the workflow measures the hosted runner before relying on it"
+    Test-Policy ($workflow -match 'GITHUB_WORKSPACE' -and $workflow -match 'RUNNER_TEMP') `
+        "the workflow measures the actual workspace and temporary build volumes"
+    Test-Policy ($workflow -match 'test-desktop-policy\.ps1') `
+        "the workflow runs this desktop policy test before release"
+    Test-Policy ($workflow -match 'resources/dim-sum/har-gow\.png') `
+        "the release attaches the bundled Shrimp dumpling image"
+    Test-Policy (([regex]::Matches($workflow, '(?m)^\s*gh release create\s')).Count -eq 1) `
+        "the workflow has exactly one GitHub Release creation command"
+    Test-Policy ($workflow -match 'build-\$env:GITHUB_RUN_NUMBER-\$shortSha') `
+        "the immutable tag includes a monotonic run number and commit identity"
+    Test-Policy ($workflow -match 'immutable-releases' -and $workflow -match 'isImmutable') `
+        "the workflow gates on repository immutability and verifies the published release"
+    Test-Policy ($workflow -match 'targetCommitish -ne \$env:GITHUB_SHA') `
+        "the published release target is verified against the triggering commit"
+    Test-Policy ($workflow -notmatch 'ls-remote\s+--exit-code') `
+        "an absent release tag does not leak an expected native failure code"
+    Test-Policy ($workflow -notmatch '(?m)^\s*uses:\s*[^@\s]+@(?![0-9a-f]{40}(?:\s|#|$))') `
+        "every external GitHub Action is pinned to a full commit"
+    Test-Policy ($workflow -notmatch '--draft|--prerelease') `
+        "the release command cannot request a draft or prerelease"
+    Test-Policy ($workflow -notmatch '--clobber') "the workflow never clobbers a release asset"
+    Test-Policy ($workflow -notmatch 'gh release upload') "the workflow never mutates an existing release"
+    Test-Policy ($workflow -notmatch '(?i)\btui\b') "the workflow remains Windows-desktop-only"
+}
+
+if ($failures.Count -gt 0) {
+    Write-Host ""
+    Write-Host "$($failures.Count) of $checks desktop policy checks failed:"
+    foreach ($failure in $failures) {
+        Write-Host " - $failure"
+    }
+    throw "Desktop policy and content-integrity verification failed."
+}
+
+Write-Host ""
+Write-Host "All $checks desktop policy and content-integrity checks passed."

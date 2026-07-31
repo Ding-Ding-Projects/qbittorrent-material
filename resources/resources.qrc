@@ -8,6 +8,9 @@
       :/fonts/MaterialSymbolsOutlined.ttf   (MDIcon glyphs)
       :/fonts/Roboto.ttf, :/fonts/RobotoMono.ttf
       :/i18n/cantonese.json                 (FunnyTranslator catalog)
+      :/experience/changelog.json           (offline in-app release history)
+      :/experience/dim-sum.json             (startup delight catalog)
+      :/dim-sum/*.png                       (bundled startup delight photos)
       :/branding/logo-mark.svg              (window and normal tray artwork)
       :/branding/logo-monochrome.svg        (monochrome tray artwork)
       :/html/gpl.html                       (About dialog license text)
@@ -27,6 +30,11 @@
         <file alias="fonts/Roboto.ttf">fonts/Roboto.ttf</file>
         <file alias="fonts/RobotoMono.ttf">fonts/RobotoMono.ttf</file>
         <file alias="i18n/cantonese.json">i18n/cantonese.json</file>
+        <file alias="experience/changelog.json">experience/changelog.json</file>
+        <file alias="experience/dim-sum.json">experience/dim-sum.json</file>
+        <file alias="dim-sum/har-gow.png">dim-sum/har-gow.png</file>
+        <file alias="dim-sum/siu-mai.png">dim-sum/siu-mai.png</file>
+        <file alias="dim-sum/egg-tart.png">dim-sum/egg-tart.png</file>
         <file alias="branding/logo-mark.svg">branding/logo-mark.svg</file>
         <file alias="branding/logo-monochrome.svg">branding/logo-monochrome.svg</file>
         <file alias="html/gpl.html">html/gpl.html</file>

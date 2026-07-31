@@ -271,7 +271,7 @@
     var resolved = resolveRepoPath(doc.path, value);
     if (resolved.indexOf("docs/") === 0) return resolved.substring(5);
     if (resolved.indexOf("README") === 0) return value.replace(/^docs\//, "");
-    return "https://raw.githubusercontent.com/codingmachineedge/qbittorrent-material/master/" + resolved;
+    return "https://raw.githubusercontent.com/Ding-Ding-Projects/qbittorrent-material/master/" + resolved;
   }
 
   function resolveDocumentLink(url, doc) {
@@ -302,7 +302,7 @@
       };
     }
     return {
-      href: "https://github.com/codingmachineedge/qbittorrent-material/blob/master/" + resolveRepoPath(doc.path, path),
+      href: "https://github.com/Ding-Ding-Projects/qbittorrent-material/blob/master/" + resolveRepoPath(doc.path, path),
       external: true
     };
   }
@@ -1249,7 +1249,7 @@
     return {
       type: "qbt-material-wiki",
       schemaVersion: 1,
-      repository: "codingmachineedge/qbittorrent-material",
+      repository: "Ding-Ding-Projects/qbittorrent-material",
       exportedAt: new Date().toISOString(),
       documents: state.docs.map(function (doc) {
         return {
@@ -1743,7 +1743,7 @@
   function resolveInstallerLink() {
     var links = document.querySelectorAll(".js-installer-link");
     if (!links.length || typeof fetch !== "function") return;
-    var api = "https://api.github.com/repos/codingmachineedge/qbittorrent-material/releases?per_page=15";
+    var api = "https://api.github.com/repos/Ding-Ding-Projects/qbittorrent-material/releases?per_page=15";
     fetch(api, { headers: { Accept: "application/vnd.github+json" } })
       .then(function (response) {
         if (!response.ok) throw new Error("releases request failed: " + response.status);

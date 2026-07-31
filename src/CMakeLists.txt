@@ -201,6 +201,8 @@ else()
         "${QBT_RES_ROOT}/html/*.html"
         "${QBT_RES_ROOT}/html/*.css"
         "${QBT_RES_ROOT}/i18n/*.json"
+        "${QBT_RES_ROOT}/experience/*.json"
+        "${QBT_RES_ROOT}/dim-sum/*.png"
     )
     file(GLOB_RECURSE QBT_ASSET_FILES CONFIGURE_DEPENDS ${QBT_ASSET_GLOBS})
     if (QBT_ASSET_FILES)

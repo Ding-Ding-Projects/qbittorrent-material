@@ -12,6 +12,8 @@
 
 #include "application.h"
 
+#include <algorithm>
+
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
@@ -92,8 +94,8 @@ using namespace Qt::StringLiterals;
 
 namespace
 {
-    // Persisted setting key for the runtime UI language (see CONTRACTS §2.3).
-    const QString kLanguageKey = u"Appearance/Language"_qs;
+    const QString kEnglishFunnyLevelKey = u"Appearance/EnglishFunnyLevel"_qs;
+    const QString kCantoneseFunnyLevelKey = u"Appearance/CantoneseFunnyLevel"_qs;
 
     /// A stable, per-user single-instance identifier (so two different logins
     /// on the same host don't collide).
@@ -325,26 +327,40 @@ int Application::run()
 void Application::setupTranslation()
 {
     int langValue = 0;  // 0 == English (default)
+    int englishFunnyLevel = 1;
+    int cantoneseFunnyLevel = 3;
 #ifdef QBT_HAS_PREFERENCES
-    langValue = Preferences::instance()->value(kLanguageKey, 0).toInt();
-    qCInfo(lcI18n) << "Loaded persisted language mode:" << langValue;
+    langValue = Preferences::instance()->getLanguageMode();
+    englishFunnyLevel = Preferences::instance()->value(kEnglishFunnyLevelKey, 1).toInt();
+    cantoneseFunnyLevel = Preferences::instance()->value(kCantoneseFunnyLevelKey, 3).toInt();
+    qCInfo(lcI18n) << "Loaded persisted language settings:"
+                   << langValue << englishFunnyLevel << cantoneseFunnyLevel;
 #else
-    qCWarning(lcI18n) << "Preferences unavailable at startup; defaulting language to English";
+    qCWarning(lcI18n) << "Preferences unavailable at startup; using language defaults";
 #endif
 
 #ifdef QBT_HAS_FUNNY_TRANSLATOR
     using Utils::I18n::FunnyTranslator;
     auto *funny = new FunnyTranslator(this);
-    if (funny->loadCatalog(u":/i18n/cantonese.json"_qs))
-        qCInfo(lcI18n) << "Cantonese catalog loaded";
-    else
+    if (funny->entryCount() == 0)
         qCWarning(lcI18n) << "Cantonese catalog missing — Cantonese/Bilingual will fall back to English";
+    langValue = std::clamp(langValue, int(FunnyTranslator::Mode::English),
+                           int(FunnyTranslator::Mode::Bilingual));
     funny->setMode(static_cast<FunnyTranslator::Mode>(langValue));
+    funny->setFunnyLevels(englishFunnyLevel, cantoneseFunnyLevel);
     m_translator = funny;
-    installTranslator(m_translator);
-    qCInfo(lcI18n) << "FunnyTranslator installed on qApp before QML load";
+    if (installTranslator(m_translator))
+        qCInfo(lcI18n) << "Sole FunnyTranslator installed before QML load";
+    else
+    {
+        qCWarning(lcI18n) << "FunnyTranslator installation failed; UI will use English";
+        delete m_translator;
+        m_translator = nullptr;
+    }
 #else
     Q_UNUSED(langValue)
+    Q_UNUSED(englishFunnyLevel)
+    Q_UNUSED(cantoneseFunnyLevel)
     qCWarning(lcI18n) << "FunnyTranslator not available yet; UI will render raw English literals";
 #endif
 }
@@ -504,6 +520,14 @@ void Application::cleanup()
         qCDebug(lcApp) << "QML engine destroyed";
     }
 
+    if (m_translator)
+    {
+        removeTranslator(m_translator);
+        delete m_translator;
+        m_translator = nullptr;
+        qCDebug(lcI18n) << "Runtime translator removed";
+    }
+
 #ifdef QBT_HAS_SESSION
     // Tear the session down for real: ~SessionImpl requests a final resume-data
     // save for every torrent and drains the alerts (bounded by the shutdown
@@ -531,6 +555,11 @@ DesktopIntegration *Application::desktopIntegration() const
 QQmlApplicationEngine *Application::qmlEngine() const
 {
     return m_engine;
+}
+
+QTranslator *Application::runtimeTranslator() const
+{
+    return m_translator;
 }
 
 qint64 Application::launchTimeSecsSinceEpoch() const

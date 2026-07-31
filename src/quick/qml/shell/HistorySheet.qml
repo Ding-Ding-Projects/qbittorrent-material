@@ -152,7 +152,7 @@ Sheet {
             Item { Layout.fillWidth: true }
 
             Text {
-                text: qsTr("auto-commit")
+                text: qsTr("auto-commit · always on")
                 font.family: Typography.family
                 font.pixelSize: 12
                 color: Theme.color("onSurfaceVariant")
@@ -171,8 +171,8 @@ Sheet {
                 }
                 MouseArea {
                     anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: JournalController.autoCommit = !JournalController.autoCommit
+                    cursorShape: Qt.ArrowCursor
+                    Accessible.name: qsTr("Settings history is always recorded locally")
                 }
             }
         }

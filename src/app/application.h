@@ -71,6 +71,10 @@ public:
     /// The underlying QML engine (valid only after run() has begun).
     [[nodiscard]] QQmlApplicationEngine *qmlEngine() const;
 
+    /// The one process-wide runtime translator installed before QML loads.
+    /// I18n adopts this instance instead of installing a competing translator.
+    [[nodiscard]] QTranslator *runtimeTranslator() const;
+
     /// Wall-clock launch time (seconds since epoch), for uptime/statistics.
     [[nodiscard]] qint64 launchTimeSecsSinceEpoch() const;
 
@@ -88,7 +92,7 @@ private:
     void cleanup();
 
     QQmlApplicationEngine *m_engine = nullptr;
-    QTranslator *m_translator = nullptr;  ///< A Utils::I18n::FunnyTranslator when available.
+    QTranslator *m_translator = nullptr;  ///< The sole process-wide translator.
 
     QPointer<AppController> m_appController;
     QPointer<DesktopIntegration> m_desktopIntegration;

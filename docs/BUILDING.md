@@ -111,11 +111,13 @@ then configures and builds with CMake and Ninja:
 
 ## Continuous Windows releases
 
-Every branch push triggers the `Build and release every push` GitHub Actions
-workflow. It builds on `windows-2022` with MSVC 2022 and Qt 6.8.3, creates and
-smoke-tests the NSIS installer, and publishes it as a full GitHub release:
+Every branch push and manual dispatch triggers the `Build and release every
+push` GitHub Actions workflow. It measures the hosted `windows-2022` runner,
+runs the desktop policy test, builds with MSVC 2022 and Qt 6.8.3, creates and
+smoke-tests the NSIS installer, and publishes one immutable full release:
 
-- A GitHub release containing the Windows x64 installer as its release asset.
+- the Windows x64 installer built by that run; and
+- the existing bundled Shrimp dumpling · 蝦餃 `har-gow.png` image.
 
 The installed-app gate removes every Git executable directory from `PATH`, then
 verifies that bundled libgit2 initializes and commits a clean repository. It
@@ -124,13 +126,21 @@ body is restored as a committed recovered tab without data loss. A second crash
 window confirms that a tracked body left behind after an intentional close is
 removed and not resurrected.
 
-The workflow intentionally does not retain a separate Actions artifact.
+The workflow intentionally does not create a separate Actions artifact. It
+attaches both files directly to the release.
 
 Each push receives a unique tag in the form
 `build-<run-number>-<short-sha>`. The release targets the exact pushed
-commit, is marked "latest" on creation, and records the branch, build ID, and
-installer SHA-256 checksum in its release notes. The workflow can also be
-started manually with `workflow_dispatch`.
+commit, is marked “latest” on creation, and records the branch, build ID,
+installer SHA-256, and dim-sum dish/filename in its release notes. The workflow
+refuses an existing tag or release and never uses `--clobber`. Its release token
+uses `RELEASE_TOKEN`, then `ORG_TOKEN`, then `GITHUB_TOKEN`.
+
+Run the same offline policy gate locally before packaging:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\test-desktop-policy.ps1
+```
 
 ## Preview the documentation site
 

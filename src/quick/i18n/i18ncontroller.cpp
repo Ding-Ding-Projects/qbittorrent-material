@@ -13,7 +13,9 @@
 #include "i18ncontroller.h"
 
 #include <QCoreApplication>
+#include <QSet>
 
+#include "app/application.h"
 #include "base/logging.h"
 #include "base/preferences.h"
 #include "funnytranslator.h"
@@ -22,8 +24,8 @@ using Utils::I18n::FunnyTranslator;
 
 namespace
 {
-    /// Persisted-settings key for the chosen language (integer enum value).
-    const QString kLanguageKey = QStringLiteral("Appearance/Language");
+    const QString kEnglishFunnyLevelKey = QStringLiteral("Appearance/EnglishFunnyLevel");
+    const QString kCantoneseFunnyLevelKey = QStringLiteral("Appearance/CantoneseFunnyLevel");
 
     FunnyTranslator::Mode toMode(const I18n::Language lang)
     {
@@ -56,7 +58,10 @@ I18n *I18n::create(QQmlEngine *engine, QJSEngine *scriptEngine)
         return s_instance;
     }
 
-    s_instance = new I18n(engine);
+    // CppOwnership prevents JavaScript GC from deleting the singleton, while
+    // the engine parent gives it a deterministic shutdown before Application
+    // removes the shared translator.
+    s_instance = new I18n(engine, engine);
     QJSEngine::setObjectOwnership(s_instance, QJSEngine::CppOwnership);
     return s_instance;
 }
@@ -67,22 +72,46 @@ I18n::I18n(QQmlEngine *engine, QObject *parent)
 {
     qCInfo(lcI18n) << "I18n controller initializing";
 
-    m_translator = new FunnyTranslator(this);
+    // Application installs the translator before Main.qml loads. Adopt that
+    // exact instance so a stale second translator can never participate in Qt's
+    // fallback chain. Standalone tests still get a safe owned fallback.
+    if (Application *app = Application::instance())
+        m_translator = qobject_cast<FunnyTranslator *>(app->runtimeTranslator());
 
-    // Restore the persisted language (default English).
-    if (Preferences::instance() != nullptr)
-        m_language = clampLanguage(Preferences::instance()->value(kLanguageKey, int(English)).toInt());
+    if (m_translator != nullptr)
+    {
+        qCInfo(lcI18n) << "I18n adopted Application's pre-QML FunnyTranslator";
+    }
+    else
+    {
+        qCWarning(lcI18n) << "Application translator unavailable; installing I18n fallback";
+        m_translator = new FunnyTranslator(this);
+        m_ownsTranslator = true;
+        QCoreApplication::installTranslator(m_translator);
+    }
 
-    m_translator->setMode(toMode(m_language));
-    QCoreApplication::installTranslator(m_translator);
+    // Restore the three bounded, persisted controls.
+    if (Preferences *preferences = Preferences::instance())
+    {
+        m_language = clampLanguage(preferences->getLanguageMode());
+        m_englishFunnyLevel = FunnyTranslator::clampFunnyLevel(
+            preferences->value(kEnglishFunnyLevelKey,
+                FunnyTranslator::DefaultEnglishFunnyLevel).toInt());
+        m_cantoneseFunnyLevel = FunnyTranslator::clampFunnyLevel(
+            preferences->value(kCantoneseFunnyLevelKey,
+                FunnyTranslator::DefaultCantoneseFunnyLevel).toInt());
+    }
+
+    applyTranslatorState(false);
 
     qCInfo(lcI18n) << "I18n ready; language:" << displayName(m_language)
-                   << "catalog entries:" << m_translator->entryCount();
+                   << "funny levels:" << m_englishFunnyLevel << m_cantoneseFunnyLevel
+                   << "catalog entries:" << catalogEntryCount();
 }
 
 I18n::~I18n()
 {
-    if (m_translator != nullptr)
+    if (m_ownsTranslator && (m_translator != nullptr))
         QCoreApplication::removeTranslator(m_translator);
     if (s_instance == this)
         s_instance = nullptr;
@@ -108,47 +137,86 @@ QString I18n::displayName(const Language lang) const
 
 void I18n::setLanguage(const Language lang)
 {
-    if (m_language == lang)
-    {
-        qCDebug(lcI18n) << "setLanguage no-op; already" << displayName(lang);
+    setLanguageSettings(int(lang), m_englishFunnyLevel, m_cantoneseFunnyLevel);
+}
+
+void I18n::setEnglishFunnyLevel(const int level)
+{
+    setLanguageSettings(int(m_language), level, m_cantoneseFunnyLevel);
+}
+
+void I18n::setCantoneseFunnyLevel(const int level)
+{
+    setLanguageSettings(int(m_language), m_englishFunnyLevel, level);
+}
+
+void I18n::setFunnyLevels(const int englishLevel, const int cantoneseLevel)
+{
+    setLanguageSettings(int(m_language), englishLevel, cantoneseLevel);
+}
+
+void I18n::resetFunnyLevels()
+{
+    setFunnyLevels(FunnyTranslator::DefaultEnglishFunnyLevel,
+                   FunnyTranslator::DefaultCantoneseFunnyLevel);
+}
+
+void I18n::setLanguageSettings(const int language, const int englishFunnyLevel,
+                               const int cantoneseFunnyLevel)
+{
+    const Language safeLanguage = clampLanguage(language);
+    const int safeEnglishLevel = FunnyTranslator::clampFunnyLevel(englishFunnyLevel);
+    const int safeCantoneseLevel = FunnyTranslator::clampFunnyLevel(cantoneseFunnyLevel);
+
+    const bool didLanguageChange = (m_language != safeLanguage);
+    const bool didEnglishLevelChange = (m_englishFunnyLevel != safeEnglishLevel);
+    const bool didCantoneseLevelChange = (m_cantoneseFunnyLevel != safeCantoneseLevel);
+    if (!didLanguageChange && !didEnglishLevelChange && !didCantoneseLevelChange)
         return;
-    }
 
-    qCInfo(lcI18n) << "Language change requested:" << displayName(m_language)
-                   << "->" << displayName(lang);
+    qCInfo(lcI18n) << "Language settings change:"
+                   << int(m_language) << m_englishFunnyLevel << m_cantoneseFunnyLevel
+                   << "->" << int(safeLanguage) << safeEnglishLevel << safeCantoneseLevel;
 
-    m_language = lang;
-    applyMode(lang);
+    m_language = safeLanguage;
+    m_englishFunnyLevel = safeEnglishLevel;
+    m_cantoneseFunnyLevel = safeCantoneseLevel;
+    applyTranslatorState(true);
 
-    // Persist as the integer enum value under Appearance/Language.
-    if (Preferences::instance() != nullptr)
+    if (Preferences *preferences = Preferences::instance())
     {
-        Preferences::instance()->setValue(kLanguageKey, int(lang));
-        qCDebug(lcI18n) << "Persisted" << kLanguageKey << "=" << int(lang);
+        preferences->setLanguageMode(int(m_language));
+        preferences->setValue(kEnglishFunnyLevelKey, m_englishFunnyLevel);
+        preferences->setValue(kCantoneseFunnyLevelKey, m_cantoneseFunnyLevel);
     }
     else
     {
-        qCWarning(lcI18n) << "Preferences unavailable; language not persisted";
+        qCWarning(lcI18n) << "Preferences unavailable; language settings not persisted";
     }
 
-    emit languageChanged();
-    qCInfo(lcI18n) << "Language applied and live bindings retranslated:" << displayName(lang);
+    if (didLanguageChange)
+        emit languageChanged();
+    if (didEnglishLevelChange)
+        emit englishFunnyLevelChanged();
+    if (didCantoneseLevelChange)
+        emit cantoneseFunnyLevelChanged();
 }
 
-void I18n::applyMode(const Language lang)
+void I18n::applyTranslatorState(const bool retranslate)
 {
     if (m_translator == nullptr)
     {
-        qCWarning(lcI18n) << "applyMode called without a translator";
+        qCWarning(lcI18n) << "Cannot apply language settings without a translator";
         return;
     }
 
-    m_translator->setMode(toMode(lang));
+    m_translator->setMode(toMode(m_language));
+    m_translator->setFunnyLevels(m_englishFunnyLevel, m_cantoneseFunnyLevel);
 
     // Re-evaluate every live qsTr binding without an application restart.
-    if (m_engine != nullptr)
+    if (retranslate && (m_engine != nullptr))
         m_engine->retranslate();
-    else
+    else if (retranslate)
         qCWarning(lcI18n) << "No QQmlEngine stored; cannot retranslate live bindings";
 }
 
@@ -162,4 +230,43 @@ QString I18n::t(const QString &english) const
             return translated;
     }
     return english;
+}
+
+int I18n::catalogEntryCount() const
+{
+    return (m_translator != nullptr) ? m_translator->entryCount() : 0;
+}
+
+QStringList I18n::catalogPlaceholderMismatchKeys() const
+{
+    return (m_translator != nullptr)
+        ? m_translator->placeholderMismatchKeys() : QStringList();
+}
+
+QVariantMap I18n::catalogParity(const QStringList &englishSourceTexts) const
+{
+    QStringList missing;
+    QStringList placeholderMismatches;
+    if (m_translator != nullptr)
+    {
+        missing = m_translator->missingCatalogEntries(englishSourceTexts);
+        placeholderMismatches = m_translator->placeholderMismatchKeys();
+    }
+
+    QSet<QString> uniqueExpected;
+    for (const QString &sourceText : englishSourceTexts)
+    {
+        if (!sourceText.isEmpty() && !sourceText.startsWith(QLatin1Char('_')))
+            uniqueExpected.insert(sourceText);
+    }
+
+    return {
+        {QStringLiteral("expectedCount"), uniqueExpected.size()},
+        {QStringLiteral("catalogEntryCount"), catalogEntryCount()},
+        {QStringLiteral("missingCount"), missing.size()},
+        {QStringLiteral("missing"), missing},
+        {QStringLiteral("placeholderMismatchCount"), placeholderMismatches.size()},
+        {QStringLiteral("placeholderMismatches"), placeholderMismatches},
+        {QStringLiteral("complete"), missing.isEmpty() && placeholderMismatches.isEmpty()}
+    };
 }

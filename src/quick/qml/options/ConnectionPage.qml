@@ -382,9 +382,9 @@ Flickable {
         target: OptionsController
         function onIpFilterParsed(error, ruleCount) {
             if (error)
-                Snackbar.show(qsTr("Failed to parse the provided IP filter"))
+                NotificationCenter.notify(qsTr("Failed to parse the provided IP filter"), "error")
             else
-                Snackbar.show(qsTr("Successfully parsed the provided IP filter: %1 rules were found.").arg(ruleCount))
+                NotificationCenter.notify(qsTr("Successfully parsed the provided IP filter: %1 rules were found.").arg(ruleCount), "success")
         }
     }
 

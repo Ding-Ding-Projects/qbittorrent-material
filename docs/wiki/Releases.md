@@ -1,8 +1,12 @@
 # Releases and Automation
 
-## One release per push
+## One immutable release per successful run
 
-Every branch push runs the `Build and release every push` workflow on Windows Server 2022. It configures MSVC and Qt, restores vcpkg caches, builds the application, packages NSIS, performs the installed-app smoke test, and creates a uniquely tagged, full GitHub release marked "latest."
+Every branch push and manual dispatch runs the `Build and release every push`
+workflow on Windows Server 2022. It measures the hosted runner, runs the desktop
+policy test, configures MSVC and Qt, restores vcpkg caches, builds the
+application, packages NSIS, performs the installed-app smoke, and creates one
+uniquely tagged full GitHub release marked “latest.”
 
 The dependency restore includes libgit2, which powers the app's private
 workspace repository without requiring `git.exe`. The installed-app launch gate
@@ -15,9 +19,13 @@ Tags follow this form:
 build-<workflow-run-number>-<8-character-commit>
 ```
 
-The installer is uploaded directly as a GitHub Release asset. The workflow intentionally retains no ordinary Actions artifact.
+The tested installer and the bundled Shrimp dumpling · 蝦餃 `har-gow.png` are
+uploaded directly as release assets. The workflow creates no ordinary Actions
+artifact and never fetches the release image from a third party.
 
-GitHub Pages can create a transient internal deployment artifact when `master/docs` changes. The installer workflow's final cleanup step removes completed Actions artifacts after every push, while leaving the tested installer safely attached to its GitHub Release.
+Before publishing, the workflow proves the tag is unused twice. It never
+uploads to an existing release, uses `--clobber`, or recycles a tag. A rerun
+after publication fails safely instead of mutating the release.
 
 ## Pages publishing
 
@@ -25,12 +33,17 @@ GitHub Pages publishes directly from `master/docs`. That keeps the documentation
 
 ## Release confidence gates
 
-1. Configure with the pinned Qt, libgit2, and vcpkg toolchain.
-2. Compile the Release target.
-3. Build exactly one expected NSIS installer.
-4. Hash the package with SHA-256.
-5. Install silently into an isolated directory.
-6. Verify the executable and Qt platform plugin.
-7. Launch offscreen and require it to stay alive.
-8. Uninstall silently.
-9. Publish the exact tested installer.
+1. Measure CPU, memory, and disk on the hosted runner.
+2. Validate desktop catalogs, decoded images, required surfaces, and release
+   policy.
+3. Configure with the pinned Qt, libgit2, and vcpkg toolchain.
+4. Compile the Release target and build exactly one NSIS installer.
+5. Hash and silently install the package in an isolated directory.
+6. Verify the executable, Qt platform plugin, schema 2 persistence, both
+   Workspace crash windows, and strict local Git integrity.
+7. Uninstall silently.
+8. Publish one full release containing the exact installer and bundled PNG.
+
+Any failure before step 8 publishes no release. See
+[Immutable Windows Releases](https://ding-ding-projects.github.io/qbittorrent-material/wiki.html#wiki/features-delivery-windows-releases)
+for the token fallback and complete verification contract.

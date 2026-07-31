@@ -15,6 +15,8 @@
 #include <QObject>
 #include <QQmlEngine>
 #include <QString>
+#include <QVariantList>
+#include <QVariantMap>
 
 class QIcon;
 class QQmlEngine;
@@ -47,6 +49,10 @@ class DesktopIntegration : public QObject
     Q_PROPERTY(bool notificationsEnabled READ isNotificationsEnabled
             WRITE setNotificationsEnabled NOTIFY notificationsEnabledChanged)
     Q_PROPERTY(QString toolTip READ toolTip WRITE setToolTip NOTIFY toolTipChanged)
+    Q_PROPERTY(QVariantList availableEditors READ availableEditors NOTIFY availableEditorsChanged)
+    Q_PROPERTY(QString selectedEditor READ selectedEditor WRITE setSelectedEditor NOTIFY selectedEditorChanged)
+    Q_PROPERTY(QString customEditorPath READ customEditorPath WRITE setCustomEditorPath NOTIFY availableEditorsChanged)
+    Q_PROPERTY(bool externalEditorAvailable READ externalEditorAvailable NOTIFY availableEditorsChanged)
 
 public:
     ~DesktopIntegration() override;
@@ -65,6 +71,15 @@ public:
     [[nodiscard]] QString toolTip() const;
     void setToolTip(const QString &toolTip);
 
+    [[nodiscard]] QVariantList availableEditors() const;
+    [[nodiscard]] QString selectedEditor() const;
+    void setSelectedEditor(const QString &editorId);
+    [[nodiscard]] QString customEditorPath() const;
+    void setCustomEditorPath(const QString &path);
+    [[nodiscard]] bool externalEditorAvailable() const;
+    Q_INVOKABLE void refreshEditors();
+    Q_INVOKABLE bool openInExternalEditor(const QString &path);
+
     /// Show a native desktop / tray notification (no-op if unavailable/disabled).
     Q_INVOKABLE void showNotification(const QString &title, const QString &message) const;
 
@@ -82,6 +97,9 @@ signals:
     void contextMenuRequested();
     /// The user clicked a shown notification balloon.
     void notificationClicked();
+    void availableEditorsChanged();
+    void selectedEditorChanged();
+    void editorLaunchFinished(bool success, const QString &message);
 
 private:
     friend class Application;
@@ -97,4 +115,7 @@ private:
     QSystemTrayIcon *m_trayIcon = nullptr;
     QString m_toolTip;
     bool m_notificationsEnabled = true;
+    QVariantList m_availableEditors;
+    QString m_selectedEditor;
+    QString m_customEditorPath;
 };

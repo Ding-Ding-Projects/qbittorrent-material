@@ -2,7 +2,7 @@
 
 The project website is a dependency-free Material 3 application published directly from the repository's `master/docs` directory at:
 
-<https://codingmachineedge.github.io/qbittorrent-material/>
+<https://ding-ding-projects.github.io/qbittorrent-material/>
 
 It combines the landing page, screenshot gallery, complete technical corpus, and curated wiki in one installable static site. No server, analytics service, runtime package manager, or search API is required.
 
@@ -13,9 +13,12 @@ Canonical content comes from:
 - `README.md`
 - every Markdown and JSON file under `docs`
 - curated guides under `docs/wiki`
+- categorized feature articles under `docs/features`
 
 This includes the complete [Custom Workspace Tabs](WORKSPACE_TABS.md) reference
-and its shorter task-oriented Wiki guide.
+and its shorter task-oriented Wiki guide. The
+[Windows Desktop Features](features/README.md) index links one article per
+cross-app experience, Workspace, appearance, and delivery feature.
 
 Run the deterministic generator after changing any source document:
 
@@ -70,7 +73,12 @@ The exporter writes curated pages, complete references, JSON blueprints rendered
 
 ## Publishing
 
-GitHub Pages uses `master` and `/docs` as its source. This branch-based configuration keeps the published site auditable without a repository-maintained Pages upload workflow. GitHub may create a short-lived internal `github-pages` artifact during deployment; the installer workflow removes completed Actions artifacts at the end of every run, so none are retained.
+GitHub Pages uses `master` and `/docs` as its source. This branch-based
+configuration keeps the published site auditable without a
+repository-maintained Pages upload workflow. GitHub may create a short-lived
+internal `github-pages` artifact during deployment. The installer workflow does
+not create, download, or delete Actions artifacts; release assets go directly
+to the immutable GitHub Release.
 
 The site includes `.nojekyll`, a web manifest, an offline service worker, project-root-aware `404.html`, and linked sitemap metadata. Pages refreshes automatically after `master` changes.
 

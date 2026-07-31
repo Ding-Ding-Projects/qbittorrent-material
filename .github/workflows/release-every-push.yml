@@ -6,13 +6,14 @@ on:
       - "**"
   workflow_dispatch:
 
-# The workflow creates a tag and full (non-prerelease) release for the commit
-# that triggered it. Branch-only filtering above excludes tag pushes, and
-# GITHUB_TOKEN-generated events do not recursively start another ordinary
-# push workflow.
+# One run creates one immutable, full release for the commit that triggered it.
+# Branch filtering excludes tag pushes, so the release tag cannot start a loop.
 permissions:
-  actions: write
   contents: write
+
+concurrency:
+  group: windows-release-${{ github.event_name }}-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
   windows-installer:
@@ -25,15 +26,103 @@ jobs:
 
     steps:
       - name: Check out the pushed commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Measure hosted runner resources
+        shell: pwsh
+        run: |
+          $computer = Get-CimInstance Win32_ComputerSystem
+          $operatingSystem = Get-CimInstance Win32_OperatingSystem
+          $logicalProcessors = [int] $computer.NumberOfLogicalProcessors
+          $memoryGiB = [Math]::Round($computer.TotalPhysicalMemory / 1GB, 2)
+          $freeMemoryGiB = [Math]::Round($operatingSystem.FreePhysicalMemory * 1KB / 1GB, 2)
+
+          Write-Host "Runner image: $env:ImageOS"
+          Write-Host "Logical processors: $logicalProcessors"
+          Write-Host "Physical memory: $memoryGiB GiB ($freeMemoryGiB GiB free)"
+
+          if ($logicalProcessors -lt 2 -or $freeMemoryGiB -lt 2) {
+            throw "The hosted runner is below the measured CPU or memory minimum."
+          }
+
+          $buildRoots = @(
+            [IO.Path]::GetPathRoot($env:GITHUB_WORKSPACE),
+            [IO.Path]::GetPathRoot($env:RUNNER_TEMP)
+          ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique
+          $reportedRoots = @($env:SystemDrive) + $buildRoots | Sort-Object -Unique
+          foreach ($root in $reportedRoots) {
+            $deviceId = $root.TrimEnd('\')
+            $disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$deviceId'"
+            if ($null -eq $disk) {
+              throw "Could not measure runner volume $root."
+            }
+            $diskGiB = [Math]::Round($disk.Size / 1GB, 2)
+            $freeDiskGiB = [Math]::Round($disk.FreeSpace / 1GB, 2)
+            Write-Host "Volume ${root}: $diskGiB GiB ($freeDiskGiB GiB free)"
+            if ($buildRoots -contains $root -and $freeDiskGiB -lt 12) {
+              throw "Build volume $root has less than 12 GiB free."
+            }
+          }
+
+      - name: Prepare an immutable monotonic release identity
+        id: release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.ORG_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          $shortSha = $env:GITHUB_SHA.Substring(0, 8)
+          $tag = "build-$env:GITHUB_RUN_NUMBER-$shortSha"
+          $title = "qBittorrent Material build #$env:GITHUB_RUN_NUMBER ($shortSha)"
+          $buildId = "build.$env:GITHUB_RUN_NUMBER.$shortSha"
+
+          $tagRefs = @(& git ls-remote --tags origin "refs/tags/$tag")
+          $tagLookupExitCode = $LASTEXITCODE
+          if ($tagLookupExitCode -ne 0) {
+            throw "Could not prove release-tag availability (git exit $tagLookupExitCode)."
+          }
+          if ($tagRefs.Count -ne 0) {
+            throw "Immutable release tag already exists: $tag"
+          }
+
+          $releaseJson = gh release list --repo $env:GITHUB_REPOSITORY --limit 1000 --json tagName
+          $releaseLookupExitCode = $LASTEXITCODE
+          if ($releaseLookupExitCode -ne 0) {
+            throw "Could not list releases (gh exit $releaseLookupExitCode)."
+          }
+          $releaseMatches = @(($releaseJson | ConvertFrom-Json) | Where-Object { $_.tagName -eq $tag })
+          if ($releaseMatches.Count -ne 0) {
+            throw "Immutable release already exists: $tag"
+          }
+
+          $immutablePolicyJson = gh api `
+            -H "Accept: application/vnd.github+json" `
+            -H "X-GitHub-Api-Version: 2026-03-10" `
+            "repos/$env:GITHUB_REPOSITORY/immutable-releases"
+          $immutablePolicyExitCode = $LASTEXITCODE
+          if ($immutablePolicyExitCode -ne 0) {
+            throw "Could not verify repository release immutability (gh exit $immutablePolicyExitCode)."
+          }
+          $immutablePolicy = $immutablePolicyJson | ConvertFrom-Json
+          if (-not $immutablePolicy.enabled) {
+            throw "Repository release immutability must be enabled before building."
+          }
+
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "title=$title" >> $env:GITHUB_OUTPUT
+          "QBT_BUILD_ID=$buildId" >> $env:GITHUB_ENV
+          Write-Host "Reserved release identity $tag for $env:GITHUB_SHA."
+
+      - name: Run desktop policy and content-integrity tests
+        shell: pwsh
+        run: ./scripts/test-desktop-policy.ps1
 
       - name: Activate the MSVC 2022 toolchain
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
         with:
           arch: x64
 
       - name: Install Qt
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4
         with:
           version: "6.8.3"
           host: windows
@@ -43,7 +132,7 @@ jobs:
           cache: true
 
       - name: Set up vcpkg and binary caching
-        uses: lukka/run-vcpkg@v11.6
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11.6
         with:
           vcpkgJsonGlob: "**/vcpkg.json"
           runVcpkgInstall: false
@@ -51,15 +140,11 @@ jobs:
       - name: Configure the release build
         shell: pwsh
         run: |
-          $shortSha = $env:GITHUB_SHA.Substring(0, 8)
-          $buildId = "build.$env:GITHUB_RUN_NUMBER.$shortSha"
-          "QBT_BUILD_ID=$buildId" >> $env:GITHUB_ENV
-
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=x64-windows-static-md `
-            "-DQBT_BUILD_ID=$buildId"
+            "-DQBT_BUILD_ID=$env:QBT_BUILD_ID"
 
       - name: Build
         shell: pwsh
@@ -162,7 +247,7 @@ jobs:
 
           $workspaceState = Get-Content -Raw -LiteralPath $workspaceJson | ConvertFrom-Json
           if ($workspaceState.type -ne "qbt-material-workspace" `
-              -or $workspaceState.schemaVersion -ne 1 `
+              -or $workspaceState.schemaVersion -ne 2 `
               -or @($workspaceState.tabs).Count -ne 1) {
             throw "Persisted workspace metadata failed schema validation."
           }
@@ -253,79 +338,89 @@ jobs:
           "Installer: $($installer.Name)"
           "SHA256: $hash"
 
-      - name: Create or update this push's release
+      - name: Publish one immutable non-draft release
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.ORG_TOKEN || secrets.GITHUB_TOKEN }}
           INSTALLER_PATH: ${{ steps.package.outputs.installer }}
           INSTALLER_SHA256: ${{ steps.package.outputs.sha256 }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_TITLE: ${{ steps.release.outputs.title }}
+          DIM_SUM_PATH: resources/dim-sum/har-gow.png
         run: |
-          $shortSha = $env:GITHUB_SHA.Substring(0, 8)
-          $tag = "build-$env:GITHUB_RUN_NUMBER-$shortSha"
-          $title = "qBittorrent Material build #$env:GITHUB_RUN_NUMBER ($shortSha)"
-
-          if (gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null) {
-            gh release upload $tag $env:INSTALLER_PATH `
-              --clobber `
-              --repo $env:GITHUB_REPOSITORY
+          foreach ($requiredPath in @($env:INSTALLER_PATH, $env:DIM_SUM_PATH)) {
+            if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+              throw "Required release asset is missing: $requiredPath"
+            }
           }
-          else {
-            $notes = @"
-          Automated Windows release for commit ``$env:GITHUB_SHA``.
+
+          $tagRefs = @(& git ls-remote --tags origin "refs/tags/$env:RELEASE_TAG")
+          $tagLookupExitCode = $LASTEXITCODE
+          if ($tagLookupExitCode -ne 0) {
+            throw "Could not re-prove release-tag availability (git exit $tagLookupExitCode)."
+          }
+          if ($tagRefs.Count -ne 0) {
+            throw "Refusing to overwrite immutable release tag $env:RELEASE_TAG."
+          }
+
+          $releaseJson = gh release list --repo $env:GITHUB_REPOSITORY --limit 1000 --json tagName
+          $releaseLookupExitCode = $LASTEXITCODE
+          if ($releaseLookupExitCode -ne 0) {
+            throw "Could not list releases (gh exit $releaseLookupExitCode)."
+          }
+          $releaseMatches = @(($releaseJson | ConvertFrom-Json) | Where-Object {
+            $_.tagName -eq $env:RELEASE_TAG
+          })
+          if ($releaseMatches.Count -ne 0) {
+            throw "Refusing to mutate existing release $env:RELEASE_TAG."
+          }
+
+          $notesPath = Join-Path $env:RUNNER_TEMP "release-notes.md"
+          @"
+          Automated Windows desktop release for commit ``$env:GITHUB_SHA``.
 
           - Build: ``$env:QBT_BUILD_ID``
           - Branch: ``$env:GITHUB_REF_NAME``
           - Installer SHA256: ``$env:INSTALLER_SHA256``
-          "@
+          - Dim-sum photo: Shrimp dumpling · 蝦餃 (``har-gow.png``)
 
-            gh release create $tag $env:INSTALLER_PATH `
+          The desktop policy checks, release build, silent installation, offscreen
+          launch, workspace recovery checks, Git integrity check, and silent
+          uninstall all completed before this release was published.
+          "@ | Set-Content -LiteralPath $notesPath -Encoding utf8NoBOM
+
+          gh release create $env:RELEASE_TAG `
+            $env:INSTALLER_PATH `
+            $env:DIM_SUM_PATH `
+            --repo $env:GITHUB_REPOSITORY `
+            --target $env:GITHUB_SHA `
+            --title $env:RELEASE_TITLE `
+            --notes-file $notesPath `
+            --latest
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub did not create release $env:RELEASE_TAG."
+          }
+
+          $release = $null
+          foreach ($attempt in 1..6) {
+            $release = gh release view $env:RELEASE_TAG `
               --repo $env:GITHUB_REPOSITORY `
-              --target $env:GITHUB_SHA `
-              --title $title `
-              --notes $notes `
-              --latest
-          }
-
-      - name: Remove completed Actions artifacts
-        if: always()
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $artifacts = @()
-          $page = 1
-          do {
-            $response = gh api `
-              "repos/$env:GITHUB_REPOSITORY/actions/artifacts?per_page=100&page=$page" |
-              ConvertFrom-Json
-            $batch = @($response.artifacts)
-            $artifacts += $batch
-            $page++
-          } while ($batch.Count -eq 100)
-
-          foreach ($artifact in $artifacts) {
-            $runStatus = gh api `
-              "repos/$env:GITHUB_REPOSITORY/actions/runs/$($artifact.workflow_run.id)" `
-              --jq '.status'
-            if ($runStatus -ne "completed") {
-              Write-Host "Leaving active artifact $($artifact.name) ($($artifact.id)) in place."
-              continue
+              --json isDraft,isImmutable,isPrerelease,tagName,targetCommitish,assets | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not verify release $env:RELEASE_TAG."
             }
-            gh api --method DELETE `
-              "repos/$env:GITHUB_REPOSITORY/actions/artifacts/$($artifact.id)"
-            Write-Host "Deleted completed artifact $($artifact.name) ($($artifact.id))."
+            if ($release.isImmutable) { break }
+            Write-Host "Waiting for GitHub release immutability attestation ($attempt/6)."
+            Start-Sleep -Seconds 5
+          }
+          $assetNames = @($release.assets | ForEach-Object { $_.name })
+          $installerName = Split-Path -Leaf $env:INSTALLER_PATH
+          if ($release.isDraft -or -not $release.isImmutable -or $release.isPrerelease `
+              -or $release.tagName -ne $env:RELEASE_TAG `
+              -or $release.targetCommitish -ne $env:GITHUB_SHA `
+              -or $assetNames -notcontains $installerName `
+              -or $assetNames -notcontains "har-gow.png") {
+            throw "Published release failed immutability, status, or asset verification."
           }
 
-          $remaining = gh api `
-            "repos/$env:GITHUB_REPOSITORY/actions/artifacts?per_page=100" |
-            ConvertFrom-Json
-          $completedRemaining = @($remaining.artifacts | Where-Object {
-            $status = gh api `
-              "repos/$env:GITHUB_REPOSITORY/actions/runs/$($_.workflow_run.id)" `
-              --jq '.status'
-            $status -eq "completed"
-          })
-          if ($completedRemaining.Count -ne 0) {
-            throw "Completed Actions artifacts remain after cleanup: $($completedRemaining.Count)."
-          }
-          Write-Host "No completed Actions artifacts are retained."
+          Write-Host "Verified full release $env:RELEASE_TAG with installer and har-gow.png."

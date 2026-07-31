@@ -26,6 +26,7 @@ The completed desktop shell uses a 64px command bar, persistent 248px navigation
 
 - [Getting started](Getting-Started.md) — install a release, build locally, and launch the app.
 - [Interface tour](Interface-Tour.md) — learn the navigation, filters, transfer table, properties, and status areas.
+- [Windows desktop features](Desktop-Features.md) — review language, notifications, dim sum, changelog, tab discovery, appearance, history, editors, and delivery.
 - [Workspace tabs](Workspace-Tabs.md) — create persistent pages, customize typography, and move snapshots or complete local Git history.
 - [Search, filters, and portability](Search-Import-Export.md) — use regex search, the filter builder, and JSON/Markdown import and export.
 - [Releases and automation](Releases.md) — understand the installer pipeline and per-push releases.

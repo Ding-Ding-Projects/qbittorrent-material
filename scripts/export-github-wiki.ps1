@@ -59,6 +59,7 @@ function Convert-WikiLinks([string] $content) {
         'wiki/Troubleshooting.md' = 'Troubleshooting'
         'Getting-Started.md' = 'Getting-Started'
         'Interface-Tour.md' = 'Interface-Tour'
+        'Desktop-Features.md' = 'Desktop-Features'
         'Workspace-Tabs.md' = 'Workspace-Tabs'
         'Search-Import-Export.md' = 'Search-Import-Export'
         'Releases.md' = 'Releases'
@@ -82,7 +83,7 @@ foreach ($page in $canonicalPages) {
 
 ## Searchable documentation site
 
-Open the [full Material documentation experience](https://codingmachineedge.github.io/qbittorrent-material/) for regex search, filter building, local imports, portable exports, dark mode, and the complete embedded corpus.
+Open the [full Material documentation experience](https://ding-ding-projects.github.io/qbittorrent-material/) for regex search, filter building, local imports, portable exports, dark mode, and the complete embedded corpus.
 "@
     }
     Write-Utf8 (Join-Path $wikiRoot $page.Name) $content
@@ -128,6 +129,7 @@ $sidebar = @'
 - [Home](Home)
 - [Getting started](Getting-Started)
 - [Interface tour](Interface-Tour)
+- [Windows desktop features](Desktop-Features)
 - [Workspace tabs](Workspace-Tabs)
 - [Search and portability](Search-Import-Export)
 - [FAQ](FAQ)
@@ -154,12 +156,12 @@ $sidebar = @'
 - [File plan](Reference-File-Plan)
 - [Screen blueprints](Reference-Screen-Blueprints)
 
-[Searchable Pages site](https://codingmachineedge.github.io/qbittorrent-material/)
+[Searchable Pages site](https://ding-ding-projects.github.io/qbittorrent-material/)
 '@
 Write-Utf8 (Join-Path $wikiRoot "_Sidebar.md") $sidebar
 
 $footer = @'
-qBittorrent Material · [Documentation site](https://codingmachineedge.github.io/qbittorrent-material/) · [Source](https://github.com/codingmachineedge/qbittorrent-material) · GPL-3.0-or-later
+qBittorrent Material · [Documentation site](https://ding-ding-projects.github.io/qbittorrent-material/) · [Source](https://github.com/Ding-Ding-Projects/qbittorrent-material) · GPL-3.0-or-later
 '@
 Write-Utf8 (Join-Path $wikiRoot "_Footer.md") $footer
 

@@ -13,8 +13,13 @@
 #include "desktopintegration.h"
 
 #include <QApplication>
+#include <QDir>
 #include <QIcon>
+#include <QFileInfo>
+#include <QProcess>
+#include <QStandardPaths>
 #include <QSystemTrayIcon>
+#include <QUrl>
 
 #include "base/logging.h"
 #include "app/application.h"
@@ -30,6 +35,8 @@ using namespace Qt::StringLiterals;
 namespace
 {
     const QString kNotificationsKey = u"Preferences/General/NotificationEnabled"_qs;
+    const QString kSelectedEditorKey = u"Preferences/ExternalEditor/Selected"_qs;
+    const QString kCustomEditorKey = u"Preferences/ExternalEditor/CustomPath"_qs;
 
     QString trayIconResource(const ThemeManager::TrayIconStyle style)
     {
@@ -54,7 +61,11 @@ DesktopIntegration::DesktopIntegration(QObject *parent)
 
 #ifdef QBT_HAS_PREFERENCES
     m_notificationsEnabled = Preferences::instance()->value(kNotificationsKey, true).toBool();
+    m_selectedEditor = Preferences::instance()->value(kSelectedEditorKey).toString();
+    m_customEditorPath = Preferences::instance()->value(kCustomEditorKey).toString();
 #endif
+
+    refreshEditors();
 
     // OptionsController commits this setting through ThemeManager on Apply.
     // Updating the native icon here keeps the actual system tray in sync with
@@ -199,6 +210,144 @@ void DesktopIntegration::setToolTip(const QString &toolTip)
         m_trayIcon->setToolTip(toolTip.isEmpty() ? u"qBittorrent"_qs : toolTip);
     qCDebug(lcUi) << "Tray tooltip updated";
     emit toolTipChanged();
+}
+
+QVariantList DesktopIntegration::availableEditors() const
+{
+    return m_availableEditors;
+}
+
+QString DesktopIntegration::selectedEditor() const
+{
+    return m_selectedEditor;
+}
+
+void DesktopIntegration::setSelectedEditor(const QString &editorId)
+{
+    QString resolved = editorId.trimmed();
+    bool known = false;
+    for (const QVariant &value : m_availableEditors)
+    {
+        if (value.toMap().value(u"id"_qs).toString() == resolved)
+        {
+            known = true;
+            break;
+        }
+    }
+    if (!known)
+        resolved.clear();
+    if (m_selectedEditor == resolved)
+        return;
+    m_selectedEditor = resolved;
+#ifdef QBT_HAS_PREFERENCES
+    Preferences::instance()->setValue(kSelectedEditorKey, resolved);
+    Preferences::instance()->apply();
+#endif
+    emit selectedEditorChanged();
+}
+
+QString DesktopIntegration::customEditorPath() const
+{
+    return m_customEditorPath;
+}
+
+void DesktopIntegration::setCustomEditorPath(const QString &path)
+{
+    const QUrl url(path.trimmed());
+    const QString normalized = QDir::toNativeSeparators(url.isLocalFile()
+        ? url.toLocalFile() : path.trimmed());
+    if (m_customEditorPath == normalized)
+        return;
+    m_customEditorPath = normalized;
+#ifdef QBT_HAS_PREFERENCES
+    Preferences::instance()->setValue(kCustomEditorKey, normalized);
+    Preferences::instance()->apply();
+#endif
+    refreshEditors();
+}
+
+bool DesktopIntegration::externalEditorAvailable() const
+{
+    return !m_availableEditors.isEmpty();
+}
+
+void DesktopIntegration::refreshEditors()
+{
+    struct Candidate { const char *id; const char *name; const char *binary; };
+    static constexpr Candidate candidates[] = {
+        {"vscode", "Visual Studio Code", "code"},
+        {"vscodium", "VSCodium", "codium"},
+        {"cursor", "Cursor", "cursor"},
+        {"sublime", "Sublime Text", "subl"},
+        {"notepadpp", "Notepad++", "notepad++"},
+        {"notepad", "Notepad", "notepad"}
+    };
+
+    QVariantList editors;
+    for (const Candidate &candidate : candidates)
+    {
+        const QString executable = QStandardPaths::findExecutable(QString::fromLatin1(candidate.binary));
+        if (executable.isEmpty())
+            continue;
+        editors.append(QVariantMap {{u"id"_qs, QString::fromLatin1(candidate.id)},
+            {u"name"_qs, QString::fromLatin1(candidate.name)}, {u"path"_qs, executable}});
+    }
+    if (QFileInfo(m_customEditorPath).isExecutable())
+    {
+        editors.append(QVariantMap {{u"id"_qs, u"custom"_qs}, {u"name"_qs, tr("Custom editor")},
+            {u"path"_qs, m_customEditorPath}});
+    }
+
+    m_availableEditors = editors;
+    bool selectedExists = false;
+    for (const QVariant &value : m_availableEditors)
+        selectedExists = selectedExists || (value.toMap().value(u"id"_qs).toString() == m_selectedEditor);
+    if (!selectedExists)
+        m_selectedEditor = m_availableEditors.isEmpty() ? QString() : m_availableEditors.first().toMap().value(u"id"_qs).toString();
+    emit availableEditorsChanged();
+    emit selectedEditorChanged();
+}
+
+bool DesktopIntegration::openInExternalEditor(const QString &path)
+{
+    QString localPath = path.trimmed();
+    const QUrl asUrl(localPath);
+    if (asUrl.isLocalFile())
+        localPath = asUrl.toLocalFile();
+    const QFileInfo target(localPath);
+    if (!target.exists())
+    {
+        emit editorLaunchFinished(false, tr("The selected file or folder does not exist: %1").arg(localPath));
+        return false;
+    }
+
+    QVariantMap editor;
+    for (const QVariant &value : m_availableEditors)
+    {
+        const QVariantMap candidate = value.toMap();
+        if (candidate.value(u"id"_qs).toString() == m_selectedEditor)
+        {
+            editor = candidate;
+            break;
+        }
+    }
+    if (editor.isEmpty())
+    {
+        emit editorLaunchFinished(false, tr("No external editor is configured. Choose one in Settings."));
+        return false;
+    }
+    if (target.isDir() && editor.value(u"id"_qs).toString() == u"notepad"_qs)
+    {
+        emit editorLaunchFinished(false, tr("Notepad cannot open a project folder. Choose a project-capable editor."));
+        return false;
+    }
+
+    const QString executable = editor.value(u"path"_qs).toString();
+    const bool started = QProcess::startDetached(executable, {QDir::toNativeSeparators(target.absoluteFilePath())});
+    emit editorLaunchFinished(started,
+        started ? tr("Opened %1 in %2.").arg(target.fileName(), editor.value(u"name"_qs).toString())
+                : tr("Could not start %1. Check the configured executable.").arg(editor.value(u"name"_qs).toString()));
+    return started;
 }
 
 void DesktopIntegration::showNotification(const QString &title, const QString &message) const

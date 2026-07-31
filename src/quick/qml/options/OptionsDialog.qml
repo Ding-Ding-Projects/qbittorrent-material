@@ -68,6 +68,38 @@ Dialog {
         { icon: Icons.language,         label: qsTr("Web UI") },
         { icon: Icons.settings_suggest, label: qsTr("Advanced") }
     ]
+    readonly property var pageSearchCorpus: [
+        qsTr("Behavior language English Cantonese bilingual funny level warnings errors theme tray startup confirmation"),
+        qsTr("Downloads save path incomplete files email notification watched folders external program"),
+        qsTr("Connection port proxy IP filter protocol limits UPnP interface address"),
+        qsTr("Speed upload download rate limits scheduler alternative limits bandwidth"),
+        qsTr("BitTorrent privacy encryption queue seeding ratio DHT PeX trackers"),
+        qsTr("Search plugins Python engine results"),
+        qsTr("RSS feeds refresh interval auto download rules"),
+        qsTr("Web UI API key HTTPS authentication address port dynamic DNS"),
+        qsTr("Advanced libtorrent cache network disk Python recheck")
+    ]
+    property var tabSearchState: ["", "", "", "", "", "", "", "", ""]
+
+    function searchMatches(index) {
+        var query = optionsSearch.text.trim()
+        if (!query.length)
+            return false
+        var text = pages[index].label + " " + pageSearchCorpus[index]
+        if (optionsSearch.regexEnabled) {
+            var evaluated = WorkspaceManager.evaluateRegularExpression(query,
+                optionsSearch.regexFlags, text)
+            return evaluated.valid && evaluated.count > 0
+        }
+        return text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase()) >= 0
+    }
+
+    function matchingPageIndexes() {
+        var result = []
+        for (var i = 0; i < pages.length; ++i)
+            if (searchMatches(i)) result.push(i)
+        return result
+    }
 
     function open() {
         Log.info("ui", "OptionsDialog opening; reloading staged settings")
@@ -163,6 +195,7 @@ Dialog {
                     Log.debug("ui", "Options page -> " + currentIndex
                               + " (" + (root.pages[currentIndex] ? root.pages[currentIndex].label : "?") + ")")
                     Preferences.setValue("GUI/Preferences/LastViewedPage", currentIndex)
+                    optionsSearch.text = root.tabSearchState[currentIndex] || ""
                 }
 
                 delegate: ItemDelegate {
@@ -212,25 +245,74 @@ Dialog {
             }
         }
 
-        // ---- Page stack --------------------------------------------------------
-        StackLayout {
-            id: stack
+        // ---- Searchable page stack --------------------------------------------
+        ColumnLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            currentIndex: rail.currentIndex
+            spacing: Spacing.sm
 
-            BehaviorPage {}
-            DownloadsPage {}
-            ConnectionPage {}
-            SpeedPage {}
-            BitTorrentPage {}
+            FilterTextField {
+                id: optionsSearch
+                Layout.fillWidth: true
+                Layout.leftMargin: Spacing.lg
+                Layout.rightMargin: Spacing.lg
+                Layout.topMargin: Spacing.md
+                placeholder: qsTr("Search %1 settings…").arg(root.pages[rail.currentIndex].label)
+                builderTitle: qsTr("%1 Settings Regex Builder").arg(root.pages[rail.currentIndex].label)
+                builderSampleText: root.pageSearchCorpus[rail.currentIndex]
+                onTextChanged: {
+                    var next = root.tabSearchState.slice(0)
+                    next[rail.currentIndex] = text
+                    root.tabSearchState = next
+                }
+            }
+
+            Flow {
+                Layout.fillWidth: true
+                Layout.leftMargin: Spacing.lg
+                Layout.rightMargin: Spacing.lg
+                spacing: Spacing.xs
+                visible: optionsSearch.text.trim().length > 0
+
+                Label {
+                    text: root.matchingPageIndexes().length === 0
+                        ? qsTr("No option labels or descriptions match on any tab.")
+                        : qsTr("Matches on:")
+                    color: root.matchingPageIndexes().length === 0
+                        ? Theme.color("error") : Theme.color("onSurfaceVariant")
+                    font: Typography.bodySmall
+                }
+                Repeater {
+                    model: root.matchingPageIndexes()
+                    delegate: Button {
+                        required property int modelData
+                        text: modelData === rail.currentIndex
+                            ? root.pages[modelData].label
+                            : qsTr("%1 (different tab)").arg(root.pages[modelData].label)
+                        flat: true
+                        onClicked: rail.currentIndex = modelData
+                    }
+                }
+            }
+
+            StackLayout {
+                id: stack
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                currentIndex: rail.currentIndex
+
+                BehaviorPage {}
+                DownloadsPage {}
+                ConnectionPage {}
+                SpeedPage {}
+                BitTorrentPage {}
 
             // Search — its settings are minimal in this build (the Python
             // executable path lives on the Advanced page); shown as an
             // informational placeholder so the rail order matches the legacy
             // Tabs enum. The full Search options screen is owned by the search
             // feature and can replace this page.
-            Flickable {
+                Flickable {
                 contentHeight: searchCol.implicitHeight + (2 * Spacing.lg)
                 clip: true
                 ColumnLayout {
@@ -255,9 +337,10 @@ Dialog {
                 ScrollBar.vertical: ScrollBar {}
             }
 
-            RSSPage {}
-            WebUIPage {}
-            AdvancedPage {}
+                RSSPage {}
+                WebUIPage {}
+                AdvancedPage {}
+            }
         }
     }
 

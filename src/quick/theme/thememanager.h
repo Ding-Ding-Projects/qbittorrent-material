@@ -46,6 +46,12 @@ class ThemeManager final : public QObject
     Q_PROPERTY(UiStyle uiStyle READ uiStyle WRITE setUiStyle NOTIFY themeChanged)
     Q_PROPERTY(QString styleName READ styleName NOTIFY themeChanged)
     Q_PROPERTY(QString styleLetter READ styleLetter NOTIFY themeChanged)
+    Q_PROPERTY(qreal densityScale READ densityScale WRITE setDensityScale NOTIFY appearanceChanged)
+    Q_PROPERTY(QColor seedColor READ seedColor WRITE setSeedColor NOTIFY appearanceChanged)
+    Q_PROPERTY(QString uiFontFamily READ uiFontFamily WRITE setUiFontFamily NOTIFY appearanceChanged)
+    Q_PROPERTY(qreal uiFontScale READ uiFontScale WRITE setUiFontScale NOTIFY appearanceChanged)
+    Q_PROPERTY(int uiFontWeight READ uiFontWeight WRITE setUiFontWeight NOTIFY appearanceChanged)
+    Q_PROPERTY(bool reducedMotion READ reducedMotion WRITE setReducedMotion NOTIFY appearanceChanged)
 
 public:
     /// Preserved verbatim from legacy qBittorrent (setting `Appearance/ColorScheme`).
@@ -93,6 +99,22 @@ public:
     /// Short key of the active style ("A" / "B" / "C").
     QString styleLetter() const;
 
+    qreal densityScale() const;
+    void setDensityScale(qreal value);
+    QColor seedColor() const;
+    void setSeedColor(const QColor &value);
+    QString uiFontFamily() const;
+    void setUiFontFamily(const QString &value);
+    qreal uiFontScale() const;
+    void setUiFontScale(qreal value);
+    int uiFontWeight() const;
+    void setUiFontWeight(int value);
+    bool reducedMotion() const;
+    void setReducedMotion(bool value);
+
+    Q_INVOKABLE QStringList installedFontFamilies() const;
+    Q_INVOKABLE void resetAppearance();
+
     /// True when the effective scheme (resolving `System`) is dark.
     bool isDark() const;
 
@@ -116,6 +138,7 @@ public:
 signals:
     void themeChanged();
     void trayIconStyleChanged();
+    void appearanceChanged();
 
 private:
     explicit ThemeManager(QObject *parent = nullptr);
@@ -123,6 +146,8 @@ private:
     void buildPalette();
     void buildStylePalette();
     void buildNamedIdMap();
+    void applySeedColor();
+    void persistAppearance() const;
     void onSystemColorSchemeChanged();
 
     static ThemeManager *m_instance;
@@ -130,6 +155,12 @@ private:
     ColorScheme m_colorScheme = System;
     TrayIconStyle m_trayIconStyle = Normal;
     UiStyle m_uiStyle = TonalRail;
+    qreal m_densityScale = 1.0;
+    QColor m_seedColor;
+    QString m_uiFontFamily;
+    qreal m_uiFontScale = 1.0;
+    int m_uiFontWeight = 400;
+    bool m_reducedMotion = false;
 
     QHash<QString, QColor> m_lightPalette;   ///< role/id -> light color (active style)
     QHash<QString, QColor> m_darkPalette;    ///< role/id -> dark color (active style)

@@ -56,23 +56,23 @@ Dialog {
     Connections {
         target: SearchController
         function onPluginInstalled(name) {
-            Snackbar.show(qsTr("Search plugin \"%1\" installed").arg(SearchController.pluginFullName(name)))
+            NotificationCenter.notify(qsTr("Search plugin \"%1\" installed").arg(SearchController.pluginFullName(name)), "success")
         }
         function onPluginInstallFailed(name, reason) {
-            Snackbar.show(qsTr("Couldn't install \"%1\" search engine plugin. %2").arg(name).arg(reason))
+            NotificationCenter.notify(qsTr("Couldn't install \"%1\" search engine plugin. %2").arg(name).arg(reason), "error")
         }
         function onPluginUpdated(name) {
-            Snackbar.show(qsTr("Search plugin \"%1\" updated").arg(SearchController.pluginFullName(name)))
+            NotificationCenter.notify(qsTr("Search plugin \"%1\" updated").arg(SearchController.pluginFullName(name)), "success")
         }
         function onPluginUpdateFailed(name, reason) {
-            Snackbar.show(qsTr("Couldn't update \"%1\" search engine plugin. %2").arg(name).arg(reason))
+            NotificationCenter.notify(qsTr("Couldn't update \"%1\" search engine plugin. %2").arg(name).arg(reason), "error")
         }
         function onPluginUpdatesChecked(hasUpdates) {
             if (!hasUpdates)
-                Snackbar.show(qsTr("All your plugins are already up to date."))
+                NotificationCenter.notify(qsTr("All your plugins are already up to date."), "info")
         }
         function onPluginUpdateCheckFailed(reason) {
-            Snackbar.show(qsTr("Sorry, couldn't check for plugin updates. %1").arg(reason))
+            NotificationCenter.notify(qsTr("Sorry, couldn't check for plugin updates. %1").arg(reason), "error")
         }
     }
 

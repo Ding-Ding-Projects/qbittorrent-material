@@ -35,8 +35,15 @@
 
 namespace
 {
-    constexpr int SchemaVersion = 1;
+    constexpr int SchemaVersion = 2;
+    constexpr int MinimumSchemaVersion = 1;
     constexpr int MaximumTabs = 100;
+    constexpr int MaximumGroups = 32;
+    constexpr qsizetype MaximumPatternCharacters = 4096;
+    constexpr qsizetype MaximumSampleCharacters = 64 * 1024;
+    constexpr int MaximumRegexMatches = 200;
+    const QString RegexSafetyPrefix = QStringLiteral(
+        "(*LIMIT_MATCH=100000)(*LIMIT_DEPTH=1000)(?:");
     constexpr qsizetype MaximumContentCharacters = 4 * 1024 * 1024;
     constexpr qint64 MaximumWorkspaceBytes = 32LL * 1024 * 1024;
     constexpr qint64 MaximumRepositoryBytes = 256LL * 1024 * 1024;
@@ -138,6 +145,12 @@ QVariant WorkspaceManager::data(const QModelIndex &index, const int role) const
     case BoldRole: return tab.bold;
     case ItalicRole: return tab.italic;
     case FontColorRole: return tab.fontColor;
+    case PinnedRole: return tab.pinned;
+    case GroupIdRole: return tab.groupId;
+    case GroupNameRole: return groupName(tab.groupId);
+    case GroupColorRole: return groupColor(tab.groupId);
+    case GroupCollapsedRole: return groupCollapsed(tab.groupId);
+    case AppearanceRole: return tab.appearance;
     case CreatedAtRole: return isoDate(tab.createdAt);
     case UpdatedAtRole: return isoDate(tab.updatedAt);
     default: return {};
@@ -156,6 +169,12 @@ QHash<int, QByteArray> WorkspaceManager::roleNames() const
         {BoldRole, "bold"},
         {ItalicRole, "italic"},
         {FontColorRole, "fontColor"},
+        {PinnedRole, "pinned"},
+        {GroupIdRole, "groupId"},
+        {GroupNameRole, "groupName"},
+        {GroupColorRole, "groupColor"},
+        {GroupCollapsedRole, "groupCollapsed"},
+        {AppearanceRole, "appearance"},
         {CreatedAtRole, "createdAt"},
         {UpdatedAtRole, "updatedAt"}
     };
@@ -182,6 +201,12 @@ void WorkspaceManager::setAppDisplayName(const QString &name)
 int WorkspaceManager::count() const
 {
     return m_tabs.size();
+}
+
+int WorkspaceManager::pinnedCount() const
+{
+    return static_cast<int>(std::count_if(m_tabs.cbegin(), m_tabs.cend(),
+        [](const Tab &tab) { return tab.pinned; }));
 }
 
 int WorkspaceManager::activeIndex() const
@@ -236,6 +261,38 @@ bool WorkspaceManager::writable() const
     return !m_initializationBlocked;
 }
 
+QVariantList WorkspaceManager::tabItems() const
+{
+    QVariantList result;
+    result.reserve(m_tabs.size());
+    for (int i = 0; i < m_tabs.size(); ++i)
+    {
+        QVariantMap item = tabMap(m_tabs.at(i));
+        item.insert(QStringLiteral("index"), i);
+        result.push_back(item);
+    }
+    return result;
+}
+
+QVariantList WorkspaceManager::groups() const
+{
+    QVariantList result;
+    result.reserve(m_groups.size());
+    for (const Group &group : m_groups)
+        result.push_back(groupMap(group));
+    return result;
+}
+
+QVariantMap WorkspaceManager::globalAppearance() const
+{
+    return m_globalAppearance;
+}
+
+QVariantList WorkspaceManager::appearancePresets() const
+{
+    return m_appearancePresets;
+}
+
 bool WorkspaceManager::requireWritable()
 {
     if (writable())
@@ -282,6 +339,7 @@ QString WorkspaceManager::createTab(const QString &name)
     m_tabs.push_back(tab);
     endInsertRows();
     emit countChanged();
+    emit tabsChanged();
     setActiveIndex(row);
     scheduleSave(QStringLiteral("workspace: create tab"));
     return tab.id;
@@ -302,6 +360,7 @@ int WorkspaceManager::duplicateTab(const int index)
     m_tabs.insert(destination, copy);
     endInsertRows();
     emit countChanged();
+    emit tabsChanged();
     setActiveIndex(destination);
     scheduleSave(QStringLiteral("workspace: duplicate tab"));
     return destination;
@@ -313,9 +372,22 @@ bool WorkspaceManager::closeTab(const int index)
         return false;
     if (index < 0 || index >= m_tabs.size())
         return false;
+    if (m_dirty)
+    {
+        QString error;
+        if (!saveNow(QStringLiteral("workspace: checkpoint before close"), &error))
+        {
+            emit operationFinished(false,
+                tr("The tab was not closed because its latest edits could not be checkpointed: %1")
+                    .arg(error), {});
+            return false;
+        }
+    }
+    const QSet<QString> previouslyNonEmpty = nonEmptyGroupIds();
     beginRemoveRows({}, index, index);
     m_tabs.removeAt(index);
     endRemoveRows();
+    pruneNewlyEmptyGroups(previouslyNonEmpty);
     emit countChanged();
 
     int next = m_activeIndex;
@@ -327,6 +399,7 @@ bool WorkspaceManager::closeTab(const int index)
         next = qMin(index, m_tabs.size() - 1);
     m_activeIndex = next;
     emit activeIndexChanged();
+    emit tabsChanged();
     scheduleSave(QStringLiteral("workspace: close tab"));
     return true;
 }
@@ -337,13 +410,35 @@ bool WorkspaceManager::closeOtherTabs(const int index)
         return false;
     if (index < 0 || index >= m_tabs.size())
         return false;
-    const Tab retained = m_tabs.at(index);
+    if (m_dirty)
+    {
+        QString error;
+        if (!saveNow(QStringLiteral("workspace: checkpoint before close others"), &error))
+        {
+            emit operationFinished(false,
+                tr("Other tabs were not closed because current edits could not be checkpointed: %1")
+                    .arg(error), {});
+            return false;
+        }
+    }
+    const QSet<QString> previouslyNonEmpty = nonEmptyGroupIds();
+    const QString retainedId = m_tabs.at(index).id;
+    QVector<Tab> retained;
+    retained.reserve(pinnedCount() + 1);
+    for (const Tab &tab : std::as_const(m_tabs))
+    {
+        if (tab.pinned || tab.id == retainedId)
+            retained.push_back(tab);
+    }
     beginResetModel();
-    m_tabs = {retained};
-    m_activeIndex = 0;
+    m_tabs = std::move(retained);
+    normalizePinnedOrder();
+    m_activeIndex = indexOfTab(retainedId);
     endResetModel();
+    pruneNewlyEmptyGroups(previouslyNonEmpty);
     emit countChanged();
     emit activeIndexChanged();
+    emit tabsChanged();
     scheduleSave(QStringLiteral("workspace: close other tabs"));
     return true;
 }
@@ -353,6 +448,10 @@ bool WorkspaceManager::moveTab(const int from, const int to)
     if (!requireWritable())
         return false;
     if (from < 0 || from >= m_tabs.size() || to < 0 || to >= m_tabs.size() || from == to)
+        return false;
+    // Pinning defines a protected, stable region. Reordering cannot silently
+    // pin or unpin a tab; callers use setTabPinned() for that explicit action.
+    if (m_tabs.at(from).pinned != m_tabs.at(to).pinned)
         return false;
     const int destinationChild = (to > from) ? to + 1 : to;
     if (!beginMoveRows({}, from, from, {}, destinationChild))
@@ -366,8 +465,147 @@ bool WorkspaceManager::moveTab(const int from, const int to)
     else if (from > m_activeIndex && to <= m_activeIndex)
         ++m_activeIndex;
     emit activeIndexChanged();
+    emit tabsChanged();
     scheduleSave(QStringLiteral("workspace: reorder tabs"));
     return true;
+}
+
+bool WorkspaceManager::setTabPinned(const int index, const bool pinned)
+{
+    if (!requireWritable() || index < 0 || index >= m_tabs.size())
+        return false;
+    if (m_tabs.at(index).pinned == pinned)
+        return true;
+
+    const QString activeId = activeTabId();
+    beginResetModel();
+    Tab tab = m_tabs.takeAt(index);
+    tab.pinned = pinned;
+    tab.updatedAt = QDateTime::currentDateTimeUtc();
+    const int destination = pinned ? pinnedCount() : pinnedCount();
+    m_tabs.insert(qBound(0, destination, m_tabs.size()), std::move(tab));
+    normalizePinnedOrder();
+    m_activeIndex = indexOfTab(activeId);
+    endResetModel();
+    emit activeIndexChanged();
+    emit tabsChanged();
+    scheduleSave(pinned ? QStringLiteral("workspace: pin tab")
+                        : QStringLiteral("workspace: unpin tab"));
+    return true;
+}
+
+bool WorkspaceManager::assignTabToGroup(const int index, const QString &groupId)
+{
+    if (!requireWritable() || index < 0 || index >= m_tabs.size())
+        return false;
+    const QString normalizedId = groupId.trimmed();
+    if (!normalizedId.isEmpty() && indexOfGroup(normalizedId) < 0)
+        return false;
+    Tab &tab = m_tabs[index];
+    if (tab.groupId == normalizedId)
+        return true;
+    tab.groupId = normalizedId;
+    tab.updatedAt = QDateTime::currentDateTimeUtc();
+    emit dataChanged(this->index(index), this->index(index),
+        {GroupIdRole, GroupNameRole, GroupColorRole, GroupCollapsedRole, UpdatedAtRole});
+    emit tabsChanged();
+    scheduleSave(QStringLiteral("workspace: move tab to group"));
+    return true;
+}
+
+QString WorkspaceManager::createGroup(const QString &name, const QString &color)
+{
+    if (!requireWritable() || m_groups.size() >= MaximumGroups)
+        return {};
+    const QColor parsedColor(color.isEmpty() ? QStringLiteral("#6750A4") : color);
+    if (!parsedColor.isValid())
+        return {};
+    Group group;
+    group.id = newTabId();
+    group.name = normalizedName(name, 80, tr("New group"));
+    group.color = parsedColor.name(QColor::HexArgb).toUpper();
+    m_groups.push_back(group);
+    emit groupsChanged();
+    scheduleSave(QStringLiteral("workspace: create tab group"));
+    return group.id;
+}
+
+bool WorkspaceManager::updateGroup(const QString &groupId, const QString &name,
+    const QString &color)
+{
+    if (!requireWritable())
+        return false;
+    const int row = indexOfGroup(groupId);
+    const QColor parsedColor(color);
+    if (row < 0 || !parsedColor.isValid())
+        return false;
+    Group &group = m_groups[row];
+    group.name = normalizedName(name, 80, tr("Untitled group"));
+    group.color = parsedColor.name(QColor::HexArgb).toUpper();
+    emit groupsChanged();
+    if (!m_tabs.isEmpty())
+        emit dataChanged(index(0), index(m_tabs.size() - 1),
+            {GroupNameRole, GroupColorRole});
+    emit tabsChanged();
+    scheduleSave(QStringLiteral("workspace: update tab group"));
+    return true;
+}
+
+bool WorkspaceManager::setGroupCollapsed(const QString &groupId, const bool collapsed)
+{
+    if (!requireWritable())
+        return false;
+    const int row = indexOfGroup(groupId);
+    if (row < 0)
+        return false;
+    if (m_groups[row].collapsed == collapsed)
+        return true;
+    m_groups[row].collapsed = collapsed;
+    emit groupsChanged();
+    if (!m_tabs.isEmpty())
+        emit dataChanged(index(0), index(m_tabs.size() - 1), {GroupCollapsedRole});
+    emit tabsChanged();
+    scheduleSave(QStringLiteral("workspace: toggle tab group"));
+    return true;
+}
+
+bool WorkspaceManager::moveGroup(const int from, const int to)
+{
+    if (!requireWritable() || from < 0 || from >= m_groups.size()
+        || to < 0 || to >= m_groups.size() || from == to)
+        return false;
+    m_groups.move(from, to);
+    emit groupsChanged();
+    scheduleSave(QStringLiteral("workspace: reorder tab groups"));
+    return true;
+}
+
+bool WorkspaceManager::removeGroup(const QString &groupId)
+{
+    if (!requireWritable())
+        return false;
+    const int row = indexOfGroup(groupId);
+    if (row < 0)
+        return false;
+    m_groups.removeAt(row);
+    for (Tab &tab : m_tabs)
+    {
+        if (tab.groupId == groupId)
+            tab.groupId.clear();
+    }
+    emit groupsChanged();
+    if (!m_tabs.isEmpty())
+        emit dataChanged(index(0), index(m_tabs.size() - 1),
+            {GroupIdRole, GroupNameRole, GroupColorRole, GroupCollapsedRole});
+    emit tabsChanged();
+    scheduleSave(QStringLiteral("workspace: remove tab group"));
+    return true;
+}
+
+QVariantMap WorkspaceManager::groupById(const QString &groupId) const
+{
+    const int row = indexOfGroup(groupId);
+    return row >= 0 ? groupMap(m_groups.at(row)) : QVariantMap();
 }
 
 bool WorkspaceManager::setTabContent(const QString &tabId, const QString &content)
@@ -417,7 +655,372 @@ bool WorkspaceManager::updateTab(const QString &tabId, const QString &name,
         NameRole, FontFamilyRole, FontStyleRole, FontPointSizeRole,
         BoldRole, ItalicRole, FontColorRole, UpdatedAtRole
     });
+    emit tabsChanged();
     scheduleSave(QStringLiteral("workspace: customize tab"));
+    return true;
+}
+
+bool WorkspaceManager::updateTabAppearance(const QString &tabId,
+    const QVariantMap &appearance)
+{
+    if (!requireWritable())
+        return false;
+    const int row = indexOfTab(tabId);
+    if (row < 0)
+        return false;
+    Tab &tab = m_tabs[row];
+    tab.appearance = normalizedAppearance(appearance);
+    tab.updatedAt = QDateTime::currentDateTimeUtc();
+    emit dataChanged(index(row), index(row), {
+        FontFamilyRole, FontStyleRole, FontPointSizeRole, BoldRole, ItalicRole,
+        FontColorRole, AppearanceRole, UpdatedAtRole
+    });
+    emit tabsChanged();
+    emit appearanceChanged();
+    scheduleSave(QStringLiteral("workspace: edit tab appearance"));
+    return true;
+}
+
+bool WorkspaceManager::updateGroupAppearance(const QString &groupId,
+    const QVariantMap &appearance)
+{
+    if (!requireWritable())
+        return false;
+    const int row = indexOfGroup(groupId);
+    if (row < 0)
+        return false;
+    m_groups[row].appearance = normalizedAppearance(appearance);
+    emit groupsChanged();
+    emit appearanceChanged();
+    scheduleSave(QStringLiteral("workspace: edit group appearance"));
+    return true;
+}
+
+bool WorkspaceManager::updateGlobalAppearance(const QVariantMap &appearance)
+{
+    if (!requireWritable())
+        return false;
+    m_globalAppearance = normalizedAppearance(appearance);
+    emit appearanceChanged();
+    scheduleSave(QStringLiteral("workspace: edit global appearance"));
+    return true;
+}
+
+bool WorkspaceManager::resetTabAppearance(const QString &tabId,
+    const QString &propertyName)
+{
+    const int row = indexOfTab(tabId);
+    if (!requireWritable() || row < 0)
+        return false;
+    QVariantMap appearance = m_tabs.at(row).appearance;
+    if (propertyName.trimmed().isEmpty())
+        appearance.clear();
+    else
+        appearance.remove(propertyName.trimmed());
+    return updateTabAppearance(tabId, appearance);
+}
+
+bool WorkspaceManager::resetGroupAppearance(const QString &groupId,
+    const QString &propertyName)
+{
+    const int row = indexOfGroup(groupId);
+    if (!requireWritable() || row < 0)
+        return false;
+    QVariantMap appearance = m_groups.at(row).appearance;
+    if (propertyName.trimmed().isEmpty())
+        appearance.clear();
+    else
+        appearance.remove(propertyName.trimmed());
+    return updateGroupAppearance(groupId, appearance);
+}
+
+bool WorkspaceManager::resetGlobalAppearance(const QString &propertyName)
+{
+    if (!requireWritable())
+        return false;
+    QVariantMap appearance = m_globalAppearance;
+    if (propertyName.trimmed().isEmpty())
+        appearance.clear();
+    else
+        appearance.remove(propertyName.trimmed());
+    return updateGlobalAppearance(appearance);
+}
+
+bool WorkspaceManager::saveAppearancePreset(const QString &name,
+    const QVariantMap &appearance)
+{
+    if (!requireWritable())
+        return false;
+    const QString normalized = normalizedName(name, 80, tr("Appearance preset"));
+    const QVariantMap values = normalizedAppearance(appearance);
+    for (qsizetype i = 0; i < m_appearancePresets.size(); ++i)
+    {
+        QVariantMap preset = m_appearancePresets.at(i).toMap();
+        if (preset.value(QStringLiteral("name")).toString().compare(normalized,
+            Qt::CaseInsensitive) == 0)
+        {
+            preset.insert(QStringLiteral("name"), normalized);
+            preset.insert(QStringLiteral("appearance"), values);
+            m_appearancePresets[i] = preset;
+            emit appearanceChanged();
+            scheduleSave(QStringLiteral("workspace: update appearance preset"));
+            return true;
+        }
+    }
+    if (m_appearancePresets.size() >= 32)
+        return false;
+    m_appearancePresets.push_back(QVariantMap {
+        {QStringLiteral("name"), normalized},
+        {QStringLiteral("appearance"), values}
+    });
+    emit appearanceChanged();
+    scheduleSave(QStringLiteral("workspace: save appearance preset"));
+    return true;
+}
+
+bool WorkspaceManager::removeAppearancePreset(const QString &name)
+{
+    if (!requireWritable())
+        return false;
+    for (qsizetype i = 0; i < m_appearancePresets.size(); ++i)
+    {
+        if (m_appearancePresets.at(i).toMap().value(QStringLiteral("name")).toString()
+            .compare(name.trimmed(), Qt::CaseInsensitive) == 0)
+        {
+            m_appearancePresets.removeAt(i);
+            emit appearanceChanged();
+            scheduleSave(QStringLiteral("workspace: remove appearance preset"));
+            return true;
+        }
+    }
+    return false;
+}
+
+bool WorkspaceManager::exportAppearancePreset(const QString &name,
+    const QUrl &destination)
+{
+    QVariantMap selected;
+    for (const QVariant &value : std::as_const(m_appearancePresets))
+    {
+        const QVariantMap preset = value.toMap();
+        if (preset.value(QStringLiteral("name")).toString().compare(name,
+            Qt::CaseInsensitive) == 0)
+        {
+            selected = preset;
+            break;
+        }
+    }
+    const QString path = localPath(destination);
+    if (selected.isEmpty() || path.isEmpty())
+        return false;
+    QJsonObject object = QJsonObject::fromVariantMap(selected);
+    object.insert(QStringLiteral("type"), QStringLiteral("qbt-material-appearance-preset"));
+    object.insert(QStringLiteral("schemaVersion"), 1);
+    QString error;
+    const bool success = writeFileAtomically(path,
+        QJsonDocument(object).toJson(QJsonDocument::Indented), &error);
+    emit operationFinished(success, success ? tr("Appearance preset exported.")
+        : tr("Could not export the appearance preset: %1").arg(error),
+        success ? QUrl::fromLocalFile(path) : QUrl());
+    return success;
+}
+
+bool WorkspaceManager::importAppearancePreset(const QUrl &source)
+{
+    if (!requireWritable())
+        return false;
+    const QString path = localPath(source);
+    QFile file(path);
+    if (path.isEmpty() || !file.open(QIODevice::ReadOnly) || file.size() > 128 * 1024)
+        return false;
+    QJsonParseError error;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &error);
+    if (!document.isObject())
+        return false;
+    const QJsonObject object = document.object();
+    if (object.value(QStringLiteral("type")).toString()
+        != QStringLiteral("qbt-material-appearance-preset")
+        || object.value(QStringLiteral("schemaVersion")).toInt() != 1
+        || !object.value(QStringLiteral("appearance")).isObject())
+        return false;
+    return saveAppearancePreset(object.value(QStringLiteral("name")).toString(),
+        object.value(QStringLiteral("appearance")).toObject().toVariantMap());
+}
+
+QVariantMap WorkspaceManager::validatePattern(const QString &pattern,
+    const QString &flags) const
+{
+    QString error;
+    const QRegularExpression expression = regularExpression(pattern, flags, &error);
+    return {
+        {QStringLiteral("valid"), expression.isValid()},
+        {QStringLiteral("error"), error},
+        {QStringLiteral("errorOffset"), expression.isValid() ? -1
+            : qMax<qsizetype>(0, expression.patternErrorOffset()
+                - RegexSafetyPrefix.size())},
+        {QStringLiteral("dialect"), QStringLiteral("Qt QRegularExpression (PCRE2)")},
+        {QStringLiteral("flags"), flags.toLower()}
+    };
+}
+
+QVariantMap WorkspaceManager::evaluateRegularExpression(const QString &pattern,
+    const QString &flags, const QString &sampleText) const
+{
+    if (sampleText.size() > MaximumSampleCharacters)
+    {
+        return {
+            {QStringLiteral("valid"), false},
+            {QStringLiteral("error"), tr("Sample text is limited to 64 KiB.")},
+            {QStringLiteral("dialect"), QStringLiteral("Qt QRegularExpression (PCRE2)")}
+        };
+    }
+    QString error;
+    const QRegularExpression expression = regularExpression(pattern, flags, &error);
+    QVariantList matches;
+    bool truncated = false;
+    if (expression.isValid() && !pattern.isEmpty())
+    {
+        QRegularExpressionMatchIterator iterator = expression.globalMatch(sampleText);
+        while (iterator.hasNext())
+        {
+            if (matches.size() >= MaximumRegexMatches)
+            {
+                truncated = true;
+                break;
+            }
+            const QRegularExpressionMatch match = iterator.next();
+            QVariantList captures;
+            const QStringList capturedTexts = match.capturedTexts();
+            for (qsizetype capture = 0; capture < capturedTexts.size(); ++capture)
+            {
+                captures.push_back(QVariantMap {
+                    {QStringLiteral("index"), capture},
+                    {QStringLiteral("name"), expression.captureCount() >= capture
+                        ? expression.namedCaptureGroups().value(capture) : QString()},
+                    {QStringLiteral("text"), capturedTexts.at(capture).left(4096)},
+                    {QStringLiteral("start"), match.capturedStart(capture)},
+                    {QStringLiteral("length"), match.capturedLength(capture)}
+                });
+            }
+            matches.push_back(QVariantMap {
+                {QStringLiteral("start"), match.capturedStart()},
+                {QStringLiteral("length"), match.capturedLength()},
+                {QStringLiteral("text"), match.captured().left(4096)},
+                {QStringLiteral("captures"), captures}
+            });
+            if (!flags.contains(QLatin1Char('g'), Qt::CaseInsensitive))
+                break;
+        }
+    }
+    return {
+        {QStringLiteral("valid"), expression.isValid()},
+        {QStringLiteral("error"), error},
+        {QStringLiteral("errorOffset"), expression.isValid() ? -1
+            : qMax<qsizetype>(0, expression.patternErrorOffset()
+                - RegexSafetyPrefix.size())},
+        {QStringLiteral("dialect"), QStringLiteral("Qt QRegularExpression (PCRE2)")},
+        {QStringLiteral("matches"), matches},
+        {QStringLiteral("count"), matches.size()},
+        {QStringLiteral("truncated"), truncated}
+    };
+}
+
+QVariantMap WorkspaceManager::searchTabs(const QString &query, const bool regex,
+    const QString &flags, const QString &groupId) const
+{
+    return queryTabs(query, regex, flags, groupId, false, true, false);
+}
+
+QVariantMap WorkspaceManager::searchGroups(const QString &query, const bool regex,
+    const QString &flags) const
+{
+    QString error;
+    const QRegularExpression expression = regex
+        ? regularExpression(query, flags, &error) : QRegularExpression();
+    QVariantList items;
+    const bool valid = !regex || expression.isValid();
+    const Qt::CaseSensitivity sensitivity = flags.contains(QLatin1Char('i'),
+        Qt::CaseInsensitive) ? Qt::CaseInsensitive : Qt::CaseSensitive;
+    if (valid)
+    {
+        for (int i = 0; i < m_groups.size(); ++i)
+        {
+            const Group &group = m_groups.at(i);
+            const bool match = query.isEmpty()
+                || (regex ? expression.match(group.name).hasMatch()
+                          : group.name.contains(query, sensitivity));
+            if (!match)
+                continue;
+            QVariantMap item = groupMap(group);
+            item.insert(QStringLiteral("index"), i);
+            item.insert(QStringLiteral("tabCount"), static_cast<int>(std::count_if(
+                m_tabs.cbegin(), m_tabs.cend(), [&group](const Tab &tab)
+                { return tab.groupId == group.id; })));
+            items.push_back(item);
+        }
+    }
+    return {
+        {QStringLiteral("valid"), valid},
+        {QStringLiteral("error"), error},
+        {QStringLiteral("items"), items},
+        {QStringLiteral("count"), items.size()},
+        {QStringLiteral("dialect"), QStringLiteral("Qt QRegularExpression (PCRE2)")}
+    };
+}
+
+QVariantMap WorkspaceManager::previewCloseTabs(const QString &query,
+    const bool regex, const QString &flags, const bool inverse,
+    const bool includePinned, const QString &groupId) const
+{
+    return queryTabs(query, regex, flags, groupId, inverse, includePinned, true);
+}
+
+bool WorkspaceManager::closeTabsByText(const QString &query, const bool regex,
+    const QString &flags, const bool inverse, const bool includePinned,
+    const QString &groupId)
+{
+    if (!requireWritable())
+        return false;
+    const QVariantMap preview = previewCloseTabs(query, regex, flags, inverse,
+        includePinned, groupId);
+    if (!preview.value(QStringLiteral("valid")).toBool()
+        || preview.value(QStringLiteral("count")).toInt() <= 0)
+        return false;
+
+    if (m_dirty)
+    {
+        QString error;
+        if (!saveNow(QStringLiteral("workspace: checkpoint before bulk close"), &error))
+        {
+            emit operationFinished(false,
+                tr("Tabs were not closed because current edits could not be checkpointed: %1")
+                    .arg(error), {});
+            return false;
+        }
+    }
+
+    const QSet<QString> previouslyNonEmpty = nonEmptyGroupIds();
+    QSet<QString> ids;
+    const QVariantList items = preview.value(QStringLiteral("items")).toList();
+    for (const QVariant &value : items)
+        ids.insert(value.toMap().value(QStringLiteral("tabId")).toString());
+    const QString activeId = activeTabId();
+    beginResetModel();
+    m_tabs.erase(std::remove_if(m_tabs.begin(), m_tabs.end(), [&ids](const Tab &tab)
+        { return ids.contains(tab.id); }), m_tabs.end());
+    m_activeIndex = indexOfTab(activeId);
+    if (m_activeIndex < 0 && !m_tabs.isEmpty())
+        m_activeIndex = 0;
+    endResetModel();
+    pruneNewlyEmptyGroups(previouslyNonEmpty);
+    emit countChanged();
+    emit activeIndexChanged();
+    emit tabsChanged();
+    scheduleSave(inverse ? QStringLiteral("workspace: close tabs not containing text")
+                         : QStringLiteral("workspace: close tabs containing text"));
+    emit operationFinished(true,
+        tr("Closed %1 workspace tab(s). Pinned tabs were %2.")
+            .arg(ids.size()).arg(includePinned ? tr("included") : tr("protected")), {});
     return true;
 }
 
@@ -544,7 +1147,8 @@ bool WorkspaceManager::importWorkspace(const QUrl &source)
         return false;
     }
 
-    Snapshot previous {m_appDisplayName, activeTabId(), m_tabs};
+    Snapshot previous {m_appDisplayName, activeTabId(), m_tabs, m_groups,
+        m_globalAppearance, m_appearancePresets};
     if (!saveNow(QStringLiteral("workspace: backup before JSON import"), &error))
     {
         emit operationFinished(false, error, repositoryUrl());
@@ -667,7 +1271,8 @@ bool WorkspaceManager::importRepository(const QUrl &sourceFolder)
         return false;
     }
 
-    Snapshot previous {m_appDisplayName, activeTabId(), m_tabs};
+    Snapshot previous {m_appDisplayName, activeTabId(), m_tabs, m_groups,
+        m_globalAppearance, m_appearancePresets};
     const QSet<QString> previousManagedTabFiles = m_managedTabFiles;
     if (!saveNow(QStringLiteral("workspace: backup before repository import"), &error))
     {
@@ -875,8 +1480,25 @@ QVariantMap WorkspaceManager::tabMap(const Tab &tab) const
         {QStringLiteral("bold"), tab.bold},
         {QStringLiteral("italic"), tab.italic},
         {QStringLiteral("fontColor"), tab.fontColor},
+        {QStringLiteral("pinned"), tab.pinned},
+        {QStringLiteral("groupId"), tab.groupId},
+        {QStringLiteral("groupName"), groupName(tab.groupId)},
+        {QStringLiteral("groupColor"), groupColor(tab.groupId)},
+        {QStringLiteral("groupCollapsed"), groupCollapsed(tab.groupId)},
+        {QStringLiteral("appearance"), tab.appearance},
         {QStringLiteral("createdAt"), isoDate(tab.createdAt)},
         {QStringLiteral("updatedAt"), isoDate(tab.updatedAt)}
+    };
+}
+
+QVariantMap WorkspaceManager::groupMap(const Group &group) const
+{
+    return {
+        {QStringLiteral("groupId"), group.id},
+        {QStringLiteral("name"), group.name},
+        {QStringLiteral("color"), group.color},
+        {QStringLiteral("collapsed"), group.collapsed},
+        {QStringLiteral("appearance"), group.appearance}
     };
 }
 
@@ -890,6 +1512,229 @@ int WorkspaceManager::indexOfTab(const QString &tabId) const
     return -1;
 }
 
+int WorkspaceManager::indexOfGroup(const QString &groupId) const
+{
+    for (int i = 0; i < m_groups.size(); ++i)
+    {
+        if (m_groups.at(i).id == groupId)
+            return i;
+    }
+    return -1;
+}
+
+QString WorkspaceManager::groupName(const QString &groupId) const
+{
+    const int row = indexOfGroup(groupId);
+    return row >= 0 ? m_groups.at(row).name : QString();
+}
+
+QString WorkspaceManager::groupColor(const QString &groupId) const
+{
+    const int row = indexOfGroup(groupId);
+    return row >= 0 ? m_groups.at(row).color : QStringLiteral("#00000000");
+}
+
+bool WorkspaceManager::groupCollapsed(const QString &groupId) const
+{
+    const int row = indexOfGroup(groupId);
+    return row >= 0 && m_groups.at(row).collapsed;
+}
+
+QVariantMap WorkspaceManager::normalizedAppearance(const QVariantMap &appearance)
+{
+    // Sparse overrides are intentionally data-only. Restrict keys and sizes so
+    // imported themes cannot grow the workspace manifest without bound.
+    static const QSet<QString> allowed {
+        QStringLiteral("fontFamily"), QStringLiteral("fontStyle"),
+        QStringLiteral("fontPointSize"), QStringLiteral("fontWeight"),
+        QStringLiteral("bold"), QStringLiteral("italic"),
+        QStringLiteral("underline"), QStringLiteral("underlineStyle"),
+        QStringLiteral("underlineColor"), QStringLiteral("strikeout"),
+        QStringLiteral("doubleStrike"), QStringLiteral("overline"),
+        QStringLiteral("capitalization"), QStringLiteral("smallCaps"),
+        QStringLiteral("superscript"), QStringLiteral("subscript"),
+        QStringLiteral("textColor"), QStringLiteral("highlightColor"),
+        QStringLiteral("outlineColor"), QStringLiteral("shadowColor"),
+        QStringLiteral("glowColor"), QStringLiteral("letterSpacing"),
+        QStringLiteral("wordSpacing"), QStringLiteral("lineHeight"),
+        QStringLiteral("baselineOffset"), QStringLiteral("direction"),
+        QStringLiteral("alignment"), QStringLiteral("backgroundColor"),
+        QStringLiteral("borderColor"), QStringLiteral("borderWidth"),
+        QStringLiteral("radius"), QStringLiteral("padding"),
+        QStringLiteral("spacing"), QStringLiteral("opacity"),
+        QStringLiteral("icon"), QStringLiteral("badge"),
+        QStringLiteral("separatorColor"), QStringLiteral("hoverColor"),
+        QStringLiteral("focusColor"), QStringLiteral("checkedColor"),
+        QStringLiteral("disabledColor")
+    };
+    QVariantMap result;
+    for (auto it = appearance.cbegin(); it != appearance.cend() && result.size() < 64; ++it)
+    {
+        if (!allowed.contains(it.key()))
+            continue;
+        QVariant value = it.value();
+        if (value.metaType().id() == QMetaType::QString)
+            value = value.toString().left(256);
+        if (it.key() == QStringLiteral("fontPointSize"))
+            value = qBound(6.0, value.toDouble(), 144.0);
+        else if (it.key() == QStringLiteral("fontWeight"))
+            value = qBound(1, value.toInt(), 1000);
+        else if (it.key() == QStringLiteral("letterSpacing")
+            || it.key() == QStringLiteral("wordSpacing"))
+            value = qBound(-50.0, value.toDouble(), 200.0);
+        else if (it.key() == QStringLiteral("lineHeight"))
+            value = qBound(0.5, value.toDouble(), 5.0);
+        else if (it.key() == QStringLiteral("baselineOffset"))
+            value = qBound(-100.0, value.toDouble(), 100.0);
+        else if (it.key() == QStringLiteral("borderWidth"))
+            value = qBound(0.0, value.toDouble(), 20.0);
+        else if (it.key() == QStringLiteral("radius"))
+            value = qBound(0.0, value.toDouble(), 200.0);
+        else if (it.key() == QStringLiteral("padding")
+            || it.key() == QStringLiteral("spacing"))
+            value = qBound(0.0, value.toDouble(), 200.0);
+        else if (it.key() == QStringLiteral("opacity"))
+            value = qBound(0.0, value.toDouble(), 1.0);
+        if (it.key().endsWith(QStringLiteral("Color")))
+        {
+            const QColor color(value.toString());
+            if (!color.isValid())
+                continue;
+            value = color.name(QColor::HexArgb).toUpper();
+        }
+        result.insert(it.key(), value);
+    }
+    return result;
+}
+
+QRegularExpression WorkspaceManager::regularExpression(const QString &pattern,
+    const QString &flags, QString *error)
+{
+    if (pattern.size() > MaximumPatternCharacters)
+    {
+        if (error) *error = QObject::tr("Patterns are limited to 4,096 characters.");
+        return QRegularExpression(QStringLiteral("("));
+    }
+    const QString normalizedFlags = flags.toLower();
+    for (const QChar flag : normalizedFlags)
+    {
+        if (!QStringLiteral("gimsu").contains(flag))
+        {
+            if (error) *error = QObject::tr("Unsupported regular-expression flag: %1").arg(flag);
+            return QRegularExpression(QStringLiteral("("));
+        }
+    }
+    QRegularExpression::PatternOptions options = QRegularExpression::NoPatternOption;
+    if (normalizedFlags.contains(QLatin1Char('i')))
+        options |= QRegularExpression::CaseInsensitiveOption;
+    if (normalizedFlags.contains(QLatin1Char('m')))
+        options |= QRegularExpression::MultilineOption;
+    if (normalizedFlags.contains(QLatin1Char('s')))
+        options |= QRegularExpression::DotMatchesEverythingOption;
+    if (normalizedFlags.contains(QLatin1Char('u')))
+        options |= QRegularExpression::UseUnicodePropertiesOption;
+    // PCRE2 start verbs cap backtracking work and recursion depth for every
+    // consumer. The non-capturing wrapper preserves capture numbering.
+    QRegularExpression expression(RegexSafetyPrefix + pattern + QLatin1Char(')'), options);
+    if (!expression.isValid() && error)
+        *error = expression.errorString();
+    else if (error)
+        error->clear();
+    return expression;
+}
+
+QVariantMap WorkspaceManager::queryTabs(const QString &query, const bool regex,
+    const QString &flags, const QString &groupId, const bool inverse,
+    const bool includePinned, const bool closingPreview) const
+{
+    QString error;
+    if (closingPreview && query.trimmed().isEmpty())
+    {
+        return {
+            {QStringLiteral("valid"), false},
+            {QStringLiteral("error"), tr("Enter text or a regular expression before closing tabs.")},
+            {QStringLiteral("items"), QVariantList()},
+            {QStringLiteral("count"), 0}
+        };
+    }
+    const QRegularExpression expression = regex
+        ? regularExpression(query, flags, &error) : QRegularExpression();
+    const bool valid = !regex || expression.isValid();
+    const Qt::CaseSensitivity sensitivity = flags.contains(QLatin1Char('i'),
+        Qt::CaseInsensitive) ? Qt::CaseInsensitive : Qt::CaseSensitive;
+    QVariantList items;
+    int excludedPinned = 0;
+    if (valid)
+    {
+        for (int i = 0; i < m_tabs.size(); ++i)
+        {
+            const Tab &tab = m_tabs.at(i);
+            if (!groupId.isEmpty() && tab.groupId != groupId)
+                continue;
+            bool match = query.isEmpty()
+                || (regex ? expression.match(tab.name).hasMatch()
+                          : tab.name.contains(query, sensitivity));
+            if (inverse)
+                match = !match;
+            if (!match)
+                continue;
+            if (closingPreview && tab.pinned && !includePinned)
+            {
+                ++excludedPinned;
+                continue;
+            }
+            QVariantMap item = tabMap(tab);
+            item.insert(QStringLiteral("index"), i);
+            item.insert(QStringLiteral("window"), tr("Workspace window"));
+            item.insert(QStringLiteral("strip"), tr("Workspace tab strip"));
+            item.insert(QStringLiteral("location"), tab.groupId.isEmpty()
+                ? tr("Ungrouped") : tr("Group: %1").arg(groupName(tab.groupId)));
+            items.push_back(item);
+        }
+    }
+    return {
+        {QStringLiteral("valid"), valid},
+        {QStringLiteral("error"), error},
+        {QStringLiteral("items"), items},
+        {QStringLiteral("count"), items.size()},
+        {QStringLiteral("excludedPinned"), excludedPinned},
+        {QStringLiteral("willCheckpoint"), closingPreview && m_dirty},
+        {QStringLiteral("mode"), regex ? QStringLiteral("regex") : QStringLiteral("plain")},
+        {QStringLiteral("flags"), flags.toLower()},
+        {QStringLiteral("dialect"), QStringLiteral("Qt QRegularExpression (PCRE2)")}
+    };
+}
+
+void WorkspaceManager::normalizePinnedOrder()
+{
+    std::stable_partition(m_tabs.begin(), m_tabs.end(),
+        [](const Tab &tab) { return tab.pinned; });
+}
+
+QSet<QString> WorkspaceManager::nonEmptyGroupIds() const
+{
+    QSet<QString> result;
+    for (const Tab &tab : m_tabs)
+    {
+        if (!tab.groupId.isEmpty())
+            result.insert(tab.groupId);
+    }
+    return result;
+}
+
+void WorkspaceManager::pruneNewlyEmptyGroups(const QSet<QString> &previouslyNonEmpty)
+{
+    const QSet<QString> remaining = nonEmptyGroupIds();
+    const qsizetype previousSize = m_groups.size();
+    m_groups.erase(std::remove_if(m_groups.begin(), m_groups.end(),
+        [&previouslyNonEmpty, &remaining](const Group &group)
+        {
+            return previouslyNonEmpty.contains(group.id) && !remaining.contains(group.id);
+        }), m_groups.end());
+    if (m_groups.size() != previousSize)
+        emit groupsChanged();
+}
+
 QJsonObject WorkspaceManager::tabObject(const Tab &tab, const bool includeContent) const
 {
     QJsonObject object {
@@ -901,6 +1746,9 @@ QJsonObject WorkspaceManager::tabObject(const Tab &tab, const bool includeConten
         {QStringLiteral("bold"), tab.bold},
         {QStringLiteral("italic"), tab.italic},
         {QStringLiteral("fontColor"), tab.fontColor},
+        {QStringLiteral("pinned"), tab.pinned},
+        {QStringLiteral("groupId"), tab.groupId},
+        {QStringLiteral("appearance"), QJsonObject::fromVariantMap(tab.appearance)},
         {QStringLiteral("createdAt"), isoDate(tab.createdAt)},
         {QStringLiteral("updatedAt"), isoDate(tab.updatedAt)}
     };
@@ -914,11 +1762,25 @@ QJsonObject WorkspaceManager::workspaceObject(const bool exportMetadata) const
     QJsonArray tabs;
     for (const Tab &tab : m_tabs)
         tabs.append(tabObject(tab, exportMetadata));
+    QJsonArray groups;
+    for (const Group &group : m_groups)
+    {
+        groups.append(QJsonObject {
+            {QStringLiteral("id"), group.id},
+            {QStringLiteral("name"), group.name},
+            {QStringLiteral("color"), group.color},
+            {QStringLiteral("collapsed"), group.collapsed},
+            {QStringLiteral("appearance"), QJsonObject::fromVariantMap(group.appearance)}
+        });
+    }
     QJsonObject object {
         {QStringLiteral("type"), QStringLiteral("qbt-material-workspace")},
         {QStringLiteral("schemaVersion"), SchemaVersion},
         {QStringLiteral("appDisplayName"), m_appDisplayName},
         {QStringLiteral("activeTabId"), activeTabId()},
+        {QStringLiteral("groups"), groups},
+        {QStringLiteral("globalAppearance"), QJsonObject::fromVariantMap(m_globalAppearance)},
+        {QStringLiteral("appearancePresets"), QJsonArray::fromVariantList(m_appearancePresets)},
         {QStringLiteral("tabs"), tabs}
     };
     if (exportMetadata)
@@ -942,8 +1804,9 @@ bool WorkspaceManager::parseWorkspace(const QByteArray &bytes, Snapshot *snapsho
         return false;
     }
     const QJsonObject root = document.object();
+    const int schemaVersion = root.value(QStringLiteral("schemaVersion")).toInt(-1);
     if (root.value(QStringLiteral("type")).toString() != QStringLiteral("qbt-material-workspace")
-        || root.value(QStringLiteral("schemaVersion")).toInt(-1) != SchemaVersion)
+        || schemaVersion < MinimumSchemaVersion || schemaVersion > SchemaVersion)
     {
         if (error) *error = tr("This is not a supported qBittorrent Material workspace.");
         return false;
@@ -965,6 +1828,73 @@ bool WorkspaceManager::parseWorkspace(const QByteArray &bytes, Snapshot *snapsho
     candidate.appDisplayName = normalizedName(root.value(QStringLiteral("appDisplayName")).toString(),
         80, QString::fromLatin1(ProductDisplayName));
     candidate.activeTabId = root.value(QStringLiteral("activeTabId")).toString();
+    QSet<QString> groupIds;
+    if (schemaVersion >= 2)
+    {
+        const QJsonValue groupsValue = root.value(QStringLiteral("groups"));
+        if (!groupsValue.isUndefined() && !groupsValue.isArray())
+        {
+            if (error) *error = tr("Workspace contains a malformed group list.");
+            return false;
+        }
+        const QJsonArray groupEntries = groupsValue.toArray();
+        if (groupEntries.size() > MaximumGroups)
+        {
+            if (error) *error = tr("Workspace contains too many tab groups.");
+            return false;
+        }
+        for (const QJsonValue &groupValue : groupEntries)
+        {
+            if (!groupValue.isObject())
+            {
+                if (error) *error = tr("Workspace contains a malformed tab group.");
+                return false;
+            }
+            const QJsonObject object = groupValue.toObject();
+            const QUuid parsedId(object.value(QStringLiteral("id")).toString());
+            const QColor color(object.value(QStringLiteral("color")).toString());
+            if (parsedId.isNull() || !color.isValid())
+            {
+                if (error) *error = tr("Workspace contains an invalid tab group.");
+                return false;
+            }
+            Group group;
+            group.id = parsedId.toString(QUuid::WithoutBraces);
+            if (groupIds.contains(group.id))
+            {
+                if (error) *error = tr("Workspace contains duplicate tab groups.");
+                return false;
+            }
+            groupIds.insert(group.id);
+            group.name = normalizedName(object.value(QStringLiteral("name")).toString(),
+                80, tr("Untitled group"));
+            group.color = color.name(QColor::HexArgb).toUpper();
+            group.collapsed = object.value(QStringLiteral("collapsed")).toBool();
+            if (object.value(QStringLiteral("appearance")).isObject())
+                group.appearance = normalizedAppearance(object.value(
+                    QStringLiteral("appearance")).toObject().toVariantMap());
+            candidate.groups.push_back(std::move(group));
+        }
+        if (root.value(QStringLiteral("globalAppearance")).isObject())
+            candidate.globalAppearance = normalizedAppearance(root.value(
+                QStringLiteral("globalAppearance")).toObject().toVariantMap());
+        if (root.value(QStringLiteral("appearancePresets")).isArray())
+        {
+            const QJsonArray presets = root.value(QStringLiteral("appearancePresets")).toArray();
+            for (qsizetype i = 0; i < presets.size() && i < 32; ++i)
+            {
+                const QJsonObject preset = presets.at(i).toObject();
+                if (!preset.value(QStringLiteral("appearance")).isObject())
+                    continue;
+                candidate.appearancePresets.push_back(QVariantMap {
+                    {QStringLiteral("name"), normalizedName(preset.value(
+                        QStringLiteral("name")).toString(), 80, tr("Appearance preset"))},
+                    {QStringLiteral("appearance"), normalizedAppearance(preset.value(
+                        QStringLiteral("appearance")).toObject().toVariantMap())}
+                });
+            }
+        }
+    }
     QSet<QString> ids;
     for (const QJsonValue &value : entries)
     {
@@ -1020,12 +1950,21 @@ bool WorkspaceManager::parseWorkspace(const QByteArray &bytes, Snapshot *snapsho
         tab.fontColor = color.name(QColor::HexArgb).toUpper();
         tab.bold = object.value(QStringLiteral("bold")).toBool();
         tab.italic = object.value(QStringLiteral("italic")).toBool();
+        tab.pinned = object.value(QStringLiteral("pinned")).toBool();
+        tab.groupId = object.value(QStringLiteral("groupId")).toString();
+        if (!tab.groupId.isEmpty() && !groupIds.contains(tab.groupId))
+            tab.groupId.clear();
+        if (object.value(QStringLiteral("appearance")).isObject())
+            tab.appearance = normalizedAppearance(object.value(
+                QStringLiteral("appearance")).toObject().toVariantMap());
         tab.createdAt = QDateTime::fromString(object.value(QStringLiteral("createdAt")).toString(), Qt::ISODate);
         tab.updatedAt = QDateTime::fromString(object.value(QStringLiteral("updatedAt")).toString(), Qt::ISODate);
         if (!tab.createdAt.isValid()) tab.createdAt = QDateTime::currentDateTimeUtc();
         if (!tab.updatedAt.isValid()) tab.updatedAt = tab.createdAt;
         candidate.tabs.push_back(std::move(tab));
     }
+    std::stable_partition(candidate.tabs.begin(), candidate.tabs.end(),
+        [](const Tab &tab) { return tab.pinned; });
     if (!candidate.tabs.isEmpty() && !ids.contains(candidate.activeTabId))
         candidate.activeTabId = candidate.tabs.constFirst().id;
     if (candidate.tabs.isEmpty())
@@ -1180,6 +2119,10 @@ void WorkspaceManager::applySnapshot(Snapshot snapshot)
     m_loading = true;
     beginResetModel();
     m_tabs = std::move(snapshot.tabs);
+    m_groups = std::move(snapshot.groups);
+    m_globalAppearance = std::move(snapshot.globalAppearance);
+    m_appearancePresets = std::move(snapshot.appearancePresets);
+    normalizePinnedOrder();
     m_appDisplayName = normalizedName(snapshot.appDisplayName, 80,
         QString::fromLatin1(ProductDisplayName));
     m_activeIndex = indexOfTab(snapshot.activeTabId);
@@ -1190,6 +2133,9 @@ void WorkspaceManager::applySnapshot(Snapshot snapshot)
     emit countChanged();
     emit activeIndexChanged();
     emit appDisplayNameChanged();
+    emit tabsChanged();
+    emit groupsChanged();
+    emit appearanceChanged();
     m_loading = false;
 }
 
@@ -1394,7 +2340,7 @@ bool WorkspaceManager::writeManagedFiles(QString *error)
     const QByteArray readme = QStringLiteral(
         "# %1 workspace\n\n"
         "This is a complete local Git repository managed by qBittorrent Material.\n\n"
-        "- `workspace.json` stores the app display name, ordered tabs, and typography.\n"
+        "- `workspace.json` stores the app display name, pinned and ordinary tab order, groups, and sparse appearance overrides.\n"
         "- `tabs/*.md` stores one plain-text page per browser-style tab.\n"
         "- `.git` stores the automatic local history.\n\n"
         "Use the app's Workspace menu to export/import JSON snapshots or the entire repository.\n")

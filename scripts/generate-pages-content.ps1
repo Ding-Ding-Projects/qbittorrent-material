@@ -25,6 +25,11 @@ Get-ChildItem -LiteralPath $docsRoot -File -Recurse |
 function Get-DocumentCategory([string] $repositoryPath) {
     switch -Regex ($repositoryPath) {
         '^README\.md$' { return "Overview" }
+        '^docs/features/experience/' { return "Desktop · Experience" }
+        '^docs/features/workspace/' { return "Desktop · Workspace" }
+        '^docs/features/appearance/' { return "Desktop · Appearance" }
+        '^docs/features/delivery/' { return "Desktop · Delivery" }
+        '^docs/features/' { return "Desktop features" }
         '^docs/wiki/' { return "Wiki" }
         'BUILDING|REQUIREMENTS|PAGES' { return "Get started" }
         'SCREENSHOTS|SCREENS|WORKSPACE_TABS' { return "Interface" }
@@ -49,7 +54,13 @@ function Get-Slug([string] $repositoryPath) {
         return "overview"
     }
 
-    $slug = [System.IO.Path]::GetFileNameWithoutExtension($repositoryPath).ToLowerInvariant()
+    $slugSource = [System.IO.Path]::GetFileNameWithoutExtension($repositoryPath)
+    if ($repositoryPath -match '^docs/(features(?:/.+)?)/[^/]+$') {
+        $slugSource = [System.IO.Path]::ChangeExtension($Matches[1] + "/" `
+            + [System.IO.Path]::GetFileName($repositoryPath), $null)
+    }
+
+    $slug = $slugSource.ToLowerInvariant()
     $slug = $slug -replace '[^a-z0-9]+', '-'
     $slug = $slug.Trim('-')
     if ($repositoryPath -match '^docs/wiki/') {
@@ -92,7 +103,7 @@ $documents = foreach ($file in $sourceFiles) {
 
 $payload = [ordered]@{
     schemaVersion = 1
-    repository = "codingmachineedge/qbittorrent-material"
+    repository = "Ding-Ding-Projects/qbittorrent-material"
     documents = @($documents)
 }
 

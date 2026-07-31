@@ -154,9 +154,9 @@ Dialog {
         Log.info("ui", "UIThemeDialog applying theme overrides from " + root.themePath)
         var ok = ThemeManager.loadColorOverrides(root.themePath)
         if (ok)
-            Snackbar.show(qsTr("UI theme applied"))
+            NotificationCenter.notify(qsTr("UI theme applied"), "success")
         else
-            Snackbar.show(qsTr("Failed to load the selected UI theme file"))
+            NotificationCenter.notify(qsTr("Failed to load the selected UI theme file"), "error")
     }
     onRejected: Log.debug("ui", "UIThemeDialog closed")
 }

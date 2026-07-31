@@ -130,7 +130,7 @@ string(REGEX REPLACE "[^A-Za-z0-9._-]+" "-"
 set(CPACK_PACKAGE_NAME "qBittorrent Material")
 set(CPACK_PACKAGE_VENDOR "qBittorrent Material contributors")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "A Qt Quick Material desktop BitTorrent client")
-set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/codingmachineedge/qbittorrent-material")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/Ding-Ding-Projects/qbittorrent-material")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_VERSION_MAJOR "${PROJECT_VERSION_MAJOR}")
 set(CPACK_PACKAGE_VERSION_MINOR "${PROJECT_VERSION_MINOR}")

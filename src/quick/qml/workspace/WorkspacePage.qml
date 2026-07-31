@@ -21,9 +21,34 @@ Item {
     required property bool bold
     required property bool italic
     required property string fontColor
+    required property string groupId
+    required property var appearance
     required property string updatedAt
 
     property bool initialized: false
+    readonly property var effectiveAppearance: {
+        // Reading these properties makes the binding refresh when a group or
+        // global sparse override changes.
+        var groupsRevision = WorkspaceManager.groups
+        var globalValues = WorkspaceManager.globalAppearance || ({})
+        var groupValues = groupId ? (WorkspaceManager.groupById(groupId).appearance || ({})) : ({})
+        return Object.assign({}, globalValues, groupValues, appearance || ({}))
+    }
+
+    function capitalization(value) {
+        if (value === "Uppercase") return Font.AllUppercase
+        if (value === "Lowercase") return Font.AllLowercase
+        if (value === "SmallCaps") return Font.SmallCaps
+        if (value === "Capitalize") return Font.Capitalize
+        return Font.MixedCase
+    }
+
+    function alignment(value) {
+        if (value === "Center") return Text.AlignHCenter
+        if (value === "Right") return Text.AlignRight
+        if (value === "Justify") return Text.AlignJustify
+        return Text.AlignLeft
+    }
     objectName: "workspacePage_" + tabId
 
     ColumnLayout {
@@ -64,7 +89,7 @@ Item {
                 Layout.preferredWidth: 14
                 Layout.preferredHeight: 14
                 radius: 7
-                color: root.fontColor
+                color: root.effectiveAppearance.textColor || root.fontColor
                 border.width: 1
                 border.color: Theme.color("outline")
                 Accessible.name: qsTr("Page font color")
@@ -85,10 +110,16 @@ Item {
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            radius: Spacing.radiusDialog
-            color: Theme.color("surface")
-            border.width: 1
-            border.color: editor.activeFocus ? Theme.color("primary") : Theme.color("outlineVariant")
+            radius: root.effectiveAppearance.radius !== undefined
+                ? root.effectiveAppearance.radius : Spacing.radiusDialog
+            color: root.effectiveAppearance.backgroundColor || Theme.color("surface")
+            opacity: root.effectiveAppearance.opacity !== undefined
+                ? root.effectiveAppearance.opacity : 1
+            border.width: root.effectiveAppearance.borderWidth !== undefined
+                ? root.effectiveAppearance.borderWidth : 1
+            border.color: editor.activeFocus
+                ? (root.effectiveAppearance.focusColor || Theme.color("primary"))
+                : (root.effectiveAppearance.borderColor || Theme.color("outlineVariant"))
 
             ScrollView {
                 anchors.fill: parent
@@ -105,18 +136,48 @@ Item {
                     wrapMode: TextEdit.Wrap
                     selectByMouse: true
                     persistentSelection: true
-                    leftPadding: Spacing.xl
-                    rightPadding: Spacing.xl
-                    topPadding: Spacing.lg
-                    bottomPadding: Spacing.lg
+                    leftPadding: root.effectiveAppearance.padding || Spacing.xl
+                    rightPadding: root.effectiveAppearance.padding || Spacing.xl
+                    topPadding: (root.effectiveAppearance.padding || Spacing.lg)
+                        + (root.effectiveAppearance.baselineOffset || 0)
+                    bottomPadding: root.effectiveAppearance.padding || Spacing.lg
                     placeholderText: WorkspaceManager.writable
                         ? qsTr("Write anything on this page. Changes save automatically to local Git.")
                         : qsTr("Workspace recovery is required before this page can be edited.")
-                    color: root.fontColor
-                    selectionColor: Theme.color("primaryContainer")
+                    color: root.effectiveAppearance.textColor || root.fontColor
+                    selectionColor: root.effectiveAppearance.highlightColor
+                        || Theme.color("primaryContainer")
                     selectedTextColor: Theme.color("onPrimaryContainer")
-                    font: WorkspaceManager.resolvedFont(root.fontFamily, root.fontStyle,
-                                                        root.fontPointSize, root.bold, root.italic)
+                    readonly property font resolvedEditorFont: WorkspaceManager.resolvedFont(
+                        root.effectiveAppearance.fontFamily || root.fontFamily,
+                        root.effectiveAppearance.fontStyle || root.fontStyle,
+                        root.effectiveAppearance.fontPointSize || root.fontPointSize,
+                        root.effectiveAppearance.bold !== undefined
+                            ? root.effectiveAppearance.bold : root.bold,
+                        root.effectiveAppearance.italic !== undefined
+                            ? root.effectiveAppearance.italic : root.italic)
+                    font.family: resolvedEditorFont.family
+                    font.styleName: resolvedEditorFont.styleName
+                    font.pointSize: resolvedEditorFont.pointSize
+                    font.italic: resolvedEditorFont.italic
+                    font.weight: root.effectiveAppearance.fontWeight
+                        || ((root.effectiveAppearance.bold !== undefined
+                            ? root.effectiveAppearance.bold : root.bold)
+                            ? Font.Bold : Font.Normal)
+                    font.underline: !!root.effectiveAppearance.underline
+                    font.strikeout: !!root.effectiveAppearance.strikeout
+                        || !!root.effectiveAppearance.doubleStrike
+                    font.overline: !!root.effectiveAppearance.overline
+                    font.capitalization: root.capitalization(
+                        root.effectiveAppearance.capitalization)
+                    font.letterSpacing: root.effectiveAppearance.letterSpacing || 0
+                    font.wordSpacing: root.effectiveAppearance.wordSpacing || 0
+                    // Qt Quick Controls TextArea does not expose TextEdit's
+                    // lineHeight properties on this Qt build. The editor keeps
+                    // the saved value and explains the platform limitation in
+                    // the appearance panel instead of crashing page creation.
+                    horizontalAlignment: root.alignment(root.effectiveAppearance.alignment)
+                    LayoutMirroring.enabled: root.effectiveAppearance.direction === "RightToLeft"
                     background: null
 
                     onTextChanged: {

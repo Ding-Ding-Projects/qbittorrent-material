@@ -26,7 +26,7 @@ import qBittorrent
     \c sourceModel.renameFileByIndex(index, newPath).
 
     \qml
-    BatchRenameDialog { sourceModel: contentSource; onApplied: (n) => Snackbar.show(qsTr("Renamed %1 file(s)").arg(n)) }
+    BatchRenameDialog { sourceModel: contentSource; onApplied: (n) => NotificationCenter.notify(qsTr("Renamed %1 file(s)").arg(n), "success") }
     \endqml
 */
 Popup {

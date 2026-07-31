@@ -85,16 +85,16 @@ Dialog {
 
         function onCreationSucceeded(torrentFilePath, savePath) {
             Log.info("ui", "TorrentCreatorDialog creation succeeded: " + torrentFilePath)
-            Snackbar.show(qsTr("Torrent created successfully."))
+            NotificationCenter.notify(qsTr("Torrent created successfully."), "success")
             root.close()
         }
         function onCreationFailed(message) {
             Log.warning("ui", "TorrentCreatorDialog creation failed: " + message)
-            Snackbar.show(qsTr("Torrent creation failed: %1").arg(message))
+            NotificationCenter.notify(qsTr("Torrent creation failed: %1").arg(message), "error")
         }
         function onAddTorrentFailed(message) {
             Log.warning("ui", "TorrentCreatorDialog add-for-seeding failed: " + message)
-            Snackbar.show(qsTr("Could not start seeding the new torrent: %1").arg(message))
+            NotificationCenter.notify(qsTr("Could not start seeding the new torrent: %1").arg(message), "error")
         }
     }
 

@@ -105,6 +105,12 @@ TorrentJournal::TorrentJournal()
     initializeRepositories();
     connectSession();
 
+    // Version history is a safety feature, not a lossy preference. Profiles
+    // created by earlier builds may have paused settings capture; re-enable it
+    // before listening for new writes and snapshot any drift that occurred.
+    if (!isSettingsAutoCommitEnabled())
+        setSettingsAutoCommitEnabled(true);
+
     connect(SettingsStorage::instance(), &SettingsStorage::valueChanged,
         this, &TorrentJournal::onSettingsValueChanged);
 }
@@ -559,6 +565,11 @@ bool TorrentJournal::isSettingsAutoCommitEnabled() const
 
 void TorrentJournal::setSettingsAutoCommitEnabled(const bool enabled)
 {
+    if (!enabled)
+    {
+        qCWarning(lcApp) << "Ignoring request to disable mandatory local settings history";
+        return;
+    }
     const bool wasEnabled = isSettingsAutoCommitEnabled();
     SettingsStorage::instance()->storeValue(KeyAutoCommitSettings, enabled);
     if (!wasEnabled && enabled)
@@ -707,6 +718,11 @@ void TorrentJournal::onSettingsValueChanged(const QString &key, const QVariant &
         return;
     // The journal's own bookkeeping keys would self-loop.
     if (key.startsWith(u"TorrentJournal/"_s))
+        return;
+    // Notification history is ephemeral UI history, not configuration. Its
+    // JSON blob is rewritten on read/dismiss and must not create a large Git
+    // settings commit for every toast.
+    if (key == u"GUI/Notifications/HistoryV1"_s)
         return;
     if (!isSettingsAutoCommitEnabled())
         return;

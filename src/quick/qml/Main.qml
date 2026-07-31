@@ -695,7 +695,7 @@ ApplicationWindow {
         currentTab: root.currentTabIndex
         filterProxy: centralTabs.proxy
         rssUnread: centralTabs.rssUnread
-        unreadNotifications: 0   // TODO(#11): NotificationController.unreadCount
+        unreadNotifications: NotificationCenter.unreadCount
         activePanel: root.activePanel
         onNavRequested: (index) => root.switchToTab(index)
         onPanelRequested: (panel) => root.togglePanel(panel)
@@ -785,6 +785,10 @@ ApplicationWindow {
 
     Snackbar {
         id: snackbar
+        parent: root.contentItem
+    }
+
+    DimSumSurprise {
         parent: root.contentItem
     }
 
@@ -928,13 +932,24 @@ ApplicationWindow {
         target: JournalController
         function onActionJournaled(commitId, description, undoable) {
             if (undoable)
-                snackbar.show(description, qsTr("Undo"), () => JournalController.undoEntry(commitId))
+                NotificationCenter.notify(description, "info", "", qsTr("Undo"),
+                    "journal-undo:" + commitId)
             else
                 snackbar.show(description)
         }
         function onOperationFinished(success, message) {
             if (message && message.length > 0)
                 snackbar.show(message)
+        }
+    }
+
+    Connections {
+        target: NotificationCenter
+        function onActionRequested(actionId, notificationId) {
+            if (actionId.startsWith("journal-undo:")) {
+                JournalController.undoEntry(actionId.slice("journal-undo:".length))
+                NotificationCenter.dismiss(notificationId)
+            }
         }
     }
 
@@ -951,6 +966,18 @@ ApplicationWindow {
         function onNotificationClicked() {
             Log.debug("ui", "Notification clicked -> show window")
             root.showAndRaise()
+        }
+        function onEditorLaunchFinished(success, message) {
+            NotificationCenter.notify(message, success ? "success" : "error",
+                success ? qsTr("External editor opened") : qsTr("External editor failed"))
+        }
+    }
+
+    Connections {
+        target: Experience
+        function onOperationFinished(success, message) {
+            NotificationCenter.notify(message, success ? "success" : "error",
+                success ? qsTr("Changelog action completed") : qsTr("Changelog action failed"))
         }
     }
 
@@ -1038,6 +1065,8 @@ ApplicationWindow {
             case "add-link": downloadFromURLDialog.open(); break
             case "about": aboutDialog.initialTab = 0; aboutDialog.open(); break
             case "about-license": aboutDialog.initialTab = 4; aboutDialog.open(); break
+            case "about-changelog": aboutDialog.initialTab = 5; aboutDialog.open(); break
+            case "dim-sum": Experience.considerStartupSurprise(true, false, true); break
             case "statistics": statisticsDialog.open(); break
             case "speed-limits": speedLimitDialog.open(); break
             case "history": root.activePanel = "history"; break
@@ -1047,6 +1076,14 @@ ApplicationWindow {
             default: break
             }
         }
+    }
+
+    Timer {
+        id: startupSurpriseTimer
+        interval: 1800
+        repeat: false
+        onTriggered: Experience.considerStartupSurprise(root.captureMode,
+            root.blockingFlowActive(), false)
     }
     function queueTop() { Log.info("ui", "Action: Queue top"); TransferController.queueTop() }
     function queueUp() { Log.info("ui", "Action: Queue up"); TransferController.queueUp() }
@@ -1074,7 +1111,7 @@ ApplicationWindow {
     }
     function openDocumentation() {
         Log.info("ui", "Action: Documentation")
-        Qt.openUrlExternally("https://codingmachineedge.github.io/qbittorrent-material/#wiki")
+        Qt.openUrlExternally("https://ding-ding-projects.github.io/qbittorrent-material/#wiki")
     }
     function donate() {
         Log.info("ui", "Action: Donate")
@@ -1254,6 +1291,13 @@ ApplicationWindow {
             root.searchTabEnabled = Preferences.isSearchEnabled()
             root.rssTabEnabled = Preferences.isRSSWidgetEnabled()
             root.executionLogEnabled = Preferences.value("GUI/Log/Enabled", false)
+            if (!Preferences.value("Experience/FunnyDisclosureShown", false)) {
+                NotificationCenter.notify(
+                    qsTr("English and Cantonese funny levels style every message, including errors and warnings. Facts and available actions stay unchanged. You can change or reset both levels in Options at any time."),
+                    "info", qsTr("Language voice controls"))
+                Preferences.setValue("Experience/FunnyDisclosureShown", true)
+                Preferences.apply()
+            }
         }
 
         var mask = Preferences.value("GUI/Log/Types", 15)
@@ -1271,5 +1315,17 @@ ApplicationWindow {
 
         Log.info("ui", "Shell ready. toolbar=" + root.toolbarVisible
                  + " statusbar=" + root.statusbarVisible + " sidebar=" + root.sidebarVisible)
+        startupSurpriseTimer.start()
+    }
+    function blockingFlowActive() {
+        if (root.activePanel.length > 0 || AppController.locked)
+            return true
+        var overlayChildren = Overlay.overlay ? Overlay.overlay.children : []
+        for (var i = 0; i < overlayChildren.length; ++i) {
+            var child = overlayChildren[i]
+            if (child && child.visible && child.modal === true)
+                return true
+        }
+        return false
     }
 }

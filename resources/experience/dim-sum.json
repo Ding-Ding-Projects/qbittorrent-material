@@ -1,0 +1,26 @@
+[
+  {
+    "id": "har-gow",
+    "english": "Shrimp dumpling",
+    "cantonese": "蝦餃",
+    "image": "qrc:/dim-sum/har-gow.png",
+    "altEnglish": "A bamboo steamer holding translucent shrimp dumplings",
+    "altCantonese": "竹蒸籠入面有晶瑩蝦餃"
+  },
+  {
+    "id": "siu-mai",
+    "english": "Pork and shrimp siu mai",
+    "cantonese": "燒賣",
+    "image": "qrc:/dim-sum/siu-mai.png",
+    "altEnglish": "A bamboo steamer holding pork and shrimp siu mai",
+    "altCantonese": "竹蒸籠入面有豬肉鮮蝦燒賣"
+  },
+  {
+    "id": "egg-tart",
+    "english": "Puff-pastry egg tart",
+    "cantonese": "酥皮蛋撻",
+    "image": "qrc:/dim-sum/egg-tart.png",
+    "altEnglish": "Golden puff-pastry egg tarts on a serving plate",
+    "altCantonese": "碟上面有金黃色酥皮蛋撻"
+  }
+]

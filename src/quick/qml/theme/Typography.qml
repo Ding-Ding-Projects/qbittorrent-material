@@ -43,8 +43,12 @@ QtObject {
     }
 
     //! Primary UI font family.
-    readonly property string family: robotoLoader.status === FontLoader.Ready
-        ? robotoLoader.name : "Roboto"
+    readonly property string family: ThemeManager.uiFontFamily.length > 0
+        ? ThemeManager.uiFontFamily
+        : (robotoLoader.status === FontLoader.Ready ? robotoLoader.name : "Roboto")
+    readonly property real scale: ThemeManager.uiFontScale
+    readonly property int normalWeight: ThemeManager.uiFontWeight
+    readonly property int strongWeight: Math.max(Font.DemiBold, ThemeManager.uiFontWeight)
     //! Google Sans is not bundled; Roboto is the verified display fallback.
     readonly property string displayFamily: family
     //! Monospaced family for tabular numerics (speeds/sizes/ratios).
@@ -55,42 +59,42 @@ QtObject {
 
     //! Large display specimen retained by the source scale.
     readonly property font displayXLarge: Qt.font({
-        family: displayFamily, pixelSize: 64, weight: Font.DemiBold,
+        family: displayFamily, pixelSize: 64 * scale, weight: strongWeight,
         letterSpacing: -1.28
     })
 
     //! Compact display specimen retained by the source scale.
     readonly property font displayLarge: Qt.font({
-        family: displayFamily, pixelSize: 48, weight: Font.DemiBold,
+        family: displayFamily, pixelSize: 48 * scale, weight: strongWeight,
         letterSpacing: -0.96
     })
 
     //! Page heading: 32/600, -0.02em tracking.
     readonly property font pageTitle: Qt.font({
-        family: displayFamily, pixelSize: 32, weight: Font.DemiBold,
+        family: displayFamily, pixelSize: 32 * scale, weight: strongWeight,
         letterSpacing: -0.64
     })
 
     //! Section and dialog heading: 24/600, restrained -0.01em tracking.
     readonly property font sectionTitle: Qt.font({
-        family: displayFamily, pixelSize: 24, weight: Font.DemiBold,
+        family: displayFamily, pixelSize: 24 * scale, weight: strongWeight,
         letterSpacing: -0.24
     })
 
     //! Product lockup: 20/600, -0.01em tracking.
     readonly property font brand: Qt.font({
-        family: displayFamily, pixelSize: 20, weight: Font.DemiBold,
+        family: displayFamily, pixelSize: 20 * scale, weight: strongWeight,
         letterSpacing: -0.20
     })
 
     //! Default desktop UI copy: 14/400.
     readonly property font body: Qt.font({
-        family: family, pixelSize: 14, weight: Font.Normal, letterSpacing: 0
+        family: family, pixelSize: 14 * scale, weight: normalWeight, letterSpacing: 0
     })
 
     //! Uppercase-compatible table label: 11/600, 0.07em tracking.
     readonly property font tableHeader: Qt.font({
-        family: family, pixelSize: 11, weight: Font.DemiBold,
+        family: family, pixelSize: 11 * scale, weight: strongWeight,
         letterSpacing: 0.77, capitalization: Font.AllUppercase
     })
 
@@ -99,18 +103,18 @@ QtObject {
 
     //! Operational metric: 18/600 monospace.
     readonly property font metric: Qt.font({
-        family: monoFamily, pixelSize: 18, weight: Font.DemiBold,
+        family: monoFamily, pixelSize: 18 * scale, weight: strongWeight,
         letterSpacing: 0
     })
 
     //! Muted labels and metadata: 12/400.
     readonly property font metadata: Qt.font({
-        family: family, pixelSize: 12, weight: Font.Normal, letterSpacing: 0
+        family: family, pixelSize: 12 * scale, weight: normalWeight, letterSpacing: 0
     })
 
     //! Tabular metadata: 12/400 monospace.
     readonly property font metadataMono: Qt.font({
-        family: monoFamily, pixelSize: 12, weight: Font.Normal,
+        family: monoFamily, pixelSize: 12 * scale, weight: normalWeight,
         letterSpacing: 0
     })
 
@@ -121,17 +125,17 @@ QtObject {
 
     //! 22 — About header and other large titles.
     readonly property font titleLarge: Qt.font({
-        family: family, pixelSize: 22, weight: Font.Normal, letterSpacing: 0
+        family: family, pixelSize: 22 * scale, weight: normalWeight, letterSpacing: 0
     })
 
     //! 16 SemiBold — card / group-box headers.
     readonly property font titleMedium: Qt.font({
-        family: family, pixelSize: 16, weight: Font.DemiBold, letterSpacing: 0
+        family: family, pixelSize: 16 * scale, weight: strongWeight, letterSpacing: 0
     })
 
     //! 14 SemiBold — tab labels.
     readonly property font titleSmall: Qt.font({
-        family: family, pixelSize: 14, weight: Font.DemiBold, letterSpacing: 0
+        family: family, pixelSize: 14 * scale, weight: strongWeight, letterSpacing: 0
     })
 
     // ---- Body -----------------------------------------------------------------
@@ -149,30 +153,30 @@ QtObject {
 
     //! 14 Medium — buttons.
     readonly property font labelLarge: Qt.font({
-        family: family, pixelSize: 14, weight: Font.Medium, letterSpacing: 0.28
+        family: family, pixelSize: 14 * scale, weight: Math.max(Font.Medium, normalWeight), letterSpacing: 0.28
     })
 
     //! Compact visible field label.
     readonly property font labelMedium: Qt.font({
-        family: family, pixelSize: 12, weight: Font.DemiBold, letterSpacing: 0.12
+        family: family, pixelSize: 12 * scale, weight: strongWeight, letterSpacing: 0.12
     })
 
     //! 11 — captions / counts.
     readonly property font labelSmall: Qt.font({
-        family: family, pixelSize: 11, weight: Font.Medium, letterSpacing: 0.5
+        family: family, pixelSize: 11 * scale, weight: Math.max(Font.Medium, normalWeight), letterSpacing: 0.5
     })
 
     // ---- Monospaced (tabular) -------------------------------------------------
 
     //! Default mono, matches bodyMedium size — for numeric table cells.
     readonly property font mono: Qt.font({
-        family: monoFamily, pixelSize: 14, weight: Font.Normal,
+        family: monoFamily, pixelSize: 14 * scale, weight: normalWeight,
         letterSpacing: 0
     })
 
     //! Larger mono for prominent numeric values (e.g. statistics figures).
     readonly property font monoLarge: Qt.font({
-        family: monoFamily, pixelSize: 18, weight: Font.DemiBold,
+        family: monoFamily, pixelSize: 18 * scale, weight: strongWeight,
         letterSpacing: 0
     })
 

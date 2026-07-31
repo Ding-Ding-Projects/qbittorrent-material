@@ -294,7 +294,7 @@ Dialog {
         onAccepted: (name) => {
             const err = editor.addRule(name)
             if (err && err.length > 0)
-                Snackbar.show(err)
+                NotificationCenter.notify(err, "error")
         }
     }
 
@@ -307,7 +307,7 @@ Dialog {
         onAccepted: (newName) => {
             const err = editor.renameRule(oldName, newName)
             if (err && err.length > 0)
-                Snackbar.show(err)
+                NotificationCenter.notify(err, "error")
         }
     }
 
@@ -320,7 +320,7 @@ Dialog {
         onAccepted: (cloneName) => {
             const err = editor.cloneRule(srcName, cloneName)
             if (err && err.length > 0)
-                Snackbar.show(err)
+                NotificationCenter.notify(err, "error")
         }
     }
 
@@ -354,7 +354,7 @@ Dialog {
         onAccepted: {
             const err = editor.importRules(file.toString())
             if (err && err.length > 0)
-                Snackbar.show(qsTr("Import error") + ": " + err)
+                NotificationCenter.notify(qsTr("Import error") + ": " + err, "error")
         }
     }
 
@@ -369,7 +369,7 @@ Dialog {
             const legacy = path.toLowerCase().endsWith(".rssrules")
             const err = editor.exportRules(path, legacy)
             if (err && err.length > 0)
-                Snackbar.show(qsTr("Export error") + ": " + err)
+                NotificationCenter.notify(qsTr("Export error") + ": " + err, "error")
         }
     }
 }

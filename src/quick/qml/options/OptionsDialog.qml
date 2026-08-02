@@ -117,6 +117,12 @@ Dialog {
         rail.currentIndex = 2
     }
 
+    function showPage(index) {
+        Log.info("ui", "OptionsDialog: showPage(" + index + ")")
+        open()
+        rail.currentIndex = Math.max(0, Math.min(index, pages.length - 1))
+    }
+
     onAccepted: {
         Log.info("ui", "OptionsDialog OK — applying settings")
         OptionsController.apply()

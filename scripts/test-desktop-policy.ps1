@@ -356,6 +356,29 @@ Test-Policy ($transferListView -match 'text:\s*qsTr\("Filter by:"\)' `
 
 $peerListModel = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/models/peerlistmodel.h")
 $peersTab = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/properties/PeersTab.qml")
+$commandPalette = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/components/CommandPalette.qml")
+$mainQmlForPalette = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/Main.qml")
+$optionsDialogForPalette = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/options/OptionsDialog.qml")
+Test-Policy ($mainQmlForPalette -match 'Shortcut\s*\{\s*sequences:\s*\["Ctrl\+Shift\+P"\]' `
+        -and $mainQmlForPalette -match 'CommandPalette\s*\{' `
+        -and $mainQmlForPalette -match 'invokePaletteCommand\(commandId\)') `
+    "Ctrl+Shift+P opens the wired desktop command palette"
+Test-Policy ($commandPalette -match 'WorkspaceManager\.evaluateRegularExpression' `
+        -and $commandPalette -match 'Keys\.onDownPressed' `
+        -and $commandPalette -match 'Keys\.onUpPressed' `
+        -and $commandPalette -match 'Keys\.onReturnPressed' `
+        -and $commandPalette -match 'Accessible\.name:\s*qsTr\("Search command palette"\)') `
+    "the command palette supports shared regex search, keyboard navigation, and accessible naming"
+Test-Policy ($commandPalette -match 'GUI/CommandPalette/FullWindow' `
+        -and $commandPalette -match 'color:\s*Theme\.color\("surface"\)' `
+        -and $commandPalette -match 'clip:\s*true') `
+    "the command palette persists card/full-window choice and paints a bounded scrollable surface"
+Test-Policy ($mainQmlForPalette -match 'id:\s*"options\.0"' `
+        -and $mainQmlForPalette -match 'id:\s*"options\.8"' `
+        -and $optionsDialogForPalette -match 'function showPage\(index\)') `
+    "the first palette slice reaches every Options page directly"
 Test-Policy ($peerListModel -match 'ContributionRole' `
         -and $peerListModel -match 'ContributionValueRole' `
         -and $peerListModel -match 'row\.contribution\s*=\s*static_cast<qreal>\(row\.totalUpload\)' `
@@ -391,6 +414,33 @@ Test-Policy ($updateController.Contains('releases/latest') -and $updateControlle
 Test-Policy ($updateParser.Contains('draft') -and $updateParser.Contains('prerelease') -and $updateParser.Contains('^build(?:-|\\.)') -and $updateParser.Contains('latest.buildNumber > current.number')) "the update parser accepts only stable immutable builds and compares run numbers"
 Test-Policy ($appCMake.Contains('QBT_BUILD_ID=\"${QBT_BUILD_ID}\"')) "the packaged release identity is compiled into the update checker"
 Test-Policy (Test-Path -LiteralPath (Get-RepositoryPath "docs/features/delivery/update-check.md") -PathType Leaf) "the in-app update-check behavior and failure modes are documented"
+
+$transferContextMenu = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/transferlist/TransferRowContextMenu.qml")
+$logContextMenu = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/log/LogContextMenu.qml")
+$transfersPage = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/shell/TransfersPage.qml")
+Test-Policy ($transferContextMenu -match 'placeholderText:\s*qsTr\("Search actions"\)' `
+        -and $transferContextMenu -match 'function matches\(label\)' `
+        -and $transferContextMenu -match 'visible:\s*root\.matches\(text\)' `
+        -and $transferContextMenu -match 'Qt\.callLater\(menuSearch\.forceActiveFocus\)') `
+    "the transfer context menu provides keyboard-focused local action search"
+Test-Policy ($transferContextMenu -match 'root\.startAction\.shortcut\.toString\(\)' `
+        -and $transferContextMenu -match 'root\.stopAction\.shortcut\.toString\(\)' `
+        -and $transferContextMenu -match 'root\.removeAction\.shortcut\.toString\(\)' `
+        -and $transfersPage -match 'startAction:\s*root\.shell\.actionStart' `
+        -and $transfersPage -match 'stopAction:\s*root\.shell\.actionStop' `
+        -and $transfersPage -match 'removeAction:\s*root\.shell\.actionDelete') `
+    "transfer context shortcuts derive from the shared registered actions"
+Test-Policy ($logContextMenu -match 'Accessible\.name:\s*qsTr\("Search log actions"\)' `
+        -and $logContextMenu -match 'visible:\s*root\.matches\(text\)' `
+        -and $logContextMenu -match 'Accessible\.keyShortcut:\s*"Ctrl\+C"' `
+        -and $logContextMenu -match 'Qt\.callLater\(menuSearch\.forceActiveFocus\)') `
+    "the log context menu filters locally and truthfully exposes its Copy shortcut"
+Test-Policy (Test-Path -LiteralPath `
+        (Get-RepositoryPath "docs/features/experience/context-menu-search.md") -PathType Leaf) `
+    "searchable context actions and shortcut truthfulness are documented"
 
 $workflowPath = Get-RepositoryPath ".github/workflows/release-every-push.yml"
 Test-Policy (Test-Path -LiteralPath $workflowPath -PathType Leaf) "the push release workflow exists"

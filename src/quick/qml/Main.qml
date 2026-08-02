@@ -346,7 +346,7 @@ ApplicationWindow {
     Action {
         id: actionPauseSession
         text: qsTr("Pau&se Session")
-        shortcut: "Ctrl+Shift+P"
+        shortcut: "Ctrl+Alt+P"
         onTriggered: root.pauseSession()
     }
     property alias actionResumeSession: actionResumeSession
@@ -829,6 +829,31 @@ ApplicationWindow {
 
     // Shell dialogs (per-feature types, referenced by name in the single module).
     OptionsDialog { id: optionsDialog; parent: Overlay.overlay }
+    CommandPalette {
+        id: commandPalette
+        commands: [
+            { id: "tab.transfers", title: qsTr("Transfers"), group: qsTr("Navigate"), destination: qsTr("Main view · Transfers"), keywords: "torrents downloads" },
+            { id: "tab.search", title: qsTr("Search"), group: qsTr("Navigate"), destination: qsTr("Main view · Search"), keywords: "plugins results" },
+            { id: "tab.rss", title: qsTr("RSS"), group: qsTr("Navigate"), destination: qsTr("Main view · RSS"), keywords: "feeds rules" },
+            { id: "tab.log", title: qsTr("Execution log"), group: qsTr("Navigate"), destination: qsTr("Main view · Log"), keywords: "messages blocked IP" },
+            { id: "tab.workspace", title: qsTr("Workspace"), group: qsTr("Navigate"), destination: qsTr("Main view · Workspace"), keywords: "notes tabs" },
+            { id: "action.addFile", title: qsTr("Add torrent file"), group: qsTr("Action"), destination: qsTr("File picker"), keywords: "open torrent" },
+            { id: "action.addLink", title: qsTr("Add torrent link"), group: qsTr("Action"), destination: qsTr("Add link dialog"), keywords: "magnet URL clipboard" },
+            { id: "action.history", title: qsTr("History"), group: qsTr("Action"), destination: qsTr("History panel"), keywords: "undo journal" },
+            { id: "action.statistics", title: qsTr("Statistics"), group: qsTr("Action"), destination: qsTr("Statistics dialog"), keywords: "session totals" },
+            { id: "action.about", title: qsTr("About"), group: qsTr("Action"), destination: qsTr("About dialog"), keywords: "version changelog" },
+            { id: "options.0", title: qsTr("Options: Behavior"), group: qsTr("Settings"), destination: qsTr("Options · Behavior"), keywords: "language theme funny tray startup default apps" },
+            { id: "options.1", title: qsTr("Options: Downloads"), group: qsTr("Settings"), destination: qsTr("Options · Downloads"), keywords: "save path incomplete watched folders" },
+            { id: "options.2", title: qsTr("Options: Connection"), group: qsTr("Settings"), destination: qsTr("Options · Connection"), keywords: "port proxy UPnP IP filter" },
+            { id: "options.3", title: qsTr("Options: Speed"), group: qsTr("Settings"), destination: qsTr("Options · Speed"), keywords: "limits scheduler bandwidth" },
+            { id: "options.4", title: qsTr("Options: BitTorrent"), group: qsTr("Settings"), destination: qsTr("Options · BitTorrent"), keywords: "privacy encryption queue seeding DHT PeX" },
+            { id: "options.5", title: qsTr("Options: Search"), group: qsTr("Settings"), destination: qsTr("Options · Search"), keywords: "plugins Python" },
+            { id: "options.6", title: qsTr("Options: RSS"), group: qsTr("Settings"), destination: qsTr("Options · RSS"), keywords: "feeds refresh rules" },
+            { id: "options.7", title: qsTr("Options: Web UI"), group: qsTr("Settings"), destination: qsTr("Options · Web UI"), keywords: "API key HTTPS authentication" },
+            { id: "options.8", title: qsTr("Options: Advanced"), group: qsTr("Settings"), destination: qsTr("Options · Advanced"), keywords: "libtorrent cache network disk" }
+        ]
+        onCommandInvoked: (commandId) => root.invokePaletteCommand(commandId)
+    }
     StatisticsDialog { id: statisticsDialog; parent: Overlay.overlay }
     TorrentCreatorDialog { id: torrentCreatorDialog; parent: Overlay.overlay }
     SpeedLimitDialog { id: speedLimitDialog; parent: Overlay.overlay }
@@ -876,6 +901,7 @@ ApplicationWindow {
     Shortcut { sequences: ["Alt+3"]; onActivated: root.switchToTab(2) }
     Shortcut { sequences: ["Alt+4"]; onActivated: root.switchToTab(3) }
     Shortcut { sequences: ["Alt+5"]; onActivated: root.switchToTab(4) }
+    Shortcut { sequences: ["Ctrl+Shift+P"]; onActivated: commandPalette.openPalette() }
     Shortcut { sequences: ["Escape"]; enabled: root.activePanel.length > 0; onActivated: root.closePanel() }
     Shortcut {
         sequences: [StandardKey.Find, "Ctrl+E"]
@@ -1018,6 +1044,21 @@ ApplicationWindow {
             optionsDialog.showConnectionTab()
         else
             optionsDialog.open()
+    }
+    function invokePaletteCommand(commandId) {
+        Log.info("ui", "Command palette: " + commandId)
+        if (commandId.indexOf("tab.") === 0) {
+            var tabs = { "tab.transfers": 0, "tab.search": 1, "tab.rss": 2,
+                "tab.log": 3, "tab.workspace": 4 }
+            switchToTab(tabs[commandId])
+        }
+        else if (commandId.indexOf("options.") === 0)
+            optionsDialog.showPage(parseInt(commandId.slice(8)))
+        else if (commandId === "action.addFile") addTorrentFile()
+        else if (commandId === "action.addLink") addTorrentLink()
+        else if (commandId === "action.history") togglePanel("history")
+        else if (commandId === "action.statistics") showStatistics()
+        else if (commandId === "action.about") showAbout()
     }
     function exitApp() {
         Log.info("ui", "Action: Exit")

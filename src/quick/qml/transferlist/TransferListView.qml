@@ -39,6 +39,7 @@ Item {
 
     /*! The shared sort/filter proxy (set by \l TransfersTab). */
     property var proxy: null
+    property var shell: null
 
     /*! Name of the current (focused) torrent — published by the Name cell. */
     property string currentName: ""
@@ -484,6 +485,9 @@ Item {
 
     TransferRowContextMenu {
         id: rowMenu
+        startAction: view.shell ? view.shell.actionStart : null
+        stopAction: view.shell ? view.shell.actionStop : null
+        removeAction: view.shell ? view.shell.actionDelete : null
         onRenameRequested: renameDialog.open()
         onSetLocationRequested: setLocationDialog.open()
         onManageContentRequested: Log.warning("ui", "Manage content: no content dialog wired for the transfer row menu yet")

@@ -104,6 +104,7 @@ Item {
             TransferListView {
                 id: transferList
                 proxy: transferProxy
+                shell: root.shell
                 SplitView.fillHeight: true
                 SplitView.minimumHeight: 220
             }

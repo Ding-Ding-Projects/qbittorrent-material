@@ -972,6 +972,9 @@ Item {
     // ---- Context menu + dialogs (same wiring as the legacy view) ------------
     TransferRowContextMenu {
         id: rowMenu
+        startAction: root.shell.actionStart
+        stopAction: root.shell.actionStop
+        removeAction: root.shell.actionDelete
         onRenameRequested: renameDialog.open()
         onSetLocationRequested: setLocationDialog.open()
         onManageContentRequested: {

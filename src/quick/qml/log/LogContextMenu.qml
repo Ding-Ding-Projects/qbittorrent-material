@@ -37,12 +37,38 @@ Menu {
 
     modal: true
     Material.elevation: Spacing.elevationMenu
+    property string filterText: ""
+
+    function matches(label) {
+        return filterText.length === 0
+            || String(label).toLocaleLowerCase().includes(filterText.toLocaleLowerCase())
+    }
+
+    MenuItem {
+        focusPolicy: Qt.NoFocus
+        implicitHeight: Spacing.controlHeight + (Spacing.sm * 2)
+        contentItem: TextField {
+            id: menuSearch
+            enabled: true
+            placeholderText: qsTr("Search actions")
+            text: root.filterText
+            selectByMouse: true
+            Accessible.name: qsTr("Search log actions")
+            onTextEdited: root.filterText = text
+            Keys.onEscapePressed: root.close()
+        }
+    }
+
+    MenuSeparator {}
 
     MenuItem {
         id: copyItem
 
         text: qsTr("Copy")
         enabled: root.canCopy
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
+        Accessible.keyShortcut: "Ctrl+C"
 
         contentItem: RowLayout {
             spacing: Spacing.sm
@@ -59,6 +85,12 @@ Menu {
                 color: copyItem.enabled ? Theme.color("onSurface") : Theme.color("outline")
                 Layout.fillWidth: true
             }
+
+            Label {
+                text: "Ctrl+C"
+                font: Typography.labelMedium
+                color: copyItem.enabled ? Theme.color("onSurfaceVariant") : Theme.color("outline")
+            }
         }
 
         onTriggered: {
@@ -71,6 +103,8 @@ Menu {
         id: clearItem
 
         text: qsTr("Clear")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
 
         contentItem: RowLayout {
             spacing: Spacing.sm
@@ -95,5 +129,9 @@ Menu {
         }
     }
 
-    onOpened: Log.debug("ui", "Execution Log context menu opened; canCopy=" + root.canCopy)
+    onAboutToShow: root.filterText = ""
+    onOpened: {
+        Log.debug("ui", "Execution Log context menu opened; canCopy=" + root.canCopy)
+        Qt.callLater(menuSearch.forceActiveFocus)
+    }
 }

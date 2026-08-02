@@ -175,3 +175,28 @@ Failed downloads, oversized or malformed responses, and unsupported release
 objects produce a retryable notification without emitting the misleading
 "up to date" result. Concurrent checks are coalesced, response size is bounded,
 and parser/comparison logic is isolated from the network path for direct tests.
+
+## 2026-08-01 — verified filters and next global-memory slices
+
+The Split Dock filter failure was traced beyond pointer delivery: QML called
+ordinary C++ property setters as methods even though they were not invokable.
+Status, category, tag, and tracker rows now assign the writable proxy
+properties, while an explicit invokable tracker reset represents All trackers.
+A real-input Lowlevel headless-desktop check selected Completed (0) and changed
+the transfer table to its no-match result. The installed and locally built
+executables matched byte-for-byte, and all 36 resume records remained present.
+
+The first bounded command-palette slice adds Ctrl+Shift+P, accessible keyboard
+navigation, shared regex-builder search, core actions, all five destinations,
+and direct navigation to all nine Options pages. Pause Session moved to
+Ctrl+Alt+P. The palette persists card versus full-window presentation. It does
+not yet enumerate every individual setting as a live inline control or
+teleport/highlight a precise setting control.
+
+Transfer and log context menus now include keyboard-focused local action search.
+Transfer Start, Stop, and Remove display shortcuts from their shared actions;
+Log Copy displays Ctrl+C. Remaining global-memory priorities include complete
+per-setting command-palette controls/teleport, search and true shortcut labels
+across every context menu, systematic bilingual release code names and photos,
+full search-builder coverage for settings/properties, universal rendered-element
+appearance editing, and broader bulk/export-everything coverage.

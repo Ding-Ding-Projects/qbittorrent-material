@@ -472,6 +472,18 @@ $logContextMenu = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/log/LogContextMenu.qml")
 $transfersPage = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/shell/TransfersPage.qml")
+$transferListView = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/transferlist/TransferListView.qml")
+Test-Policy ($transfersPage -match 'property var selectedTorrentIds:\s*\[\]' `
+        -and $transfersPage -match 'function remapSelection\(\)' `
+        -and $transfersPage -match 'visibleIds\.indexOf\(id\)' `
+        -and $transfersPage -match 'function onLayoutChanged\(\) \{ root\.remapSelection\(\) \}') `
+    "redesigned transfer selection remaps stable torrent IDs after model layout changes"
+Test-Policy ($transferListView -match 'property var _selectedTorrentIds:\s*\[\]' `
+        -and $transferListView -match 'function _remapSelection\(\)' `
+        -and $transferListView -match 'visibleIds\.indexOf\(id\)' `
+        -and $transferListView -match 'function onLayoutChanged\(\) \{ view\._remapSelection\(\); \}') `
+    "legacy transfer selection remaps stable torrent IDs after model layout changes"
 Test-Policy ($transferContextMenu -match 'placeholderText:\s*qsTr\("Search actions"\)' `
         -and $transferContextMenu -match 'function matches\(label\)' `
         -and $transferContextMenu -match 'visible:\s*root\.matches\(text\)' `

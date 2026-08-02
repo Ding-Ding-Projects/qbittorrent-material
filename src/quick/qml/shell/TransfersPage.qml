@@ -79,6 +79,11 @@ Item {
 
     // ---- Selection -----------------------------------------------------------
     property var selectedRows: []
+    // Proxy rows are transient: sorting and filtering can move a torrent to a
+    // different row without changing the row count. Keep the actual selection
+    // identity separately so model layout changes can remap the highlights.
+    property var selectedTorrentIds: []
+    property string currentTorrentId: ""
 
     function rowClicked(row, modifiers) {
         if (modifiers & Qt.ControlModifier) {
@@ -107,20 +112,61 @@ Item {
         var ids = []
         for (var i = 0; i < root.selectedRows.length; ++i) {
             const id = root.filterProxy.idAt(root.selectedRows[i])
-            if (id && id.length > 0)
+            if (id && id.length > 0 && ids.indexOf(id) < 0)
                 ids.push(id)
         }
-        TransferController.selectedIds = ids
-        if (root.currentRow >= 0) {
+        root.selectedTorrentIds = ids
+        root.currentTorrentId = root.currentRow >= 0
+            ? root.filterProxy.idAt(root.currentRow) : ""
+        root.publishSelection()
+    }
+
+    function publishSelection() {
+        TransferController.selectedIds = root.selectedTorrentIds
+        if (root.currentRow >= 0 && root.currentTorrentId.length > 0) {
             const idx = root.filterProxy.index(root.currentRow, 0)
             root.currentName = String(root.filterProxy.data(idx, TransferListModel.NameRole) || "")
             root.currentState = Number(root.filterProxy.data(idx, TransferListModel.StateRole) || 0)
-            PropertiesController.currentTorrentId = root.filterProxy.idAt(root.currentRow)
+            PropertiesController.currentTorrentId = root.currentTorrentId
         } else {
             root.currentName = ""
             root.currentState = 0
             PropertiesController.currentTorrentId = ""
         }
+    }
+
+    function remapSelection() {
+        if (!root.filterProxy || typeof root.filterProxy.visibleIds !== "function") {
+            root.clearSelection()
+            return
+        }
+
+        const visibleIds = root.filterProxy.visibleIds()
+        var rows = []
+        var ids = []
+        for (var i = 0; i < root.selectedTorrentIds.length; ++i) {
+            const id = root.selectedTorrentIds[i]
+            const row = visibleIds.indexOf(id)
+            if (row >= 0) {
+                rows.push(row)
+                ids.push(id)
+            }
+        }
+
+        var focusedId = root.currentTorrentId
+        var focusedRow = focusedId.length > 0 ? visibleIds.indexOf(focusedId) : -1
+        if (focusedRow < 0 && rows.length > 0) {
+            focusedRow = rows[0]
+            focusedId = ids[0]
+        } else if (focusedRow < 0) {
+            focusedId = ""
+        }
+
+        root.selectedRows = rows
+        root.selectedTorrentIds = ids
+        root.currentRow = focusedRow
+        root.currentTorrentId = focusedId
+        root.publishSelection()
     }
 
     // A: floating selection bar (Tonal Rail only, when a torrent is focused).
@@ -212,10 +258,10 @@ Item {
     Connections {
         target: root.filterProxy
         function onCountChanged() {
-            // Row indexes shift under filtering/sorting — resync conservatively.
-            if (root.selectedRows.length > 0)
-                root.clearSelection()
+            root.remapSelection()
         }
+        function onFilterChanged() { root.remapSelection() }
+        function onLayoutChanged() { root.remapSelection() }
     }
 
     // ---- Table geometry per style (the design's tbl config) -----------------

@@ -303,3 +303,21 @@ Verification:
 - `scripts/test-desktop-policy.ps1` covers action, blob, annotation, and
   settings requeue invariants.
 - `git diff --check` passed for the journal implementation and header.
+
+## 2026-08-02 — stable transfer selection across sorting and filtering
+
+Both transfer-table implementations now keep selected and focused torrent IDs
+as their canonical selection state. Row highlights are remapped from those IDs
+after proxy count, filter, and layout changes, so a sort can no longer leave a
+highlighted row pointing at a different torrent while destructive actions still
+target the original selection. IDs that are removed or hidden are pruned, and
+Properties follows the remapped focused torrent.
+
+Verification:
+
+- Targeted Qt 6.8 `qmllint` completed with exit code 0; its output contained
+  only the repository's existing unresolved-import and unqualified-access
+  warnings.
+- Desktop policy assertions cover stable-ID storage and layout remapping in
+  the redesigned and legacy transfer tables.
+- `git diff --check` passed.

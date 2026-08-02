@@ -43,6 +43,11 @@ Item {
 
     /*! Name of the current (focused) torrent — published by the Name cell. */
     property string currentName: ""
+    // DataTable selection is row-based, while proxy rows move under sorting and
+    // filtering. These IDs are the canonical selection/focus identity used to
+    // restore the correct rows after a proxy layout change.
+    property var _selectedTorrentIds: []
+    property string _currentTorrentId: ""
 
     function focusFilter() { filterField.forceActiveFocus() }
 
@@ -181,11 +186,75 @@ Item {
         var rows = table.selectedRows;
         for (var i = 0; i < rows.length; ++i) {
             var id = view.proxy.idAt(rows[i]);
-            if (id && id.length > 0)
+            if (id && id.length > 0 && ids.indexOf(id) < 0)
                 ids.push(id);
         }
-        TransferController.selectedIds = ids;
+        view._selectedTorrentIds = ids;
+        view._currentTorrentId = table.currentRow >= 0
+            ? view.proxy.idAt(table.currentRow) : "";
+        view._publishSelection();
         Log.debug("ui", "Transfer selection -> " + ids.length + " torrent(s)");
+    }
+
+    function _publishSelection() {
+        TransferController.selectedIds = view._selectedTorrentIds;
+        if (view.proxy && table.currentRow >= 0 && view._currentTorrentId.length > 0) {
+            var idx = view.proxy.index(table.currentRow, 0);
+            view.currentName = String(view.proxy.data(idx, TransferListModel.NameRole) || "");
+            PropertiesController.currentTorrentId = view._currentTorrentId;
+        } else {
+            view.currentName = "";
+            PropertiesController.currentTorrentId = "";
+        }
+    }
+
+    function _remapSelection() {
+        if (!view.proxy || typeof view.proxy.visibleIds !== "function") {
+            view._clearSelection();
+            return;
+        }
+
+        var visibleIds = view.proxy.visibleIds();
+        var rows = [];
+        var ids = [];
+        for (var i = 0; i < view._selectedTorrentIds.length; ++i) {
+            var id = view._selectedTorrentIds[i];
+            var row = visibleIds.indexOf(id);
+            if (row >= 0) {
+                rows.push(row);
+                ids.push(id);
+            }
+        }
+
+        var focusedId = view._currentTorrentId;
+        var focusedRow = focusedId.length > 0 ? visibleIds.indexOf(focusedId) : -1;
+        if (focusedRow < 0 && rows.length > 0) {
+            focusedRow = rows[0];
+            focusedId = ids[0];
+        } else if (focusedRow < 0) {
+            focusedId = "";
+        }
+
+        table.selectedRows = rows;
+        table.currentRow = focusedRow;
+        view._selectedTorrentIds = ids;
+        view._currentTorrentId = focusedId;
+        view._publishSelection();
+    }
+
+    function _clearSelection() {
+        table.selectedRows = [];
+        table.currentRow = -1;
+        view._selectedTorrentIds = [];
+        view._currentTorrentId = "";
+        view._publishSelection();
+    }
+
+    Connections {
+        target: view.proxy
+        function onCountChanged() { view._remapSelection(); }
+        function onFilterChanged() { view._remapSelection(); }
+        function onLayoutChanged() { view._remapSelection(); }
     }
 
     function _applySort() {

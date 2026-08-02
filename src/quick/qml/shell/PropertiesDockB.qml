@@ -18,6 +18,8 @@ import qBittorrent
 Rectangle {
     id: root
 
+    // The full Properties panel also has HTTP Sources at controller index 3.
+    // Keep this dock's visual index local and translate it at the boundary.
     property int currentTab: 0
 
     radius: 12
@@ -27,12 +29,22 @@ Rectangle {
     clip: true
 
     readonly property var tabs: [
-        { label: qsTr("General"), icon: "description" },
-        { label: qsTr("Trackers"), icon: "dns" },
-        { label: qsTr("Peers"), icon: "groups" },
-        { label: qsTr("Content"), icon: "folder" },
-        { label: qsTr("Speed"), icon: "show_chart" }
+        { label: qsTr("General"), icon: "description", controllerTab: PropertiesController.General },
+        { label: qsTr("Trackers"), icon: "dns", controllerTab: PropertiesController.Trackers },
+        { label: qsTr("Peers"), icon: "groups", controllerTab: PropertiesController.Peers },
+        { label: qsTr("Content"), icon: "folder", controllerTab: PropertiesController.Content },
+        { label: qsTr("Speed"), icon: "show_chart", controllerTab: PropertiesController.Speed }
     ]
+
+    function activateCurrentTab() {
+        PropertiesController.currentTab = tabs[currentTab].controllerTab
+    }
+
+    onCurrentTabChanged: activateCurrentTab()
+    onVisibleChanged: {
+        if (visible)
+            activateCurrentTab()
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -116,7 +128,8 @@ Rectangle {
             color: Theme.color("outlineVariant")
         }
 
-        // Body: General shows the details grid; others reuse PropertiesPanel tabs.
+        // Keep Split Dock's compact General grid and host the same real tab
+        // components used by PropertiesPanel for every other destination.
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -128,30 +141,38 @@ Rectangle {
                 columns: 3
             }
 
-            Item {
+            StackLayout {
                 anchors.fill: parent
-                visible: root.currentTab !== 0
+                currentIndex: root.currentTab - 1
+                visible: root.currentTab !== 0 && PropertiesController.hasTorrent
 
-                Row {
-                    anchors.centerIn: parent
-                    spacing: 8
-                    MDIcon {
-                        anchors.verticalCenter: parent.verticalCenter
-                        name: root.tabs[root.currentTab].icon
-                        size: 28
-                        color: Theme.color("outline")
-                    }
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: (TransferController.selectionCount > 0)
-                            ? qsTr("%1 — see the properties panel").arg(root.tabs[root.currentTab].label)
-                            : qsTr("%1 — no selection").arg(root.tabs[root.currentTab].label)
-                        font.family: Typography.family
-                        font.pixelSize: 13
-                        color: Theme.color("onSurfaceVariant")
-                    }
+                TrackersTab {}
+                PeersTab {}
+                ContentTab {}
+                SpeedTab {}
+            }
+
+            ColumnLayout {
+                anchors.centerIn: parent
+                spacing: 8
+                visible: root.currentTab !== 0 && !PropertiesController.hasTorrent
+
+                MDIcon {
+                    Layout.alignment: Qt.AlignHCenter
+                    name: root.tabs[root.currentTab].icon
+                    size: 28
+                    color: Theme.color("outline")
+                }
+                Text {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: qsTr("Select a torrent to view %1").arg(root.tabs[root.currentTab].label.toLowerCase())
+                    font.family: Typography.family
+                    font.pixelSize: 13
+                    color: Theme.color("onSurfaceVariant")
                 }
             }
         }
     }
+
+    Component.onCompleted: activateCurrentTab()
 }

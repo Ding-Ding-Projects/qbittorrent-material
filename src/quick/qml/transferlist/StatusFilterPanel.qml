@@ -86,7 +86,7 @@ Column {
 
             background: Rectangle {
                 color: rowItem.selected ? Theme.color("surfaceWarm")
-                                        : (rowItem.hovered ? Theme.color("surfaceWarm") : "transparent")
+                                        : (rowPointer.containsMouse ? Theme.color("surfaceWarm") : "transparent")
                 radius: Spacing.radiusControl
             }
 
@@ -112,19 +112,26 @@ Column {
                 }
             }
 
-            HoverHandler { cursorShape: Qt.PointingHandCursor }
-
             onClicked: {
                 Log.info("ui", "Status filter -> " + model.label + " (" + model.value + ")");
                 if (root.proxy)
                     root.proxy.setStatusFilter(model.value);
             }
 
-            TapHandler {
-                acceptedButtons: Qt.RightButton
-                onTapped: {
-                    Log.debug("ui", "Status filter panel context menu");
-                    contextMenu.popup();
+            MouseArea {
+                id: rowPointer
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                onClicked: (mouse) => {
+                    if (mouse.button === Qt.LeftButton) {
+                        if (root.proxy)
+                            root.proxy.setStatusFilter(rowItem.model.value);
+                    } else {
+                        Log.debug("ui", "Status filter panel context menu");
+                        contextMenu.popup();
+                    }
                 }
             }
         }

@@ -119,7 +119,7 @@ Column {
 
             background: Rectangle {
                 color: del.filterActive ? Theme.color("surfaceWarm")
-                                    : (del.hovered ? Theme.color("surfaceWarm") : "transparent")
+                                    : (rowPointer.containsMouse ? Theme.color("surfaceWarm") : "transparent")
                 radius: Spacing.radiusControl
             }
 
@@ -144,17 +144,23 @@ Column {
                 }
             }
 
-            HoverHandler { cursorShape: Qt.PointingHandCursor }
-
             onClicked: root._apply(del.type, del.value)
 
-            TapHandler {
-                acceptedButtons: Qt.RightButton
-                onTapped: {
-                    contextMenu.category = (del.type === 2) ? del.value : "";
-                    contextMenu.isReal = (del.type === 2);
-                    Log.debug("ui", "Category filter context menu for '" + contextMenu.category + "'");
-                    contextMenu.popup();
+            MouseArea {
+                id: rowPointer
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                onClicked: (mouse) => {
+                    if (mouse.button === Qt.LeftButton) {
+                        root._apply(del.type, del.value);
+                    } else {
+                        contextMenu.category = (del.type === 2) ? del.value : "";
+                        contextMenu.isReal = (del.type === 2);
+                        Log.debug("ui", "Category filter context menu for '" + contextMenu.category + "'");
+                        contextMenu.popup();
+                    }
                 }
             }
         }

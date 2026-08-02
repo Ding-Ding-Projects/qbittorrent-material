@@ -95,7 +95,7 @@ Column {
 
             background: Rectangle {
                 color: rowItem.selected ? Theme.color("surfaceWarm")
-                                        : (rowItem.hovered ? Theme.color("surfaceWarm") : "transparent")
+                                        : (rowPointer.containsMouse ? Theme.color("surfaceWarm") : "transparent")
                 radius: Spacing.radiusControl
             }
 
@@ -121,17 +121,23 @@ Column {
                 }
             }
 
-            HoverHandler { cursorShape: Qt.PointingHandCursor }
-
             onClicked: root._apply(rowItem.model.type, rowItem.model.value)
 
-            TapHandler {
-                acceptedButtons: Qt.RightButton
-                onTapped: {
-                    contextMenu.tag = (rowItem.model.type === 2) ? rowItem.model.value : "";
-                    contextMenu.isReal = (rowItem.model.type === 2);
-                    Log.debug("ui", "Tag filter context menu for '" + contextMenu.tag + "'");
-                    contextMenu.popup();
+            MouseArea {
+                id: rowPointer
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                onClicked: (mouse) => {
+                    if (mouse.button === Qt.LeftButton) {
+                        root._apply(rowItem.model.type, rowItem.model.value);
+                    } else {
+                        contextMenu.tag = (rowItem.model.type === 2) ? rowItem.model.value : "";
+                        contextMenu.isReal = (rowItem.model.type === 2);
+                        Log.debug("ui", "Tag filter context menu for '" + contextMenu.tag + "'");
+                        contextMenu.popup();
+                    }
                 }
             }
         }

@@ -278,6 +278,9 @@ foreach ($filterPanel in @(
             -and $filterPanelSource -match 'elide:\s*Text\.ElideRight' `
             -and $filterPanelSource -match 'wrapMode:\s*Text\.NoWrap') `
         "$filterPanel bounds and elides long translated labels"
+    Test-Policy ($filterPanelSource -match 'acceptedButtons:\s*Qt\.LeftButton\s*\|\s*Qt\.RightButton' `
+            -and $filterPanelSource -notmatch 'TapHandler\s*\{') `
+        "$filterPanel routes left and right clicks through one pointer target"
 }
 
 $changelogQml = Get-Content -Raw -LiteralPath `

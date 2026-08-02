@@ -68,7 +68,7 @@ Column {
 
             background: Rectangle {
                 color: rowItem.selected ? Theme.color("surfaceWarm")
-                                        : (rowItem.hovered ? Theme.color("surfaceWarm") : "transparent")
+                                        : (rowPointer.containsMouse ? Theme.color("surfaceWarm") : "transparent")
                 radius: Spacing.radiusControl
             }
 
@@ -94,8 +94,6 @@ Column {
                 }
             }
 
-            HoverHandler { cursorShape: Qt.PointingHandCursor }
-
             onClicked: {
                 root.selectedFlag = rowItem.model.announceFlag;
                 Log.info("ui", "Tracker-status filter -> " + rowItem.model.label
@@ -104,9 +102,21 @@ Column {
                     root.proxy.setAnnounceStatusFilter(rowItem.model.announceFlag);
             }
 
-            TapHandler {
-                acceptedButtons: Qt.RightButton
-                onTapped: contextMenu.popup()
+            MouseArea {
+                id: rowPointer
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                onClicked: (mouse) => {
+                    if (mouse.button === Qt.LeftButton) {
+                        root.selectedFlag = rowItem.model.announceFlag;
+                        if (root.proxy)
+                            root.proxy.setAnnounceStatusFilter(rowItem.model.announceFlag);
+                    } else {
+                        contextMenu.popup();
+                    }
+                }
             }
         }
     }

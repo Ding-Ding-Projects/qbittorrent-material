@@ -29,7 +29,6 @@ class ExperienceController final : public QObject
     QML_SINGLETON
     Q_DISABLE_COPY_MOVE(ExperienceController)
 
-    Q_PROPERTY(bool dimSumEnabled READ dimSumEnabled WRITE setDimSumEnabled NOTIFY dimSumEnabledChanged)
     Q_PROPERTY(bool startupDishVisible READ startupDishVisible NOTIFY startupDishChanged)
     Q_PROPERTY(QVariantMap startupDish READ startupDish NOTIFY startupDishChanged)
     Q_PROPERTY(QVariantList changelog READ changelog CONSTANT)
@@ -38,8 +37,6 @@ public:
     static ExperienceController *create(QQmlEngine *, QJSEngine *);
     static ExperienceController *instance();
 
-    [[nodiscard]] bool dimSumEnabled() const;
-    void setDimSumEnabled(bool enabled);
     [[nodiscard]] bool startupDishVisible() const;
     [[nodiscard]] QVariantMap startupDish() const;
     [[nodiscard]] QVariantList changelog() const;
@@ -56,7 +53,6 @@ public:
     Q_INVOKABLE bool exportChangelog(const QUrl &destination, const QVariantList &entries);
 
 signals:
-    void dimSumEnabledChanged();
     void startupDishChanged();
     void operationFinished(bool success, const QString &message);
 
@@ -67,7 +63,6 @@ private:
     static QString markdownFor(const QVariantList &entries);
 
     static ExperienceController *s_instance;
-    bool m_dimSumEnabled = true;
     bool m_startupEvaluated = false;
     bool m_startupDishVisible = false;
     QVariantMap m_startupDish;

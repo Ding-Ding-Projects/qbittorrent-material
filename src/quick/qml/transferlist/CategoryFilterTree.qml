@@ -58,10 +58,10 @@ Column {
             root.proxy.clearCategoryFilter();
         } else if (type === 1) {
             Log.info("ui", "Category filter -> Uncategorized");
-            root.proxy.setCategoryFilter("");
+            root.proxy.categoryFilter = "";
         } else {
             Log.info("ui", "Category filter -> '" + value + "'");
-            root.proxy.setCategoryFilter(value);
+            root.proxy.categoryFilter = value;
         }
     }
 

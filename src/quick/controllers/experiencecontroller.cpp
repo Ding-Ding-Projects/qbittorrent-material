@@ -30,7 +30,6 @@ using namespace Qt::Literals::StringLiterals;
 
 namespace
 {
-    const QString kDimSumEnabledKey = u"Experience/DimSumSurpriseEnabled"_s;
     const QString kFirstRunCompleteKey = u"Experience/FirstRunCompleted"_s;
     const QString kRegexSafetyPrefix = u"(*LIMIT_MATCH=100000)(*LIMIT_DEPTH=1000)(?:"_s;
     const QString kCommitBaseUrl = u"https://github.com/Ding-Ding-Projects/qbittorrent-material/commit/"_s;
@@ -77,28 +76,6 @@ ExperienceController::ExperienceController(QObject *parent)
     , m_changelog(loadArrayResource(u":/experience/changelog.json"_s))
     , m_cantoneseCatalog(loadObjectResource(u":/i18n/cantonese.json"_s))
 {
-#ifdef QBT_HAS_PREFERENCES
-    m_dimSumEnabled = Preferences::instance()->value(kDimSumEnabledKey, true).toBool();
-#endif
-}
-
-bool ExperienceController::dimSumEnabled() const
-{
-    return m_dimSumEnabled;
-}
-
-void ExperienceController::setDimSumEnabled(const bool enabled)
-{
-    if (m_dimSumEnabled == enabled)
-        return;
-    m_dimSumEnabled = enabled;
-#ifdef QBT_HAS_PREFERENCES
-    Preferences::instance()->setValue(kDimSumEnabledKey, enabled);
-    Preferences::instance()->apply();
-#endif
-    if (!enabled)
-        dismissStartupDish();
-    emit dimSumEnabledChanged();
 }
 
 bool ExperienceController::startupDishVisible() const
@@ -133,11 +110,11 @@ void ExperienceController::considerStartupSurprise(const bool captureMode,
         return;
     }
 #endif
-    if (!m_dimSumEnabled || blockingFlow || m_dishes.isEmpty())
+    if (blockingFlow || m_dishes.isEmpty())
         return;
     if (captureMode && !force)
         return;
-    if (!force && (QRandomGenerator::system()->bounded(100) != 0))
+    if (!force && (QRandomGenerator::system()->bounded(10) != 0))
         return;
 
     const int index = QRandomGenerator::system()->bounded(static_cast<int>(m_dishes.size()));

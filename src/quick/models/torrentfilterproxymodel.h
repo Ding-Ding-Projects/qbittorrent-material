@@ -71,6 +71,8 @@ public:
     Q_INVOKABLE void clearCategoryFilter();
     /// Clear the tag criterion entirely (matches "All tags").
     Q_INVOKABLE void clearTagFilter();
+    /// Clear the tracker-host criterion entirely (matches "All trackers").
+    Q_INVOKABLE void clearTrackerFilter();
     /// Apply an announce-status filter (Warning/TrackerError/OtherError) or clear
     /// it with -1. Used by the Tracker-status sidebar panel.
     Q_INVOKABLE void setAnnounceStatusFilter(int flag);

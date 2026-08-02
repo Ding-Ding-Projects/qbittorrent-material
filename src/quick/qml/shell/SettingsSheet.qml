@@ -403,7 +403,7 @@ Sheet {
                     Layout.leftMargin: 20
                     Layout.rightMargin: 20
                     spacing: 8
-                    visible: root.settingsMatch(qsTr("Dim sum startup surprise 1% local picture disable quiet reduced motion"))
+                    visible: root.settingsMatch(qsTr("Dim sum startup surprise 10% local picture quiet reduced motion"))
 
                     Text {
                         text: qsTr("STARTUP DELIGHT")
@@ -413,24 +413,16 @@ Sheet {
                         font.letterSpacing: 1
                         color: Theme.color("primary")
                     }
-                    RowLayout {
+                    ColumnLayout {
                         Layout.fillWidth: true
-                        ColumnLayout {
+                        spacing: 2
+                        Label { text: qsTr("10% dim sum surprise"); color: Theme.color("onSurface") }
+                        Label {
                             Layout.fillWidth: true
-                            spacing: 2
-                            Label { text: qsTr("1% dim sum surprise"); color: Theme.color("onSurface") }
-                            Label {
-                                Layout.fillWidth: true
-                                text: qsTr("Uses a fresh launch draw and bundled local images; never appears on first run or while a blocking flow is active.")
-                                font: Typography.bodySmall
-                                color: Theme.color("onSurfaceVariant")
-                                wrapMode: Text.WordWrap
-                            }
-                        }
-                        Switch {
-                            checked: Experience.dimSumEnabled
-                            Accessible.name: qsTr("Enable startup dim sum surprise")
-                            onToggled: Experience.dimSumEnabled = checked
+                            text: qsTr("Uses one fresh launch draw and bundled local images. It never appears on first run or while a blocking flow is active, and it cannot be disabled.")
+                            font: Typography.bodySmall
+                            color: Theme.color("onSurfaceVariant")
+                            wrapMode: Text.WordWrap
                         }
                     }
                 }

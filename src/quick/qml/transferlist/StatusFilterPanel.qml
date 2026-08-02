@@ -115,7 +115,7 @@ Column {
             onClicked: {
                 Log.info("ui", "Status filter -> " + model.label + " (" + model.value + ")");
                 if (root.proxy)
-                    root.proxy.setStatusFilter(model.value);
+                    root.proxy.statusFilter = model.value;
             }
 
             MouseArea {
@@ -127,7 +127,7 @@ Column {
                 onClicked: (mouse) => {
                     if (mouse.button === Qt.LeftButton) {
                         if (root.proxy)
-                            root.proxy.setStatusFilter(rowItem.model.value);
+                            root.proxy.statusFilter = rowItem.model.value;
                     } else {
                         Log.debug("ui", "Status filter panel context menu");
                         contextMenu.popup();

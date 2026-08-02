@@ -10,7 +10,7 @@ import QtQuick.Layouts
 import qBittorrent
 
 /*! Non-blocking, focus-preserving startup delight. The controller performs one
-    fresh 1% draw per eligible launch and supplies only bundled local assets. */
+    fresh 10% draw per eligible launch and supplies only bundled local assets. */
 Item {
     id: root
     anchors.fill: parent
@@ -108,15 +108,10 @@ Item {
                 }
                 Label {
                     Layout.fillWidth: true
-                    text: qsTr("A 1% startup surprise. It never blocks the app, fetches nothing, and can be disabled anytime.")
+                    text: qsTr("A 10% startup surprise. It never blocks the app, steals focus, or fetches anything.")
                     font: Typography.bodySmall
                     color: Theme.color("onSurfaceVariant")
                     wrapMode: Text.WordWrap
-                }
-                Button {
-                    text: qsTr("Turn off surprises")
-                    flat: true
-                    onClicked: Experience.dimSumEnabled = false
                 }
             }
         }

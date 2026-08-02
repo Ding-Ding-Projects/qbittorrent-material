@@ -283,6 +283,25 @@ foreach ($filterPanel in @(
         "$filterPanel routes left and right clicks through one pointer target"
 }
 
+$experienceController = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/controllers/experiencecontroller.cpp")
+$experienceHeader = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/controllers/experiencecontroller.h")
+$dimSumSurface = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/shell/DimSumSurprise.qml")
+$settingsSheet = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/shell/SettingsSheet.qml")
+Test-Policy ($experienceController -match 'bounded\(10\)\s*!=\s*0') `
+    "startup dim-sum surprise uses one fresh 10 percent draw"
+Test-Policy (($experienceController -notmatch 'DimSumSurpriseEnabled') -and
+    ($experienceHeader -notmatch 'dimSumEnabled') -and
+    ($dimSumSurface -notmatch 'Turn off surprises') -and
+    ($settingsSheet -notmatch 'Enable startup dim sum surprise')) `
+    "startup dim-sum surprise has no opt-out and ignores legacy disabled preferences"
+Test-Policy (-not (Select-String -Path (Get-RepositoryPath "src/quick/qml/transferlist/*.qml") `
+        -Pattern 'root\.proxy\.set(?:Status|Category|Tag|Tracker)Filter\(' -Quiet)) `
+    "QML filter rows assign writable proxy properties instead of calling non-invokable setters"
+$filterProxyHeader = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/models/torrentfilterproxymodel.h")
+Test-Policy ($filterProxyHeader -match 'Q_INVOKABLE\s+void\s+clearTrackerFilter\(\)') `
+    "the All-trackers row has an invokable criterion reset"
+
 $changelogQml = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/dialogs/ChangelogPage.qml")
 $experienceSource = Get-Content -Raw -LiteralPath `

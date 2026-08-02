@@ -64,13 +64,12 @@ Column {
         switch (type) {
         case 0: // All — clear both tracker and announce criteria.
             Log.info("ui", "Tracker filter -> All");
-            if (typeof root.proxy.clearTrackerFilter === "function")
-                root.proxy.clearTrackerFilter();
+            root.proxy.clearTrackerFilter();
             root.proxy.setAnnounceStatusFilter(-1);
             break;
         case 1:
             Log.info("ui", "Tracker filter -> Trackerless");
-            root.proxy.setTrackerFilter("");
+            root.proxy.trackerFilter = "";
             break;
         case 2:
         case 3:
@@ -80,7 +79,7 @@ Column {
             break;
         default:
             Log.info("ui", "Tracker filter -> host '" + host + "'");
-            root.proxy.setTrackerFilter(host);
+            root.proxy.trackerFilter = host;
             break;
         }
     }

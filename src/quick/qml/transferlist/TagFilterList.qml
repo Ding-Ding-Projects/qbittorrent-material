@@ -48,10 +48,10 @@ Column {
             root.proxy.clearTagFilter();
         } else if (type === 1) {
             Log.info("ui", "Tag filter -> Untagged");
-            root.proxy.setTagFilter("");
+            root.proxy.tagFilter = "";
         } else {
             Log.info("ui", "Tag filter -> '" + value + "'");
-            root.proxy.setTagFilter(value);
+            root.proxy.tagFilter = value;
         }
     }
 

@@ -189,6 +189,16 @@ void TorrentFilterProxyModel::setTextFilter(const QString &text)
     emit filterChanged();
 }
 
+void TorrentFilterProxyModel::clearTrackerFilter()
+{
+    if (!m_filter.trackerHost.has_value())
+        return;
+    qCDebug(lcModel) << "TorrentFilterProxyModel: tracker filter cleared";
+    m_filter.trackerHost.reset();
+    invalidateFilter();
+    emit filterChanged();
+}
+
 int TorrentFilterProxyModel::textFilterColumn() const
 {
     return m_textFilterColumn;

@@ -132,7 +132,8 @@ void PreferencesController::showSpeedInTitleBar(const bool show)
 
 bool PreferencesController::isSearchEnabled() const
 {
-    return m_preferences ? m_preferences->isSearchEnabled() : false;
+    // Mirror Preferences' own default so there is one answer to "is search on".
+    return m_preferences ? m_preferences->isSearchEnabled() : true;
 }
 
 void PreferencesController::setSearchEnabled(const bool enabled)

@@ -1,5 +1,48 @@
 # Handoff
 
+## 2026-08-02 — the Search tab is on by default
+
+Requested. `Preferences::isSearchEnabled()` now defaults to `true`, and the QML
+bridge's null-guard fallback mirrors it so there is a single answer to "is search
+on". **This is a deliberate divergence from upstream — do not "restore" it.**
+Upstream hides the tab because it cannot assume a search runtime is present; this
+fork now ships the nova3 runtime in its own resources, and a missing prerequisite
+explains itself in the tab rather than looking broken, so there is nothing left
+for the opt-in to protect against. **View -> Search Engine** still toggles it and
+the choice is still remembered.
+
+Enabling it by default moved a cost onto every launch: the `SearchPluginManager`
+constructor ran `update()`, which spawns Python and blocks on
+`waitForFinished()` — measured at ~175 ms on this machine — on the GUI thread
+during startup. That probe is now deferred with `QTimer::singleShot(0, ...)`.
+The deferral also fixes a latent signal-ordering problem: run inline, the
+`pluginInstalled` and `runtimeErrorChanged` emissions happened before
+`SearchController` had connected to them, so the very first discovery pass was
+broadcast to nobody. `reload()` still runs both calls inline, because the user
+asked for a fresh answer and is waiting for it.
+
+Verification:
+
+- All 303 desktop policy and content-integrity checks passed (301 before; the
+  2 new ones require the default and its QML mirror to agree, and require the
+  constructor to defer the probe rather than call `update()` directly — scoped
+  to the constructor so `reload()` is unaffected).
+- `run.ps1 -NoRun -Jobs 8` completed a clean Release compile, link, and Qt
+  deployment.
+- End-to-end, in the real application against a brand-new profile root with the
+  offscreen platform, with no user action at all: the manager initialised at
+  startup, extracted all five runtime files plus both `__init__.py` package
+  markers into `<profile>/qBittorrent/data/nova3/`, logged `capabilities probe
+  queued`, then `Python detected: ...\Python314\python.exe version "3.14.2"
+  supported: true` — the registry fallback, not the `WindowsApps` stub the old
+  detector would have accepted — followed by `SearchController constructed;
+  pythonAvailable= true`, `SearchNoPluginsPage shown; blocked=false`, and
+  `Refreshing search engine capabilities via nova2.py --capabilities`.
+
+Note for whoever runs the offscreen smoke locally: `run.ps1`'s `windeployqt` step
+does not deploy `qoffscreen.dll` (CI passes `--include-plugins qoffscreen`), so
+it has to be copied from the Qt install into `build/platforms/` first.
+
 ## 2026-08-02 — the workspace tab strip draws tabs again
 
 Reported: "browser style tabs missing". The strip was never missing — it is

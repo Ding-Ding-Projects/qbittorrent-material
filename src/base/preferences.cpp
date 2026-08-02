@@ -702,7 +702,12 @@ void Preferences::setSchedulerDays(const Scheduler::Days days)
 // Search
 bool Preferences::isSearchEnabled() const
 {
-    return readSetting(u"Preferences/Search/SearchEnabled"_s, false);
+    // Deliberately `true`, unlike upstream. This fork ships the nova3 runtime in
+    // its own resources, so search is usable out of the box and the tab has no
+    // reason to start hidden. When a prerequisite is missing the Search tab now
+    // explains which one instead of appearing broken, so defaulting it on cannot
+    // strand the user. Do not "restore" this to upstream's `false`.
+    return readSetting(u"Preferences/Search/SearchEnabled"_s, true);
 }
 
 void Preferences::setSearchEnabled(const bool enabled)

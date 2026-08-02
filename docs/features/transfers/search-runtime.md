@@ -2,6 +2,18 @@
 
 ## Behavior
 
+The Search tab is **on by default**. Upstream qBittorrent hides it until the
+user opts in, because upstream cannot assume the search runtime is present; this
+fork ships that runtime in its own resources, so search is usable out of the box.
+The tab can still be toggled from **View -> Search Engine**, and that choice is
+remembered.
+
+Because the tab is on by default, the startup capabilities query is deferred to
+the first event-loop iteration rather than run during construction — it spawns
+Python and waits for it (~175 ms measured), which would otherwise stall every
+launch on the GUI thread. Plugins and failures are reported through signals as
+they arrive, so nothing waits on that probe.
+
 The Search tab does not query torrent sites directly. It drives the `nova3`
 Python runtime that qBittorrent search plugins are written against. On first use
 the application extracts five bundled files — `helpers.py`, `nova2.py`,

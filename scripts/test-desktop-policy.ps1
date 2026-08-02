@@ -635,6 +635,23 @@ Test-Policy ($searchEmptyPage.Contains('SearchController.unavailableReason') `
 Test-Policy (Test-Path -LiteralPath (Get-RepositoryPath "docs/features/transfers/search-runtime.md") -PathType Leaf) `
     "the bundled search runtime and its failure modes are documented"
 
+# This fork ships the runtime, so the Search tab is on by default (upstream
+# hides it). Keep the C++ preference and its QML mirror agreeing, and keep the
+# startup probe off the GUI thread's critical path.
+$preferencesSource = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/base/preferences.cpp")
+$preferencesBridge = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/controllers/preferencescontroller.cpp")
+Test-Policy ($preferencesSource -match 'readSetting\(u"Preferences/Search/SearchEnabled"_s, true\)' `
+        -and $preferencesBridge -match 'm_preferences->isSearchEnabled\(\) : true') `
+    "the Search tab is enabled by default and the QML bridge mirrors that default"
+# Scope this to the constructor: reload() legitimately runs both calls inline
+# because the user asked for it and expects a fresh answer.
+$searchManagerCtor = [regex]::Match($searchPluginManager,
+    'SearchPluginManager::SearchPluginManager\(\)[\s\S]*?\n\}').Value
+Test-Policy ($searchManagerCtor -match 'QTimer::singleShot\(0, this, \[this\] \{ update\(\); \}\)' `
+        -and $searchManagerCtor -notmatch '\n\s*update\(\);') `
+    "the startup capabilities probe is deferred instead of blocking construction"
+
 # --- Workspace: the browser-style tab strip must actually be visible ----------
 # "surfaceWarm" is aliased to primaryContainer in ThemeManager's named-id map,
 # which is exactly the selected tab's fill. Painting the strip with it made the

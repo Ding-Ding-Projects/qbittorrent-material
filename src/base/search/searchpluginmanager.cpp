@@ -30,6 +30,7 @@
 #include <QFile>
 #include <QProcess>
 #include <QSet>
+#include <QTimer>
 #include <QUrl>
 
 #include "base/global.h"
@@ -94,10 +95,17 @@ SearchPluginManager::SearchPluginManager()
     applyProxySettings();
 
     updateNova();
-    update();
 
-    qCInfo(lcSearch) << "Search plugin manager ready. Installed plugins:" << m_plugins.size()
-        << "Enabled:" << enabledPlugins().size();
+    // Defer the capabilities probe off the construction path. update() spawns
+    // Python and blocks on waitForFinished(); measured at ~175 ms here. Search
+    // is enabled by default in this fork, so doing that inline would stall every
+    // startup on the GUI thread. Deferring also means the signals it emits
+    // (pluginInstalled, runtimeErrorChanged) reach SearchController, which
+    // connects to them after this constructor returns — inline, they were
+    // emitted before anything was listening.
+    QTimer::singleShot(0, this, [this] { update(); });
+
+    qCInfo(lcSearch) << "Search plugin manager ready; capabilities probe queued";
 }
 
 SearchPluginManager::~SearchPluginManager()

@@ -35,9 +35,22 @@ Flickable {
 
     // Current proxy type drives the enable matrix.
     readonly property int proxyType: (root.rev, OptionsController.value("Network/Proxy/Type", 0))
-    readonly property bool proxyAuthSupported: proxyType === 2 || proxyType === 3   // SOCKS5 / HTTP
-    readonly property bool proxyIsSocks4: proxyType === 1
+    readonly property bool proxyAuthSupported: proxyType === 2 || proxyType === 1   // SOCKS5 / HTTP
+    readonly property bool proxyIsSocks4: proxyType === 5
     readonly property bool proxyNone: proxyType === 0
+
+    function proxyComboIndex(type) {
+        switch (type) {
+        case 5: return 1 // SOCKS4
+        case 2: return 2 // SOCKS5
+        case 1: return 3 // HTTP
+        default: return 0
+        }
+    }
+
+    function proxyTypeForIndex(index) {
+        return [0, 5, 2, 1][index]
+    }
 
     component OptCheck: CheckBox {
         property string settingKey: ""
@@ -219,8 +232,9 @@ Flickable {
                 ComboBox {
                     Layout.fillWidth: true
                     model: [ qsTr("(None)"), qsTr("SOCKS4"), qsTr("SOCKS5"), qsTr("HTTP") ]
-                    currentIndex: (root.rev, OptionsController.value("Network/Proxy/Type", 0))
-                    onActivated: (i) => OptionsController.setValue("Network/Proxy/Type", i)
+                    currentIndex: root.proxyComboIndex(root.proxyType)
+                    onActivated: (i) => OptionsController.setValue(
+                        "Network/Proxy/Type", root.proxyTypeForIndex(i))
                 }
             }
             LabeledField {

@@ -56,8 +56,17 @@ ProxyConfigurationManager::ProxyConfigurationManager(QObject *parent)
     , m_storeProxyHostnameLookupEnabled {SETTINGS_KEY(u"HostnameLookupEnabled"_s)}
 {
     m_config.type = m_storeProxyType.get(ProxyType::None);
-    if ((m_config.type < ProxyType::None) || (m_config.type > ProxyType::SOCKS4))
+    switch (m_config.type)
+    {
+    case ProxyType::None:
+    case ProxyType::HTTP:
+    case ProxyType::SOCKS5:
+    case ProxyType::SOCKS4:
+        break;
+    default:
         m_config.type = ProxyType::None;
+        break;
+    }
     m_config.ip = m_storeProxyIP.get((m_config.type == ProxyType::None) ? u""_s : u"0.0.0.0"_s);
     m_config.port = m_storeProxyPort.get(8080);
     m_config.authEnabled = m_storeProxyAuthEnabled;
@@ -90,16 +99,29 @@ ProxyConfiguration ProxyConfigurationManager::proxyConfiguration() const
 
 void ProxyConfigurationManager::setProxyConfiguration(const ProxyConfiguration &config)
 {
-    if (m_config != config)
+    ProxyConfiguration validated = config;
+    switch (validated.type)
     {
-        m_config = config;
-        m_storeProxyType = config.type;
-        m_storeProxyIP = config.ip;
-        m_storeProxyPort = config.port;
-        m_storeProxyAuthEnabled = config.authEnabled;
-        m_storeProxyUsername = config.username;
-        m_storeProxyPassword = config.password;
-        m_storeProxyHostnameLookupEnabled = config.hostnameLookupEnabled;
+    case ProxyType::None:
+    case ProxyType::HTTP:
+    case ProxyType::SOCKS5:
+    case ProxyType::SOCKS4:
+        break;
+    default:
+        validated.type = ProxyType::None;
+        break;
+    }
+
+    if (m_config != validated)
+    {
+        m_config = validated;
+        m_storeProxyType = validated.type;
+        m_storeProxyIP = validated.ip;
+        m_storeProxyPort = validated.port;
+        m_storeProxyAuthEnabled = validated.authEnabled;
+        m_storeProxyUsername = validated.username;
+        m_storeProxyPassword = validated.password;
+        m_storeProxyHostnameLookupEnabled = validated.hostnameLookupEnabled;
 
         emit proxyConfigurationChanged();
     }

@@ -41,6 +41,7 @@
 
 #include "base/global.h"
 #include "base/logging.h"
+#include "base/net/proxyconfigurationmanager.h"
 #include "base/preferences.h"
 #include "base/profile.h"
 #include "base/settingsstorage.h"
@@ -359,6 +360,15 @@ SessionImpl::SessionImpl(QObject *parent)
     m_updateTrackersFromURLTimer->setInterval(1h);
     connect(m_updateTrackersFromURLTimer, &QTimer::timeout, this, [this]() { updateTrackersFromURL(); });
 
+    // Proxy fields and the per-purpose enable flag live outside SessionImpl's
+    // CachedSettingValue members. Re-apply native settings when either owner
+    // changes so toggling only the BitTorrent profile still takes effect live.
+    connect(Net::ProxyConfigurationManager::instance(),
+        &Net::ProxyConfigurationManager::proxyConfigurationChanged,
+        this, &SessionImpl::configureDeferred);
+    connect(Preferences::instance(), &Preferences::changed,
+        this, &SessionImpl::configureDeferred);
+
     m_ioThread.reset(new QThread);
     m_ioThread->setObjectName("BitTorrent session");
 
@@ -497,6 +507,66 @@ lt::settings_pack SessionImpl::loadLTSettings() const
     pack.set_int(lt::settings_pack::download_rate_limit, downloadSpeedLimit());
     pack.set_int(lt::settings_pack::upload_rate_limit, uploadSpeedLimit());
     pack.set_bool(lt::settings_pack::anonymous_mode, isAnonymousModeEnabled());
+
+    // The UI persists qBittorrent's encryption order (allow, require,
+    // disable), while libtorrent's enum order is forced, enabled, disabled.
+    // Map explicitly so "Allow encryption" never becomes require-only.
+    lt::settings_pack::enc_policy encryptionPolicy = lt::settings_pack::pe_enabled;
+    switch (encryption())
+    {
+    case 1:
+        encryptionPolicy = lt::settings_pack::pe_forced;
+        break;
+    case 2:
+        encryptionPolicy = lt::settings_pack::pe_disabled;
+        break;
+    default:
+        break;
+    }
+    pack.set_int(lt::settings_pack::out_enc_policy, encryptionPolicy);
+    pack.set_int(lt::settings_pack::in_enc_policy, encryptionPolicy);
+    pack.set_int(lt::settings_pack::allowed_enc_level, lt::settings_pack::pe_both);
+    pack.set_bool(lt::settings_pack::announce_crypto_support,
+        encryptionPolicy != lt::settings_pack::pe_disabled);
+
+    // General-purpose downloads have their own QNetworkProxy. Libtorrent must
+    // receive the same persisted proxy explicitly or the BitTorrent profile
+    // and peer-connection checkbox are only cosmetic and traffic goes direct.
+    const auto *proxyManager = Net::ProxyConfigurationManager::instance();
+    const bool useProxy = proxyManager && Preferences::instance()->useProxyForBT();
+    const Net::ProxyConfiguration proxy = proxyManager
+        ? proxyManager->proxyConfiguration() : Net::ProxyConfiguration {};
+    int nativeProxyType = lt::settings_pack::none;
+    if (useProxy)
+    {
+        switch (proxy.type)
+        {
+        case Net::ProxyType::HTTP:
+            nativeProxyType = proxy.authEnabled
+                ? lt::settings_pack::http_pw : lt::settings_pack::http;
+            break;
+        case Net::ProxyType::SOCKS5:
+            nativeProxyType = proxy.authEnabled
+                ? lt::settings_pack::socks5_pw : lt::settings_pack::socks5;
+            break;
+        case Net::ProxyType::SOCKS4:
+            nativeProxyType = lt::settings_pack::socks4;
+            break;
+        case Net::ProxyType::None:
+            break;
+        }
+    }
+    pack.set_int(lt::settings_pack::proxy_type, nativeProxyType);
+    pack.set_str(lt::settings_pack::proxy_hostname, proxy.ip.toStdString());
+    pack.set_int(lt::settings_pack::proxy_port, proxy.port);
+    pack.set_str(lt::settings_pack::proxy_username,
+        (proxy.authEnabled ? proxy.username : QString()).toStdString());
+    pack.set_str(lt::settings_pack::proxy_password,
+        (proxy.authEnabled ? proxy.password : QString()).toStdString());
+    pack.set_bool(lt::settings_pack::proxy_hostnames, useProxy && proxy.hostnameLookupEnabled);
+    pack.set_bool(lt::settings_pack::proxy_tracker_connections, useProxy);
+    pack.set_bool(lt::settings_pack::proxy_peer_connections,
+        useProxy && isProxyPeerConnectionsEnabled());
 
     applyNetworkInterfacesSettings(pack);
 

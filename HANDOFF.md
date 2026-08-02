@@ -95,6 +95,28 @@ Verification:
 - CPack's NSIS generator completed successfully from the short-path build.
 - `actionlint` 1.7.12 passed and the 226-line embedded package PowerShell block
   parsed successfully.
+
+## 2026-08-02 — effective BitTorrent proxy and encryption privacy controls
+
+The Connection page no longer writes display indexes as persisted proxy enum
+values. Its `(None)`, SOCKS4, SOCKS5, and HTTP rows now map explicitly to the
+stable engine values `0`, `5`, `2`, and `1`; the enable matrix uses those same
+values, and the proxy manager rejects enum holes instead of accepting any value
+between None and SOCKS4.
+
+The BitTorrent profile now reaches libtorrent: HTTP/SOCKS5 authentication,
+SOCKS4, hostname lookup, tracker proxying, and optional peer proxying are mapped
+into `settings_pack` and reapplied when either proxy configuration or
+Preferences changes. The user-facing Allow/Require/Disable encryption order is
+also translated explicitly to libtorrent's different enum order for incoming
+and outgoing connections.
+
+Verification:
+
+- `qbt_base` rebuilt successfully with MSVC after the final C++ changes.
+- Desktop policy assertions cover native encryption/proxy application, stable
+  proxy enum mapping, and invalid-value rejection.
+- `git diff --check` passed.
 - All 257 desktop policy and content-integrity checks passed.
 - `run.ps1 -NoRun -Jobs 4` detected the stale `Q:\` cache, regenerated the
   build tree, compiled all 433 native/QML-cache steps, linked, deployed the Qt

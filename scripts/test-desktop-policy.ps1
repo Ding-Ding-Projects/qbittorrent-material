@@ -266,6 +266,23 @@ Test-Policy ($windowsLauncher -match 'qbt_exit_code=%ERRORLEVEL%' `
         -and $windowsLauncher -match 'exit /b %qbt_exit_code%') `
     "the Windows launcher preserves failures and supports noninteractive invocation"
 
+$sessionImpl = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/base/bittorrent/sessionimpl.cpp")
+$proxyManager = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/base/net/proxyconfigurationmanager.cpp")
+$connectionPage = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/options/ConnectionPage.qml")
+Test-Policy ($sessionImpl -match 'out_enc_policy, encryptionPolicy' `
+        -and $sessionImpl -match 'in_enc_policy, encryptionPolicy' `
+        -and $sessionImpl -match 'proxy_tracker_connections, useProxy' `
+        -and $sessionImpl -match 'useProxy && isProxyPeerConnectionsEnabled\(\)') `
+    "BitTorrent encryption and proxy controls are applied to libtorrent"
+Test-Policy ($connectionPage -match 'return \[0, 5, 2, 1\]\[index\]' `
+        -and $connectionPage -match 'proxyIsSocks4:\s*proxyType === 5' `
+        -and $proxyManager -match 'case ProxyType::HTTP:' `
+        -and $proxyManager -match 'default:\s*validated\.type = ProxyType::None') `
+    "the proxy UI preserves persisted enum values and rejects invalid types"
+
 $wikiSafetyTest = Get-RepositoryPath "scripts/test-wiki-export-safety.ps1"
 Test-Policy (Test-Path -LiteralPath $wikiSafetyTest -PathType Leaf) `
     "the Wiki exporter has hostile-manifest regression coverage"

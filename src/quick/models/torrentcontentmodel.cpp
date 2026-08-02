@@ -17,6 +17,7 @@
 
 #include <QFuture>
 #include <QModelIndex>
+#include <QSet>
 #include <QVariant>
 
 #include "base/bittorrent/torrentcontenthandler.h"
@@ -827,6 +828,35 @@ QString TorrentContentModel::itemFullPath(const QModelIndex &index) const
     return (storage / pathForIndex(index)).data();
 }
 
+void TorrentContentModel::appendFileIndexes(const ContentNode *node, QSet<int> &indexes) const
+{
+    if (!node)
+        return;
+    if (!node->isFolder())
+    {
+        if (node->fileIndex() >= 0)
+            indexes.insert(node->fileIndex());
+        return;
+    }
+    for (const ContentNode *child : node->children())
+        appendFileIndexes(child, indexes);
+}
+
+QVariantList TorrentContentModel::fileIndexesForItems(const QVariantList &indexes) const
+{
+    QSet<int> uniqueIndexes;
+    for (const QVariant &value : indexes)
+        appendFileIndexes(nodeForIndex(qvariant_cast<QModelIndex>(value)), uniqueIndexes);
+
+    QList<int> sortedIndexes(uniqueIndexes.begin(), uniqueIndexes.end());
+    std::sort(sortedIndexes.begin(), sortedIndexes.end());
+    QVariantList result;
+    result.reserve(sortedIndexes.size());
+    for (const int fileIndex : sortedIndexes)
+        result.append(fileIndex);
+    return result;
+}
+
 QVariantList TorrentContentModel::fileEntries() const
 {
     QVariantList entries;
@@ -847,20 +877,23 @@ QVariantList TorrentContentModel::fileEntries() const
 
 bool TorrentContentModel::renameFileByIndex(const int fileIndex, const QString &newRelativePath)
 {
-    if (!m_contentHandler)
+    if (!m_contentHandler || (fileIndex < 0) || (fileIndex >= m_filesIndex.size()))
         return false;
 
     const QString trimmed = newRelativePath.trimmed();
-    if (trimmed.isEmpty())
+    const Path targetPath(trimmed);
+    const QString normalized = QString(trimmed).replace(u'\\', u'/');
+    const bool hasTraversal = normalized.split(u'/', Qt::KeepEmptyParts).contains(u".."_s);
+    if (trimmed.isEmpty() || !targetPath.isValid() || !targetPath.isRelative() || hasTraversal)
     {
-        emit renameFailed(tr("The name is invalid: \"%1\"").arg(newRelativePath));
+        emit renameFailed(tr("The relative path is invalid: \"%1\"").arg(newRelativePath));
         return false;
     }
 
     qCInfo(lcModel) << "TorrentContentModel: batch rename file" << fileIndex << "->" << trimmed;
     try
     {
-        m_contentHandler->renameFile(fileIndex, Path(trimmed));
+        m_contentHandler->renameFile(fileIndex, targetPath);
     }
     catch (const std::exception &err)
     {

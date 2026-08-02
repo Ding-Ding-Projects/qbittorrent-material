@@ -112,6 +112,7 @@ Item {
             { role: "totalDownload", title: qsTr("Downloaded"),     width: 100, align: Qt.AlignRight, visible: true,  resizable: true },
             { role: "totalUpload",   title: qsTr("Uploaded"),       width: 100, align: Qt.AlignRight, visible: true,  resizable: true },
             { role: "relevance",     title: qsTr("Relevance"),      width: 90,  align: Qt.AlignRight, visible: true,  resizable: true },
+            { role: "contribution",  title: qsTr("Contribution"),  width: 100, align: Qt.AlignRight, visible: true,  resizable: true },
             { role: "files",         title: qsTr("Files"),          width: 200, align: Qt.AlignLeft,  visible: true,  resizable: true }
         ]
 

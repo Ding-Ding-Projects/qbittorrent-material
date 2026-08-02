@@ -402,6 +402,35 @@ Flickable {
                 defaultValue: true
             }
 
+            ColumnLayout {
+                visible: OptionsController.windowsDefaultAppsAvailable
+                Layout.fillWidth: true
+                spacing: Spacing.sm
+
+                Label {
+                    Layout.fillWidth: true
+                    text: qsTr("File association")
+                    font: Typography.titleSmall
+                    color: Theme.color("onSurface")
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: qsTr("To set qBittorrent as the default program for .torrent files and Magnet links, open Windows Default Apps settings and add them manually.")
+                    font: Typography.bodyMedium
+                    color: Theme.color("onSurfaceVariant")
+                    wrapMode: Text.WordWrap
+                }
+                Button {
+                    text: qsTr("Open Windows Default Apps settings page")
+                    Accessible.name: text
+                    Accessible.description: qsTr("Opens Windows Settings to choose default applications for file and link types")
+                    onClicked: {
+                        Log.info("ui", "Behavior: opening Windows Default Apps settings")
+                        OptionsController.openWindowsDefaultApps()
+                    }
+                }
+            }
+
             CheckableGroupBox {
                 title: qsTr("Show qBittorrent in notification area")
                 Layout.fillWidth: true
@@ -529,4 +558,12 @@ Flickable {
     }
 
     UIThemeDialog { id: uiThemeDialog }
+
+    Connections {
+        target: OptionsController
+        function onActionFeedback(action, success, message) {
+            if (action === "windowsDefaultApps")
+                NotificationCenter.notify(message, success ? "success" : "error")
+        }
+    }
 }

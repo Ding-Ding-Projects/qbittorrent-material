@@ -128,6 +128,9 @@ target_include_directories(qbittorrent PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/app"
 )
 target_compile_features(qbittorrent PRIVATE cxx_std_20)
+target_compile_definitions(qbittorrent PRIVATE
+    QBT_BUILD_ID=\"${QBT_BUILD_ID}\"
+)
 
 if (QBT_DBUS AND TARGET Qt6::DBus)
     target_link_libraries(qbittorrent PRIVATE Qt6::DBus)

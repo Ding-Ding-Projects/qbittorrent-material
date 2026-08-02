@@ -9,6 +9,7 @@ application rather than to one torrent screen.
 - [Notification center](notifications.md)
 - [Startup dim-sum surprise](startup-dim-sum.md)
 - [In-app changelog viewer](changelog-viewer.md)
+- [Windows Default Apps integration](windows-default-apps.md)
 
 All catalog data and dim-sum images are bundled resources. None of these
 features requires a remote service.

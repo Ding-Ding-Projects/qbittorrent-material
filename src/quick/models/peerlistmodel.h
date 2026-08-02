@@ -12,16 +12,20 @@
 
 #pragma once
 
+#include <algorithm>
+
 #include <QAbstractListModel>
 #include <QFuture>
 #include <QFutureWatcher>
 #include <QHash>
 #include <QHostAddress>
 #include <QList>
+#include <QMetaType>
 #include <QPointer>
 #include <QQmlEngine>
 #include <QString>
 #include <QStringList>
+#include <QVariant>
 
 #include "base/bittorrent/peeraddress.h"
 #include "base/bittorrent/peerinfo.h"
@@ -78,6 +82,8 @@ public:
         TotalUploadValueRole,               // "totalUploadValue"
         RelevanceRole,                      // "relevance"
         RelevanceValueRole,                 // "relevanceValue"
+        ContributionRole,                   // "contribution"
+        ContributionValueRole,              // "contributionValue"
         FilesRole                           // "files"
     };
 
@@ -157,6 +163,8 @@ public:
         case TotalUploadValueRole:   return r.totalUpload;
         case RelevanceRole:          return percent(r.relevance);
         case RelevanceValueRole:     return r.relevance;
+        case ContributionRole:       return percent(r.contribution);
+        case ContributionValueRole:  return r.contribution;
         case FilesRole:              return r.files;
         default:                     return {};
         }
@@ -175,8 +183,17 @@ public:
             {UpSpeedValueRole, "upSpeedValue"}, {TotalDownloadRole, "totalDownload"},
             {TotalDownloadValueRole, "totalDownloadValue"}, {TotalUploadRole, "totalUpload"},
             {TotalUploadValueRole, "totalUploadValue"}, {RelevanceRole, "relevance"},
-            {RelevanceValueRole, "relevanceValue"}, {FilesRole, "files"}
+            {RelevanceValueRole, "relevanceValue"}, {ContributionRole, "contribution"},
+            {ContributionValueRole, "contributionValue"}, {FilesRole, "files"}
         };
+    }
+
+    /// Sort a visible table role, using raw numeric values for measured columns.
+    Q_INVOKABLE void sortByRole(const QString &roleName, const int order)
+    {
+        m_sortRole = roleName;
+        m_sortOrder = static_cast<Qt::SortOrder>(order);
+        sortRows();
     }
 
     /// Return the "ip:port" string for @p row (bracketed for IPv6), or empty.
@@ -268,6 +285,7 @@ private:
         qlonglong totalDownload = 0;
         qlonglong totalUpload = 0;
         qreal relevance = 0;
+        qreal contribution = 0;
         QString files;
     };
 
@@ -283,6 +301,7 @@ private:
         m_hideZeroValues = pref->getHideZeroValues() && (pref->getHideZeroComboValues() == 0);
 
         const BitTorrent::TorrentInfo info = m_torrent->hasMetadata() ? m_torrent->info() : BitTorrent::TorrentInfo();
+        const qlonglong torrentSize = m_torrent->totalSize();
 
         QList<Row> rows;
         rows.reserve(peers.size());
@@ -307,6 +326,16 @@ private:
             row.totalUpload = peer.totalUpload();
             row.relevance = peer.relevance();
 
+            // Match upstream qBittorrent: the fraction of the peer's current
+            // progress that this client supplied, with safe zero-size fallbacks.
+            if (row.totalUpload > 0)
+            {
+                const qlonglong totalSize = (torrentSize <= 0) ? row.totalUpload : torrentSize;
+                const qreal progressBytes = row.progress * totalSize;
+                row.contribution = static_cast<qreal>(row.totalUpload)
+                        / ((progressBytes <= 0) ? totalSize : progressBytes);
+            }
+
             if (info.isValid())
             {
                 QStringList files;
@@ -322,6 +351,7 @@ private:
 
         beginResetModel();
         m_rows = std::move(rows);
+        sortRowsInPlace();
         endResetModel();
         emit countChanged();
         qCDebug(lcModel) << "PeerListModel refreshed:" << m_rows.size() << "peer(s)";
@@ -346,9 +376,58 @@ private:
         return Utils::String::fromDouble(fraction * 100, 1) + u'%';
     }
 
+    void sortRows()
+    {
+        beginResetModel();
+        sortRowsInPlace();
+        endResetModel();
+    }
+
+    void sortRowsInPlace()
+    {
+        if (m_sortRole.isEmpty())
+            return;
+
+        const auto value = [this](const Row &row) -> QVariant
+        {
+            if (m_sortRole == u"port") return row.port;
+            if (m_sortRole == u"progress") return row.progress;
+            if (m_sortRole == u"downSpeed") return row.downSpeed;
+            if (m_sortRole == u"upSpeed") return row.upSpeed;
+            if (m_sortRole == u"totalDownload") return row.totalDownload;
+            if (m_sortRole == u"totalUpload") return row.totalUpload;
+            if (m_sortRole == u"relevance") return row.relevance;
+            if (m_sortRole == u"contribution") return row.contribution;
+            if (m_sortRole == u"countryCode") return row.countryName;
+            if (m_sortRole == u"ip") return row.ip;
+            if (m_sortRole == u"connection") return row.connection;
+            if (m_sortRole == u"flags") return row.flags;
+            if (m_sortRole == u"client") return row.client;
+            if (m_sortRole == u"peerIdClient") return row.peerIdClient;
+            if (m_sortRole == u"files") return row.files;
+            return {};
+        };
+        const bool ascending = (m_sortOrder == Qt::AscendingOrder);
+        std::stable_sort(m_rows.begin(), m_rows.end(), [&value, ascending](const Row &left, const Row &right)
+        {
+            const QVariant l = value(left);
+            const QVariant r = value(right);
+            int comparison = 0;
+            if ((l.metaType().id() == QMetaType::QString) || (r.metaType().id() == QMetaType::QString))
+                comparison = QString::localeAwareCompare(l.toString(), r.toString());
+            else if (l.toDouble() < r.toDouble())
+                comparison = -1;
+            else if (l.toDouble() > r.toDouble())
+                comparison = 1;
+            return ascending ? (comparison < 0) : (comparison > 0);
+        });
+    }
+
     BitTorrent::Torrent *m_torrent = nullptr;
     QList<Row> m_rows;
     bool m_active = false;
     bool m_hideZeroValues = false;
+    QString m_sortRole;
+    Qt::SortOrder m_sortOrder = Qt::AscendingOrder;
     quint64 m_generation = 0;
 };

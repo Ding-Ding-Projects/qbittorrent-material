@@ -618,7 +618,11 @@ Rectangle {
             renameDialog.text = root._ctxName
             renameDialog.open()
         }
-        onBatchRenameTriggered: batchRenameDialog.open()
+        onBatchRenameTriggered: {
+            batchRenameDialog.selectedFileIndexes = root.contentModel
+                    ? root.contentModel.fileIndexesForItems(root._selectedSourceIndexes()) : []
+            batchRenameDialog.open()
+        }
         onPrioritySelected: (value) => {
             if (root.contentModel)
                 root.contentModel.applyPriorities(root._selectedSourceIndexes(), value)

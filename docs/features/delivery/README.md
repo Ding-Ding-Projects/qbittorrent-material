@@ -5,6 +5,7 @@ Delivery covers the Windows installer and the GitHub Actions release contract.
 ## Article
 
 - [Immutable Windows releases](windows-releases.md)
+- [In-app update check](update-check.md)
 
 No HTTP API is exposed by this delivery path, so no Postman collection is
 applicable.

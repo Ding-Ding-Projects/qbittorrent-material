@@ -123,4 +123,5 @@ private:
     [[nodiscard]] static QString storedPasswordHash();
 
     bool m_locked = false;
+    bool m_updateCheckInProgress = false;
 };

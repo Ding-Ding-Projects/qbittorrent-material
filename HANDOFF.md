@@ -1,5 +1,16 @@
 # Handoff
 
+## 2026-08-01 — Windows Default Apps parity
+
+The Behavior page now exposes upstream qBittorrent's Windows file-association
+handoff. Its platform-gated controller launches the fixed
+`ms-settings:defaultapps` URI through the system Explorer path, reports launch
+failure through the notification center, and leaves Options transaction state
+unchanged. The QML surface includes explanatory copy and accessible action text;
+non-Windows builds do not show it. Desktop policy coverage and the Experience
+feature article record the URI, guard, wiring, failure behavior, and security
+boundary.
+
 ## 2026-08-01 — verifiable changelog history
 
 The offline changelog now carries the full source commit for every historical
@@ -150,3 +161,17 @@ v2, and hybrid torrents without weakening the active status/sidebar filters.
 Desktop policy coverage requires the four choices and both hash-generation
 branches. The feature article records local-only behavior, empty-hash behavior,
 and the remaining runtime acceptance matrix.
+
+## 2026-08-01 — honest asynchronous update checking
+
+The application menu's update action now queries the project's latest stable
+GitHub Release asynchronously through the shared download manager. It validates
+the immutable build-run-sha identity and compares the monotonic run number with
+the build.run.sha identity embedded by release builds. Development builds offer
+a valid published release instead of pretending semantic version 5.3.0 proves
+equivalence.
+
+Failed downloads, oversized or malformed responses, and unsupported release
+objects produce a retryable notification without emitting the misleading
+"up to date" result. Concurrent checks are coalesced, response size is bounded,
+and parser/comparison logic is isolated from the network path for direct tests.

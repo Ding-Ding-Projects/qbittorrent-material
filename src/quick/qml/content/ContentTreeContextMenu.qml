@@ -82,13 +82,11 @@ Menu {
     }
     MenuItem {
         text: qsTr("Batch rename...")
-        visible: root.single
-        height: visible ? implicitHeight : 0
+        Accessible.name: qsTr("Batch rename selected files")
         onTriggered: { Log.info("ui", "Content: Batch rename"); root.batchRenameTriggered() }
     }
     MenuSeparator {
-        visible: root.single
-        height: visible ? implicitHeight : 0
+        visible: true
     }
 
     Menu {

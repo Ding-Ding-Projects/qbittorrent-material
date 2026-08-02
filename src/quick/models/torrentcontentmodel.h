@@ -17,6 +17,7 @@
 #include <QList>
 #include <QPointer>
 #include <QRegularExpression>
+#include <QSet>
 #include <QSortFilterProxyModel>
 #include <QString>
 #include <QVariantList>
@@ -145,6 +146,9 @@ public:
     Q_INVOKABLE QString itemRelativePath(const QModelIndex &index) const;
     Q_INVOKABLE QString itemFullPath(const QModelIndex &index) const;
 
+    /// Unique leaf file indexes represented by the supplied files/folders.
+    Q_INVOKABLE QVariantList fileIndexesForItems(const QVariantList &indexes) const;
+
     /// [{ index, path, name }] for every leaf file — feeds the batch-rename preview.
     Q_INVOKABLE QVariantList fileEntries() const;
 
@@ -162,6 +166,7 @@ private:
     QModelIndex indexForNode(const ContentNode *node) const;
     QModelIndex indexForPath(const Path &path) const;
     Path pathForIndex(const QModelIndex &index) const;
+    void appendFileIndexes(const ContentNode *node, QSet<int> &indexes) const;
 
     void populate();
     ContentNode *populateFolder(const Path &folderPath, bool suppressNotify);

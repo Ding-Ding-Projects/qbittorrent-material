@@ -23,6 +23,7 @@
 #include <QHash>
 #include <QHostAddress>
 #include <QNetworkInterface>
+#include <QProcess>
 #include <QQmlEngine>
 #include <QRandomGenerator>
 #include <QRegularExpression>
@@ -47,12 +48,22 @@
 #include "base/torrentfileguard.h"
 #include "base/utils/fs/path.h"
 #include "base/utils/net.h"
+#include "base/utils/os.h"
 
 #include "../models/advancedsettingsmodel.h"
 #include "../models/watchedfoldersmodel.h"
 #include "../theme/thememanager.h"
 
 using BitTorrent::Session;
+
+bool OptionsController::windowsDefaultAppsAvailable() const
+{
+#ifdef Q_OS_WIN
+    return true;
+#else
+    return false;
+#endif
+}
 
 namespace
 {
@@ -901,6 +912,24 @@ void OptionsController::openDynDNSRegistration()
     emit actionFeedback(QStringLiteral("dynDNS"), opened,
         opened ? tr("Opened the provider registration page.")
                : tr("Could not open the provider registration page."));
+}
+
+void OptionsController::openWindowsDefaultApps()
+{
+#ifdef Q_OS_WIN
+    // Match upstream qBittorrent: ask the trusted system Explorer to dispatch
+    // the Settings URI instead of depending on a browser URL handler.
+    const Path explorer = Utils::OS::windowsSystemPath().parentPath()
+        / Path(QStringLiteral("explorer.exe"));
+    const bool opened = QProcess::startDetached(explorer.data(),
+        {QStringLiteral("ms-settings:defaultapps")});
+    emit actionFeedback(QStringLiteral("windowsDefaultApps"), opened,
+        opened ? tr("Opened Windows Default Apps settings.")
+               : tr("Could not open Windows Default Apps settings."));
+#else
+    emit actionFeedback(QStringLiteral("windowsDefaultApps"), false,
+        tr("Windows Default Apps settings are unavailable on this platform."));
+#endif
 }
 
 // ---------------------------------------------------------------------------

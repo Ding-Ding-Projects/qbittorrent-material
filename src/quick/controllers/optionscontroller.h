@@ -73,6 +73,8 @@ class OptionsController : public QObject
     Q_PROPERTY(QObject *watchedFoldersModel READ watchedFoldersModel CONSTANT)
     /// Whether the staged Web UI API key is non-empty.
     Q_PROPERTY(bool apiKeyValid READ apiKeyValid NOTIFY apiKeyValidChanged)
+    /// Whether this platform exposes the Windows Default Apps settings action.
+    Q_PROPERTY(bool windowsDefaultAppsAvailable READ windowsDefaultAppsAvailable CONSTANT)
 
 public:
     /// Tab order — mirrors the legacy `OptionsDialog::Tabs` enum exactly.
@@ -100,6 +102,7 @@ public:
     int revision() const { return m_revision; }
     QObject *watchedFoldersModel() const;
     bool apiKeyValid() const;
+    bool windowsDefaultAppsAvailable() const;
 
     int lastViewedTab() const;
     void setLastViewedTab(int tab);
@@ -148,6 +151,8 @@ public:
     Q_INVOKABLE void reloadIPFilter();
     Q_INVOKABLE void sendTestEmail();
     Q_INVOKABLE void openDynDNSRegistration();
+    /// Open Windows' per-user Default Apps settings through the system Explorer.
+    Q_INVOKABLE void openWindowsDefaultApps();
 
 signals:
     void modifiedChanged();

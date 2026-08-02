@@ -35,6 +35,9 @@ Popup {
     /*! The \c TorrentContentModel providing \c fileEntries() / \c renameFileByIndex(). */
     property var sourceModel: null
 
+    /*! Optional file indexes selected by the caller; empty means every file. */
+    property var selectedFileIndexes: []
+
     /*! Emitted after the user confirms; \c count is the number of files renamed. */
     signal applied(int count)
 
@@ -59,15 +62,53 @@ Popup {
     // ---- State --------------------------------------------------------------
     property var _entries: []
     property bool _regexValid: true
+    property string _validationError: ""
     property int _changedCount: 0
+    property string _originalCommonPath: ""
 
     ListModel { id: previewModel }
 
     onOpened: {
         Log.debug("ui", "BatchRenameDialog opened")
-        _entries = (sourceModel && sourceModel.fileEntries) ? sourceModel.fileEntries() : [];
+        const allEntries = (sourceModel && sourceModel.fileEntries) ? sourceModel.fileEntries() : [];
+        const selected = {};
+        for (let i = 0; i < selectedFileIndexes.length; ++i)
+            selected["" + selectedFileIndexes[i]] = true;
+        _entries = selectedFileIndexes.length > 0
+                ? allEntries.filter((entry) => selected["" + entry.index] === true)
+                : allEntries;
+        _originalCommonPath = _commonPath(_entries);
+        commonPathField.text = _originalCommonPath;
         _updatePreview();
-        findField.forceActiveFocus();
+        commonPathField.forceActiveFocus();
+    }
+
+    function _normalizePath(path) {
+        return ("" + path).replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/{2,}/g, "/")
+    }
+
+    function _commonPath(entries) {
+        if (entries.length === 0)
+            return ""
+        let common = _normalizePath(entries[0].path).split("/")
+        for (let i = 1; i < entries.length && common.length > 0; ++i) {
+            const parts = _normalizePath(entries[i].path).split("/")
+            let count = 0
+            while (count < common.length && count < parts.length
+                   && common[count].toLocaleLowerCase() === parts[count].toLocaleLowerCase())
+                ++count
+            common = common.slice(0, count)
+        }
+        return common.join("/")
+    }
+
+    function _validRelativePath(path) {
+        const normalized = _normalizePath(path)
+        if (normalized.length === 0 || normalized.startsWith("/")
+                || /^[A-Za-z]:\//.test(normalized))
+            return false
+        const parts = normalized.split("/")
+        return parts.indexOf("") < 0 && parts.indexOf(".") < 0 && parts.indexOf("..") < 0
     }
 
     function _makeRegex() {
@@ -87,17 +128,52 @@ Popup {
     function _updatePreview() {
         previewModel.clear();
         _changedCount = 0;
+        _validationError = "";
 
         const re = _makeRegex();
         _regexValid = (re !== undefined);
-        if (!_regexValid || re === null)
+        if (!_regexValid)
             return;
+
+        const replacementCommon = _normalizePath(commonPathField.text.trim())
+        if (!_validRelativePath(replacementCommon)) {
+            _validationError = qsTr("Enter a valid relative common path without '..'.")
+            return
+        }
+
+        const occupied = {}
+        const allEntries = sourceModel ? sourceModel.fileEntries() : []
+        for (let j = 0; j < allEntries.length; ++j)
+            occupied[_normalizePath(allEntries[j].path).toLocaleLowerCase()] = allEntries[j].index
+        for (let j = 0; j < _entries.length; ++j)
+            delete occupied[_normalizePath(_entries[j].path).toLocaleLowerCase()]
 
         for (let i = 0; i < _entries.length; ++i) {
             const entry = _entries[i];
             const oldPath = "" + entry.path;
-            const newPath = oldPath.replace(re, replaceField.text);
-            if ((newPath !== oldPath) && (newPath.trim().length > 0)) {
+            const normalizedOld = _normalizePath(oldPath)
+            const suffix = _originalCommonPath.length > 0
+                    ? normalizedOld.substring(_originalCommonPath.length).replace(/^\//, "")
+                    : normalizedOld
+            let newPath = suffix.length > 0 ? replacementCommon + "/" + suffix : replacementCommon
+            if (re !== null)
+                newPath = newPath.replace(re, replaceField.text)
+            newPath = _normalizePath(newPath)
+            if (!_validRelativePath(newPath)) {
+                _validationError = qsTr("A resulting path is invalid or leaves the torrent root.")
+                previewModel.clear()
+                _changedCount = 0
+                return
+            }
+            const key = newPath.toLocaleLowerCase()
+            if (occupied[key] !== undefined && occupied[key] !== entry.index) {
+                _validationError = qsTr("Two files would have the same destination path.")
+                previewModel.clear()
+                _changedCount = 0
+                return
+            }
+            occupied[key] = entry.index
+            if (newPath !== normalizedOld) {
                 previewModel.append({ "fileIndex": entry.index, "oldPath": oldPath, "newPath": newPath });
                 ++_changedCount;
             }
@@ -130,11 +206,27 @@ Popup {
         }
 
         Label {
-            text: qsTr("Find and replace across file paths using plain text or a regular expression.")
+            text: qsTr("Edit the shared path of the selected files, with optional find and replace.")
             font: Typography.bodyMedium
             color: Theme.color("onSurfaceVariant")
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            Label {
+                text: qsTr("Common path:")
+                font: Typography.bodyMedium
+                color: Theme.color("onSurfaceVariant")
+            }
+            TextField {
+                id: commonPathField
+                Layout.fillWidth: true
+                selectByMouse: true
+                Accessible.name: qsTr("Common path")
+                onTextChanged: root._updatePreview()
+            }
         }
 
         GridLayout {
@@ -198,6 +290,15 @@ Popup {
             text: qsTr("Invalid regular expression.")
             font: Typography.labelLarge
             color: StateColors.error
+            Layout.fillWidth: true
+        }
+
+        Label {
+            visible: root._validationError.length > 0
+            text: root._validationError
+            font: Typography.labelLarge
+            color: StateColors.error
+            wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }
 
@@ -279,7 +380,7 @@ Popup {
             Button {
                 text: qsTr("Rename")
                 highlighted: true
-                enabled: root._regexValid && (root._changedCount > 0)
+                enabled: root._regexValid && root._validationError.length === 0 && (root._changedCount > 0)
                 DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
                 onClicked: root._apply()
             }

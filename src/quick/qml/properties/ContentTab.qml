@@ -78,6 +78,40 @@ Item {
         return contentFilter.sourceIndex(tree.index(row, 0))
     }
 
+    function _rowSelected(row) {
+        return tree.selectedRows.indexOf(row) >= 0
+    }
+
+    function _selectRow(row, modifiers) {
+        let rows = tree.selectedRows.slice()
+        const pos = rows.indexOf(row)
+        if (modifiers & Qt.ControlModifier) {
+            if (pos >= 0)
+                rows.splice(pos, 1)
+            else
+                rows.push(row)
+            tree.anchorRow = row
+        } else if ((modifiers & Qt.ShiftModifier) && tree.anchorRow >= 0) {
+            rows = []
+            const lo = Math.min(tree.anchorRow, row)
+            const hi = Math.max(tree.anchorRow, row)
+            for (let i = lo; i <= hi; ++i)
+                rows.push(i)
+        } else {
+            rows = [row]
+            tree.anchorRow = row
+        }
+        tree.selectedRows = rows
+        tree.selectedRow = rows.length > 0 ? row : -1
+    }
+
+    function _selectedSourceIndexes() {
+        const result = []
+        for (let i = 0; i < tree.selectedRows.length; ++i)
+            result.push(_srcIndex(tree.selectedRows[i]))
+        return result
+    }
+
     function _priorityLabel(prio) {
         switch (prio) {
         case prioIgnored: return qsTr("Do not download")
@@ -178,6 +212,8 @@ Item {
             boundsBehavior: Flickable.StopAtBounds
 
             property int selectedRow: -1
+            property var selectedRows: []
+            property int anchorRow: -1
 
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
@@ -198,7 +234,7 @@ Item {
                 implicitWidth: tree.width
                 implicitHeight: 40
 
-                readonly property bool selected: tree.selectedRow === row
+                readonly property bool selected: root._rowSelected(row)
                 readonly property int nameWidth: Math.max(120, tree.width - root.fixedCols)
 
                 Rectangle {
@@ -394,7 +430,10 @@ Item {
                         z: -1
                         acceptedButtons: Qt.LeftButton | Qt.RightButton
                         onClicked: (mouse) => {
-                            tree.selectedRow = rowItem.row
+                            if (mouse.button === Qt.RightButton && !root._rowSelected(rowItem.row))
+                                root._selectRow(rowItem.row, Qt.NoModifier)
+                            else if (mouse.button === Qt.LeftButton)
+                                root._selectRow(rowItem.row, mouse.modifiers)
                             if (mouse.button === Qt.RightButton) {
                                 const p = mapToItem(root, mouse.x, mouse.y)
                                 contentMenu.x = p.x
@@ -450,9 +489,18 @@ Item {
         }
         MenuItem {
             text: qsTr("Rename...")
-            visible: contentMenu.hasRow
+            visible: contentMenu.hasRow && tree.selectedRows.length === 1
             height: visible ? implicitHeight : 0
             onTriggered: root._openRename(contentMenu.currentRow)
+        }
+        MenuItem {
+            text: qsTr("Batch rename...")
+            enabled: tree.selectedRows.length > 0
+            Accessible.name: qsTr("Batch rename selected files")
+            onTriggered: {
+                batchRenameDialog.selectedFileIndexes = contentModel.fileIndexesForItems(root._selectedSourceIndexes())
+                batchRenameDialog.open()
+            }
         }
 
         MenuSeparator {}
@@ -497,6 +545,12 @@ Item {
             Log.info("ui", "ContentTab rename row " + row + " -> " + newName)
             contentModel.renameItem(root._srcIndex(row), newName)
         }
+    }
+
+    BatchRenameDialog {
+        id: batchRenameDialog
+        sourceModel: contentModel
+        onApplied: (count) => NotificationCenter.notify(qsTr("Renamed %1 file(s)").arg(count), "success")
     }
 
     Component.onCompleted: Log.debug("ui", "ContentTab loaded")

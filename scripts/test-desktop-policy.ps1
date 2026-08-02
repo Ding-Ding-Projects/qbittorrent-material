@@ -332,6 +332,44 @@ Test-Policy ($transferListView -match 'text:\s*qsTr\("Filter by:"\)' `
         -and $transferListView -match 'TransferListModel\.TR_INFOHASH_V2') `
     "the transfer toolbar offers all upstream desktop filter-by choices"
 
+$peerListModel = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/models/peerlistmodel.h")
+$peersTab = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/properties/PeersTab.qml")
+Test-Policy ($peerListModel -match 'ContributionRole' `
+        -and $peerListModel -match 'ContributionValueRole' `
+        -and $peerListModel -match 'row\.contribution\s*=\s*static_cast<qreal>\(row\.totalUpload\)' `
+        -and $peerListModel -match 'm_sortRole\s*==\s*u"contribution"') `
+    "the peer model calculates and numerically sorts upstream contribution"
+Test-Policy ($peersTab -match 'role:\s*"contribution"' `
+        -and $peersTab -match 'title:\s*qsTr\("Contribution"\)') `
+    "the Peers table displays the upstream Contribution column"
+
+$optionsControllerHeader = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/controllers/optionscontroller.h")
+$optionsControllerSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/controllers/optionscontroller.cpp")
+$behaviorPage = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/options/BehaviorPage.qml")
+Test-Policy ($optionsControllerHeader -match 'Q_PROPERTY\(bool windowsDefaultAppsAvailable' `
+        -and $optionsControllerHeader -match 'Q_INVOKABLE void openWindowsDefaultApps\(\)') `
+    "the options controller exposes the Windows Default Apps capability and action"
+Test-Policy ($optionsControllerSource -match 'Utils::OS::windowsSystemPath\(\)\.parentPath\(\)' `
+        -and $optionsControllerSource -match 'QProcess::startDetached' `
+        -and $optionsControllerSource -match 'ms-settings:defaultapps') `
+    "the Default Apps action uses the fixed URI through system Explorer on Windows"
+Test-Policy ($behaviorPage -match 'visible:\s*OptionsController\.windowsDefaultAppsAvailable' `
+        -and $behaviorPage -match 'OptionsController\.openWindowsDefaultApps\(\)' `
+        -and $behaviorPage -match 'Accessible\.description:\s*qsTr\(' `
+        -and $behaviorPage -match 'action === "windowsDefaultApps"') `
+    "the Behavior page platform-gates, describes, invokes, and reports the Default Apps action"
+
+$updateController = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/app/appcontroller.cpp")
+$updateParser = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/app/updatecheck.cpp")
+$appCMake = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/CMakeLists.txt")
+Test-Policy ($updateController.Contains('releases/latest') -and $updateController.Contains('.limit(maxReleaseResponseSize)') -and $updateController.Contains('m_updateCheckInProgress') -and $updateController.Contains('result.status != Net::DownloadStatus::Success')) "the program update check is asynchronous, bounded, and failure-safe"
+Test-Policy ($updateParser.Contains('draft') -and $updateParser.Contains('prerelease') -and $updateParser.Contains('^build(?:-|\\.)') -and $updateParser.Contains('latest.buildNumber > current.number')) "the update parser accepts only stable immutable builds and compares run numbers"
+Test-Policy ($appCMake.Contains('QBT_BUILD_ID=\"${QBT_BUILD_ID}\"')) "the packaged release identity is compiled into the update checker"
+Test-Policy (Test-Path -LiteralPath (Get-RepositoryPath "docs/features/delivery/update-check.md") -PathType Leaf) "the in-app update-check behavior and failure modes are documented"
+
 $workflowPath = Get-RepositoryPath ".github/workflows/release-every-push.yml"
 Test-Policy (Test-Path -LiteralPath $workflowPath -PathType Leaf) "the push release workflow exists"
 if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {
@@ -395,6 +433,8 @@ if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {
         "an absent release tag does not leak an expected native failure code"
     Test-Policy ($workflow -notmatch '(?m)^\s*uses:\s*[^@\s]+@(?![0-9a-f]{40}(?:\s|#|$))') `
         "every external GitHub Action is pinned to a full commit"
+    Test-Policy ($workflow -match '(?ms)name:\s*Check out the pushed commit.*?fetch-depth:\s*0') `
+        "the release checkout includes full history for changelog commit validation"
     Test-Policy ($workflow -notmatch '--draft|--prerelease') `
         "the release command cannot request a draft or prerelease"
     Test-Policy ($workflow -notmatch '--clobber') "the workflow never clobbers a release asset"

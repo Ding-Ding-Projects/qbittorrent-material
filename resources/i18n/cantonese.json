@@ -1989,6 +1989,13 @@
   "µTorrent compatible list URL:": "µTorrent 相容清單網址:",
   "μTP": "μTP",
   "∞": "∞",
+  "File association": "檔案關聯",
+  "To set qBittorrent as the default program for .torrent files and Magnet links, open Windows Default Apps settings and add them manually.": "想用 qBittorrent 開 .torrent 檔同 Magnet 連結，就去 Windows 預設應用程式設定手動揀返佢啦。",
+  "Open Windows Default Apps settings page": "開 Windows 預設應用程式設定",
+  "Opens Windows Settings to choose default applications for file and link types": "開 Windows 設定，揀檔案類型同連結類型嘅預設應用程式",
+  "Opened Windows Default Apps settings.": "Windows 預設應用程式設定開咗喇。",
+  "Could not open Windows Default Apps settings.": "開唔到 Windows 預設應用程式設定。",
+  "Windows Default Apps settings are unavailable on this platform.": "呢個平台冇 Windows 預設應用程式設定。",
   "Open commit %1": "開啟提交 %1",
   "Opens the source commit for this changelog entry": "開啟呢項更新紀錄對應嘅原始碼提交",
   "qBittorrent Material build #49 (6bc2b3f5)": "qBittorrent Material build #49 (6bc2b3f5)",
@@ -1997,4 +2004,7 @@
   "Added source-commit links to every changelog entry and preserved them in copy and Markdown export.": "每條更新紀錄都有原始碼提交連結，複製同 Markdown 匯出亦帶齊收據。",
   "Added upstream-compatible transfer filtering by name, save path, info hash v1, and info hash v2.": "加入同上游相容嘅傳輸篩選，可按名稱、儲存路徑、資訊雜湊 v1 同 v2 搵。",
   "Fixed compact filter controls, maximum-playfulness bilingual clipping, and selection-dependent Split Dock actions.": "修正咗緊湊篩選控制、最高玩味雙語文字攝位，同埋 Split Dock 動作依選取狀態啟用。"
+, "An update check is already in progress.": "更新檢查已經跑緊，唔使催佢啦。"
+  , "Could not check for updates. Please try again later.": "暫時檢查唔到更新，遲啲再試啦。"
+  , "Could not understand the latest release information.": "最新版本資料解讀唔到，所以唔會亂講你已經最新。"
 }

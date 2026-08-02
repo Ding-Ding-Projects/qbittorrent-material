@@ -23,6 +23,8 @@
 
 #include "base/logging.h"
 #include "app/application.h"
+#include "app/updatecheck.h"
+#include "base/net/downloadmanager.h"
 
 #if __has_include("base/preferences.h")
 #include "base/preferences.h"
@@ -234,13 +236,53 @@ void AppController::setLockPassword(const QString &password)
 
 void AppController::checkForUpdates()
 {
+    if (m_updateCheckInProgress)
+    {
+        emit notify(tr("An update check is already in progress."));
+        return;
+    }
+
     qCInfo(lcUi) << "checkForUpdates() requested";
-    // TODO(engine): fetch the latest published version from the update endpoint
-    // via Net::DownloadManager and compare against applicationVersion(). Until
-    // that pipeline is wired, report "up to date" so the UI stays responsive.
     emit notify(tr("Checking for updates…"));
-    emit updateCheckFinished(false, QString());
-    qCDebug(lcUi) << "checkForUpdates() completed (stub: reported up-to-date)";
+    m_updateCheckInProgress = true;
+
+    constexpr qint64 maxReleaseResponseSize = 256 * 1024;
+    const auto request = Net::DownloadRequest(
+        u"https://api.github.com/repos/Ding-Ding-Projects/qbittorrent-material/releases/latest"_s)
+        .userAgent(QStringLiteral("qBittorrent-Material/" QBT_BUILD_ID " ProgramUpdater"))
+        .limit(maxReleaseResponseSize);
+
+    bool useProxy = false;
+#ifdef QBT_HAS_PREFERENCES
+    useProxy = Preferences::instance()->useProxyForGeneralPurposes();
+#endif
+
+    Net::DownloadManager::instance()->download(request, useProxy, this,
+        [this](const Net::DownloadResult &result)
+    {
+        m_updateCheckInProgress = false;
+        if (result.status != Net::DownloadStatus::Success)
+        {
+            qCWarning(lcUi) << "Update check download failed:" << result.errorString;
+            emit notify(tr("Could not check for updates. Please try again later."));
+            return;
+        }
+
+        QString parseError;
+        const UpdateCheck::Release latest = UpdateCheck::parseLatestRelease(result.data, &parseError);
+        if (!latest.isValid())
+        {
+            qCWarning(lcUi) << "Update check response rejected:" << parseError;
+            emit notify(tr("Could not understand the latest release information."));
+            return;
+        }
+
+        const bool available = UpdateCheck::isNewer(
+            latest, QStringLiteral(QBT_BUILD_ID));
+        emit updateCheckFinished(available, latest.tagName);
+        qCInfo(lcUi) << "Update check completed; current build" << QBT_BUILD_ID
+                     << "latest" << latest.tagName << "available" << available;
+    });
 }
 
 void AppController::pasteAdd()

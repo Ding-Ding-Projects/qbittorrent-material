@@ -1,5 +1,73 @@
 # Handoff
 
+## 2026-08-02 — requested follow-up: magnet conversion and silent updates
+
+This is a handoff-only checkpoint; neither feature below has been implemented.
+The next agent should keep the default branch releasable and land each feature
+with focused engine, policy, headless, and installed-package coverage.
+
+### Magnet link to `.torrent` converter
+
+Add a first-class workflow that accepts a magnet URI, obtains its metadata, and
+writes a standards-compliant `.torrent` file chosen by the user. Conversion
+must use an isolated temporary libtorrent handle rather than adding a durable
+transfer, and it must remove every v1/v2 hash alias on success, cancellation,
+timeout, failure, and shutdown. Preserve hybrid v1/v2 metadata, announce tiers,
+web seeds, private flags, file paths, and piece data exactly as provided by the
+metadata. Sanitize the suggested output filename and use atomic file creation
+so an interrupted conversion cannot leave a valid-looking partial file.
+
+Expose clear pending/progress/success/failure/cancel states and prevent two
+conversions of the same hash from colliding with the add-dialog metadata
+preview or normal session adds. The converter must obey the planned VPN traffic
+gate: when the kill switch is enabled, metadata retrieval cannot start or
+resume until the strict tunnel policy is Ready. It must never become a bypass
+for startup pause, DHT/tracker restrictions, or the per-app routing policy.
+
+Regression coverage should include malformed/non-magnet input, magnets with
+v1, v2, and hybrid identities, duplicate requests, metadata timeout, cancel and
+shutdown races, invalid output paths, existing-file handling, atomic-write
+failure, exact bdecode round trips, and proof that conversion leaves no torrent
+in the user's transfer list, resume store, or torrent journal. Include a
+deterministic headless conversion smoke with a local synthetic metadata peer or
+fixture rather than relying on a public torrent.
+
+### Fully automatic silent update
+
+Replace the current manual update notification with an automatic Windows
+update pipeline that discovers a newer immutable release, downloads exactly
+one matching x64 installer, authenticates it, stages it atomically, exits the
+application cleanly, installs silently, restarts the installed binary, and
+reports success or a recoverable failure on the next launch. Prevent downgrade,
+same-build replay, cross-architecture assets, draft/prerelease selection, and
+ambiguous/missing installers. Preserve the user's profile and drain pending
+torrent adds/resume writes before handing off to the installer.
+
+Do not silently execute an installer based only on its filename or release
+JSON. Add a signed release manifest or equivalent pinned-key verification that
+binds version, build ID, commit, asset name, length, and SHA-256; verify all of
+it before launch. Downloads must be bounded, written to an application-owned
+staging directory through a temporary file, and renamed only after successful
+verification. Never put update tokens or secrets in settings, logs, command
+lines, CI artifacts, or release notes.
+
+The current NSIS package requests administrator elevation and is installed
+under Program Files, so a normal qBittorrent process cannot guarantee a truly
+silent update: Windows will show UAC. To meet the explicit no-prompt requirement
+after initial setup, the next agent should design a least-privilege updater
+service/task installed once with informed elevation, or change to a per-user
+installation model. Do not bypass UAC, weaken Windows security, run the main
+qBittorrent UI elevated, or call the flow fully silent until that prerequisite
+exists and is tested.
+
+CI should use a fake signed release feed to cover selection, signature/hash
+failure, truncation, downgrade/replay, interrupted download/install, rollback,
+and restart handoff. Installed Windows coverage must prove the exact published
+CI artifact is selected, normal shutdown completes, the silent installer exit
+code is honored, the new build ID is running afterward, and failure leaves the
+previous installation launchable. Keep real GitHub release credentials out of
+tests.
+
 ## 2026-08-02 — NordVPN/OpenVPN isolation design checkpoint
 
 The requested VPN feature has two independent parts. The profile-management

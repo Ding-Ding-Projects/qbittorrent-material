@@ -790,6 +790,9 @@ namespace BitTorrent
         const bool m_wasPexEnabled = m_isPeXEnabled;
 
         int m_numResumeData = 0;
+        // Normal adds are known as soon as they are queued, before libtorrent's
+        // add_torrent_alert creates the TorrentImpl.
+        QSet<TorrentID> m_addingTorrents;
         // Torrents whose restore add is queued in libtorrent but whose
         // add_torrent_alert hasn't landed yet (see prepareStartup()).
         QSet<TorrentID> m_restoringTorrents;
@@ -821,7 +824,7 @@ namespace BitTorrent
         TorrentContentRemover *m_torrentContentRemover = nullptr;
 
         using AddTorrentAlertHandler = std::function<void (const lt::add_torrent_alert *alert)>;
-        QList<AddTorrentAlertHandler> m_addTorrentAlertHandlers;
+        QHash<TorrentID, AddTorrentAlertHandler> m_addTorrentAlertHandlers;
 
         QHash<TorrentID, lt::torrent_handle> m_downloadedMetadata;
 

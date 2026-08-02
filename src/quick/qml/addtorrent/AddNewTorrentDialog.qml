@@ -24,14 +24,15 @@ import qBittorrent
     \c AddTorrentController.dialogRequested fires, binds every field to the
     controller's resolved \c initialValues, renders the content tree from
     \c AddTorrentController.contentModel, and on accept hands a plain value map
-    back to \c AddTorrentController.accept(). Duplicate / merge-tracker / failure
-    feedback from \c GuiAddTorrentManager is handled by the application shell.
+    back to \c AddTorrentController.accept(). It also owns the global tracker-
+    merge confirmation requested by \c GuiAddTorrentManager.
 */
 Dialog {
     id: root
 
     modal: true
     focus: true
+    closePolicy: Popup.NoAutoClose
     padding: Spacing.lg
     Material.elevation: 24
     Material.roundedScale: Material.LargeScale
@@ -49,6 +50,13 @@ Dialog {
     readonly property bool _manualMode: tmmCombo.currentIndex === 0
     readonly property bool _hasMetadata: AddTorrentController.hasMetadata
 
+    Shortcut {
+        sequence: "Escape"
+        enabled: root.visible && !mergeTrackersDialog.visible
+        onActivated: root.reject()
+        onActivatedAmbiguously: root.reject()
+    }
+
     // ---- Open / load lifecycle ---------------------------------------------
 
     Connections {
@@ -64,10 +72,62 @@ Dialog {
         }
     }
 
-    // NOTE: duplicate / failed / merge-tracker feedback from GuiAddTorrentManager
-    // is intentionally handled by the application shell (Main.qml), because those
-    // signals can fire before this dialog is shown. GuiAddTorrentManager exposes
-    // mergeTrackersRequested() + respondMergeTrackers() for that wiring.
+    // This component exists for the lifetime of the application shell, even
+    // while the add dialog itself is hidden, so it can safely own the global
+    // merge-trackers confirmation.
+    Connections {
+        target: GuiAddTorrentManager
+        function onTorrentAdded(source) {
+            NotificationCenter.notify(qsTr("Torrent added"), "success", "")
+        }
+        function onAddTorrentFailed(source, reason) {
+            NotificationCenter.notify(qsTr("Could not add torrent"), "error", reason)
+        }
+        function onDuplicateTorrent(source, name) {
+            NotificationCenter.notify(qsTr("Torrent already exists"), "warning", name)
+        }
+        function onMergeTrackersRequested(source, name, isPrivate) {
+            if (isPrivate) {
+                // Defensive only: the manager never requests a merge for a
+                // private torrent.
+                GuiAddTorrentManager.respondMergeTrackers(source, false)
+                return
+            }
+
+            mergeTrackersDialog.torrentSource = source
+            mergeTrackersDialog.torrentName = name
+            mergeTrackersDialog.open()
+        }
+    }
+
+    ConfirmDialog {
+        id: mergeTrackersDialog
+        property string torrentSource: ""
+        property string torrentName: ""
+
+        closePolicy: Popup.NoAutoClose
+        title: qsTr("Merge trackers?")
+        text: qsTr("The torrent \"%1\" already exists. Merge trackers and web seeds from the new source?").arg(torrentName)
+        acceptText: qsTr("Merge")
+
+        onAccepted: {
+            const source = torrentSource
+            torrentSource = ""
+            GuiAddTorrentManager.respondMergeTrackers(source, true)
+        }
+        onRejected: {
+            const source = torrentSource
+            torrentSource = ""
+            GuiAddTorrentManager.respondMergeTrackers(source, false)
+        }
+
+        Shortcut {
+            sequence: "Escape"
+            enabled: mergeTrackersDialog.visible
+            onActivated: mergeTrackersDialog.reject()
+            onActivatedAmbiguously: mergeTrackersDialog.reject()
+        }
+    }
 
     // Local transient notifications for in-dialog actions (e.g. .torrent export).
     Snackbar { id: localSnackbar }

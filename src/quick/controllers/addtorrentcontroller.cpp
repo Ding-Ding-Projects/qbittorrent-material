@@ -15,6 +15,7 @@
 #include <algorithm>
 
 #include <QLocale>
+#include <QJSEngine>
 #include <QStringList>
 
 #include "base/bittorrent/downloadpriority.h"
@@ -301,7 +302,9 @@ AddTorrentController *AddTorrentController::s_instance = nullptr;
 
 AddTorrentController *AddTorrentController::create(QQmlEngine *, QJSEngine *)
 {
-    return instance();
+    AddTorrentController *controller = instance();
+    QJSEngine::setObjectOwnership(controller, QJSEngine::CppOwnership);
+    return controller;
 }
 
 AddTorrentController *AddTorrentController::instance()
@@ -316,7 +319,6 @@ AddTorrentController::AddTorrentController(QObject *parent)
     , m_session {BitTorrent::Session::instance()}
     , m_fileModel {new AddTorrentFileModel(this)}
 {
-    s_instance = this;
     connect(m_fileModel, &AddTorrentFileModel::wantedSizeChanged, this, [this]
     {
         // Refresh the size label against the currently-selected save path.
@@ -749,8 +751,10 @@ void AddTorrentController::reject()
     qCInfo(lcUi) << "AddTorrentController: rejected" << m_context->source;
     const QString source = m_context->source;
 
-    // Cancel any in-progress metadata download for magnet links.
-    if (m_session && !hasMetadata())
+    // The preview handle remains temporary even after metadata arrives. Always
+    // cancel it when the dialog is rejected so it cannot leak into the native
+    // session or block a later add of the same magnet.
+    if (m_session)
     {
         m_session->cancelDownloadMetadata(
                 m_context->torrentDescr.infoHash().toTorrentID());

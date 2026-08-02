@@ -145,7 +145,6 @@ public:
     static AddTorrentController *create(QQmlEngine *engine, QJSEngine *scriptEngine);
     static AddTorrentController *instance();
 
-    explicit AddTorrentController(QObject *parent = nullptr);
     ~AddTorrentController() override;
 
     // ---- property getters -------------------------------------------------
@@ -216,6 +215,8 @@ signals:
     void torrentRejected(const QString &source);
 
 private:
+    explicit AddTorrentController(QObject *parent = nullptr);
+
     class TorrentContentAdaptor;
     struct Context;
 

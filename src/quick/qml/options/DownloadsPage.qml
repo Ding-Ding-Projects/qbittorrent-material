@@ -135,6 +135,7 @@ Flickable {
             // Duplicate handling
             SectionHeader { text: qsTr("When adding a duplicate torrent"); Layout.fillWidth: true }
             OptCheck {
+                id: mergeTrackers
                 text: qsTr("Merge trackers to existing torrent")
                 settingKey: "BitTorrent/MergeTrackersEnabled"
                 defaultValue: false
@@ -143,7 +144,7 @@ Flickable {
                 text: qsTr("Ask to merge trackers for manually added torrent")
                 settingKey: "GUI/ConfirmActions/MergeTrackers"
                 defaultValue: true
-                enabled: additionDialog.checked
+                enabled: additionDialog.checked && mergeTrackers.checked
             }
 
             // Delete .torrent afterwards

@@ -246,7 +246,21 @@ QByteArray TorrentInfo::rawData() const
 
 bool TorrentInfo::matchesInfoHash(const InfoHash &otherInfoHash) const
 {
-    return isValid() && (infoHash() == otherInfoHash);
+    if (!isValid() || !otherInfoHash.isValid())
+        return false;
+
+    // A magnet can advertise only one side of a hybrid torrent. Match any
+    // common, valid hash generation so metadata that expands btih/v1 or
+    // btmh/v2 into the complete hybrid identity is still accepted.
+    const InfoHash ownInfoHash = infoHash();
+    const SHA1Hash ownV1 = ownInfoHash.v1();
+    const SHA1Hash otherV1 = otherInfoHash.v1();
+    if (ownV1.isValid() && otherV1.isValid() && (ownV1 == otherV1))
+        return true;
+
+    const SHA256Hash ownV2 = ownInfoHash.v2();
+    const SHA256Hash otherV2 = otherInfoHash.v2();
+    return ownV2.isValid() && otherV2.isValid() && (ownV2 == otherV2);
 }
 
 std::shared_ptr<lt::torrent_info> TorrentInfo::nativeInfo() const

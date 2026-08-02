@@ -44,6 +44,9 @@ namespace BitTorrent
     struct LoadTorrentParams
     {
         lt::add_torrent_params ltAddTorrentParams {};
+        // Stable application identity. This can intentionally remain the v1
+        // ID when a magnet later expands into a hybrid v1/v2 torrent.
+        TorrentID id;
 
         QString name;
         QString category;

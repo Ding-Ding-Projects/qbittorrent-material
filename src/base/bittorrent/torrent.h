@@ -298,7 +298,7 @@ namespace BitTorrent
         virtual QFuture<QList<int>> fetchPieceAvailability() const = 0;
         virtual QFuture<QBitArray> fetchDownloadingPieces() const = 0;
 
-        TorrentID id() const;
+        virtual TorrentID id() const;
         bool isRunning() const;
         qlonglong remainingSize() const;
 

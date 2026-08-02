@@ -126,6 +126,7 @@ TorrentImpl::TorrentImpl(SessionImpl *session, const lt::torrent_handle &nativeH
     , m_session {session}
     , m_nativeHandle {nativeHandle}
     , m_infoHash {m_nativeHandle.info_hashes()}
+    , m_id {params.id.isValid() ? params.id : m_infoHash.toTorrentID()}
     , m_name {params.name}
     , m_savePath {params.savePath}
     , m_downloadPath {params.downloadPath}
@@ -183,6 +184,11 @@ bool TorrentImpl::isValid() const
 Session *TorrentImpl::session() const
 {
     return m_session;
+}
+
+TorrentID TorrentImpl::id() const
+{
+    return m_id;
 }
 
 InfoHash TorrentImpl::infoHash() const
@@ -1427,9 +1433,18 @@ void TorrentImpl::setMetadata(const TorrentInfo &torrentInfo)
     if (hasMetadata())
         return;
 
-    // TODO(engine): feed the received metadata into the libtorrent handle via
-    // set_metadata so a magnet download can begin fetching content.
-    m_session->downloadMetadata(TorrentDescriptor{});
+    if (!torrentInfo.matchesInfoHash(m_infoHash))
+    {
+        qCWarning(lcTorrent) << "Rejected metadata with a different info hash for" << name();
+        return;
+    }
+
+    const QByteArray metadata = torrentInfo.rawData();
+    if (metadata.isEmpty() || !m_nativeHandle.set_metadata(
+            lt::span<char const>(metadata.constData(), metadata.size())))
+    {
+        qCWarning(lcTorrent) << "Failed to set metadata for" << name();
+    }
 }
 
 Torrent::StopCondition TorrentImpl::stopCondition() const
@@ -1887,6 +1902,7 @@ void TorrentImpl::handleMetadataReceived()
             return;
 
         m_torrentInfo = TorrentInfo(*nativeInfo);
+        m_infoHash = InfoHash {m_nativeHandle.info_hashes()};
         m_ltAddTorrentParams.ti = std::const_pointer_cast<lt::torrent_info>(nativeInfo);
 
         // Rebuild the payload index map (native indexes -> public indexes)

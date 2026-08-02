@@ -325,6 +325,7 @@ Item {
                             padding: 0
                             hoverEnabled: true
                             activeFocusOnTab: true
+                            enabled: TransferController.selectionCount > 0
                             Accessible.name: modelData.tip
                             Accessible.description: qsTr("Action for the selected torrent")
                             background: Rectangle {

@@ -13,6 +13,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
+import QtQuick.Layouts
 import qBittorrent
 
 /*!
@@ -110,6 +111,8 @@ Column {
             implicitWidth: root.width
             implicitHeight: Spacing.controlHeight
             indentation: Spacing.md
+            hoverEnabled: true
+            activeFocusOnTab: true
 
             readonly property bool filterActive: (del.type === root.selectedType)
                 && ((del.type !== 2) || (del.value === root.selectedValue))
@@ -120,22 +123,28 @@ Column {
                 radius: Spacing.radiusControl
             }
 
-            contentItem: Row {
+            contentItem: RowLayout {
                 spacing: Spacing.sm
                 MDIcon {
                     icon: del.type === 0 ? Icons.apps : Icons.category
                     size: 18
                     color: del.filterActive ? Theme.color("primary") : Theme.color("onSurfaceVariant")
-                    anchors.verticalCenter: parent.verticalCenter
+                    Layout.alignment: Qt.AlignVCenter
                 }
                 Label {
                     text: del.label
                     elide: Text.ElideRight
+                    maximumLineCount: 1
+                    wrapMode: Text.NoWrap
                     font: Typography.bodyMedium
                     color: del.filterActive ? Theme.color("primary") : Theme.color("onSurface")
-                    anchors.verticalCenter: parent.verticalCenter
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    Layout.alignment: Qt.AlignVCenter
                 }
             }
+
+            HoverHandler { cursorShape: Qt.PointingHandCursor }
 
             onClicked: root._apply(del.type, del.value)
 

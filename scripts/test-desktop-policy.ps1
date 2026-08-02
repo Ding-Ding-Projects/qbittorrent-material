@@ -242,6 +242,30 @@ Get-ChildItem -LiteralPath (Get-RepositoryPath "src/quick/qml") -Filter "*.qml" 
 Test-Policy ($legacySnackbarCalls.Count -eq 0) `
     "desktop QML contains no legacy static Snackbar.show calls$($legacySnackbarCalls -join ', ')"
 
+$filterSidebar = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/transferlist/FilterSidebar.qml")
+Test-Policy ($filterSidebar -match 'width:\s*Math\.max\(0,\s*filterScroll\.availableWidth\)') `
+    "the filter sidebar reserves the vertical scrollbar viewport"
+
+foreach ($filterPanel in @(
+    "StatusFilterPanel.qml",
+    "CategoryFilterTree.qml",
+    "TagFilterList.qml",
+    "TrackersFilterList.qml",
+    "TrackerStatusFilterPanel.qml"
+)) {
+    $filterPanelSource = Get-Content -Raw -LiteralPath `
+        (Get-RepositoryPath "src/quick/qml/transferlist/$filterPanel")
+    Test-Policy ($filterPanelSource -match 'Layout\.fillWidth:\s*true' `
+            -and $filterPanelSource -match 'Layout\.minimumWidth:\s*0' `
+            -and $filterPanelSource -match 'elide:\s*Text\.ElideRight' `
+            -and $filterPanelSource -match 'wrapMode:\s*Text\.NoWrap') `
+        "$filterPanel bounds and elides long translated labels"
+}
+
+$transfersPage = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/shell/TransfersPage.qml")
+Test-Policy ($transfersPage -match 'enabled:\s*TransferController\.selectionCount\s*>\s*0') `
+    "selection-only Split Dock actions expose their disabled state"
+
 $workflowPath = Get-RepositoryPath ".github/workflows/release-every-push.yml"
 Test-Policy (Test-Path -LiteralPath $workflowPath -PathType Leaf) "the push release workflow exists"
 if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {

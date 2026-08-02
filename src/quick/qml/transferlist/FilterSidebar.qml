@@ -50,13 +50,18 @@ Rectangle {
     }
 
     ScrollView {
+        id: filterScroll
         anchors.fill: parent
         contentWidth: availableWidth
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
         clip: true
 
         ColumnLayout {
-            width: root.width
+            // The vertical scrollbar consumes part of the viewport.  Sizing the
+            // delegates to the outer rectangle placed their labels and click
+            // targets underneath it, which was especially visible with the
+            // longest high-playfulness translations.
+            width: Math.max(0, filterScroll.availableWidth)
             spacing: 0
 
             CollapsibleSection {

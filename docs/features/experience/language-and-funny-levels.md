@@ -16,6 +16,11 @@ also applies to errors and warnings.
 The default levels are English 1 and Cantonese 3. Bilingual mode uses both
 current levels.
 
+Long bilingual and level-5 labels remain single-line in the compact Split Dock
+filter sidebar. They elide before the vertical scrollbar instead of painting or
+placing their click target underneath it; the full translated label remains
+available through the control's accessibility name.
+
 ## Configuration
 
 Open full Options and use the Behavior page. The language and both sliders are
@@ -59,7 +64,9 @@ discard runtime values.
   37 unique changelog title/change strings are covered.
 - Runtime acceptance should switch all three modes, exercise levels 1 and 5 in
   both languages, restart the app to prove persistence, and verify that Apply
-  and Cancel keep their transactional meanings.
+  and Cancel keep their transactional meanings. Compact Split Dock acceptance
+  also checks that every filter remains clickable and no label overlaps the
+  vertical scrollbar.
 
 ## Related articles
 

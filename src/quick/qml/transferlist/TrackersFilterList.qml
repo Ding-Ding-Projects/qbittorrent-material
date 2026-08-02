@@ -12,6 +12,7 @@
 
 import QtQuick
 import QtQuick.Controls.Material
+import QtQuick.Layouts
 import qBittorrent
 
 /*!
@@ -113,6 +114,8 @@ Column {
             width: root.width
             height: Spacing.controlHeight
             padding: Spacing.xs
+            hoverEnabled: true
+            activeFocusOnTab: true
 
             background: Rectangle {
                 color: rowItem.selected ? Theme.color("surfaceWarm")
@@ -120,24 +123,29 @@ Column {
                 radius: Spacing.radiusControl
             }
 
-            contentItem: Row {
+            contentItem: RowLayout {
                 spacing: Spacing.sm
-                leftPadding: Spacing.sm
                 MDIcon {
                     icon: root._typeIcon(rowItem.model.type)
                     size: 18
                     color: rowItem.selected ? Theme.color("primary") : Theme.color("onSurfaceVariant")
-                    anchors.verticalCenter: parent.verticalCenter
+                    Layout.leftMargin: Spacing.sm
+                    Layout.alignment: Qt.AlignVCenter
                 }
                 Label {
-                    width: root.width - 60
                     text: rowItem.model.label
                     elide: Text.ElideRight
+                    maximumLineCount: 1
+                    wrapMode: Text.NoWrap
                     font: Typography.bodyMedium
                     color: rowItem.selected ? Theme.color("primary") : Theme.color("onSurface")
-                    anchors.verticalCenter: parent.verticalCenter
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    Layout.alignment: Qt.AlignVCenter
                 }
             }
+
+            HoverHandler { cursorShape: Qt.PointingHandCursor }
 
             onClicked: root._apply(rowItem.model.type, rowItem.model.value, rowItem.model.announceFlag)
 

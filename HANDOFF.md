@@ -96,3 +96,16 @@ Verification:
   as a false interaction pass.
 
 The build and smoke output remain under ignored `build\smoke-20260721`.
+
+## 2026-08-01 — compact filter interaction and clipping fix
+
+Split Dock filter delegates now reserve the vertical scrollbar viewport and
+constrain translated labels to one elided line. This keeps maximum-playfulness
+bilingual status, category, tag, tracker, and tracker-status rows inside the
+sidebar while preserving the complete accessible label and full-row click
+target. Pointer cursors and keyboard focus make their interactive state clear.
+
+The Split Dock Start, Stop, and Remove toolbar actions now disable when no
+torrent is selected instead of appearing actionable and silently doing nothing.
+The Add torrent action remains available. Desktop policy assertions cover the
+scrollbar reservation, bounded labels, and selection-dependent action state.

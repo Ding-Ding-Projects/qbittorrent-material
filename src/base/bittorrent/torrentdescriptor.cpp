@@ -120,6 +120,8 @@ const std::optional<TorrentInfo> &TorrentDescriptor::info() const
 void TorrentDescriptor::setTorrentInfo(TorrentInfo torrentInfo)
 {
     m_info = std::move(torrentInfo);
+    m_ltAddTorrentParams.info_hashes =
+            static_cast<InfoHash::WrappedType>(m_info->infoHash());
     m_ltAddTorrentParams.ti = m_info->nativeInfo();
     if (m_ltAddTorrentParams.ti)
     {

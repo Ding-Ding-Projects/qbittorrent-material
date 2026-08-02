@@ -69,6 +69,9 @@ Session *SessionImpl::m_instance = nullptr;
 
 namespace
 {
+    struct MetadataPreviewAddTag {};
+    MetadataPreviewAddTag metadataPreviewAddTag;
+
     const int MAX_PROCESSING_RESUMEDATA_COUNT = 50;
     const int STATISTICS_SAVE_INTERVAL = std::chrono::milliseconds(15min).count();
 
@@ -412,6 +415,27 @@ SessionImpl::~SessionImpl()
 
     if (m_nativeSession)
     {
+        const int timeoutMs = (shutdownTimeout() >= 0) ? shutdownTimeout() : 15000;
+        QElapsedTimer shutdownTimer;
+        shutdownTimer.start();
+
+        // A just-accepted torrent is not represented in m_torrents until its
+        // add_torrent_alert arrives. Drain those real add/restore handlers
+        // first so the torrent can be included in the final resume checkpoint.
+        while (!m_addTorrentAlertHandlers.isEmpty()
+                && (shutdownTimer.elapsed() < timeoutMs))
+        {
+            fetchPendingAlerts(lt::milliseconds(100));
+            for (const lt::alert *alert : m_alerts)
+                handleAlert(const_cast<lt::alert *>(alert));
+        }
+        if (!m_addTorrentAlertHandlers.isEmpty())
+        {
+            qCWarning(lcSession) << "Shutdown timed out waiting for"
+                                 << m_addTorrentAlertHandlers.size()
+                                 << "torrent add(s) to complete";
+        }
+
         saveResumeData();
 
         // Give outstanding save_resume_data_alert(s) a bounded chance to arrive
@@ -420,9 +444,6 @@ SessionImpl::~SessionImpl()
         // whatever changed since the last periodic/event-triggered save.
         if (m_numResumeData > 0)
         {
-            const int timeoutMs = (shutdownTimeout() >= 0) ? shutdownTimeout() : 15000;
-            QElapsedTimer shutdownTimer;
-            shutdownTimer.start();
             while ((m_numResumeData > 0) && (shutdownTimer.elapsed() < timeoutMs))
             {
                 fetchPendingAlerts(lt::milliseconds(100));
@@ -684,6 +705,11 @@ void SessionImpl::prepareStartup()
             continue;
         }
 
+        // Preserve the filename/key identity across restarts. In particular, a
+        // v1 magnet that later learns hybrid metadata must remain stored under
+        // its original v1 ID instead of creating a second v2 resume entry.
+        loadTorrentParams.id = id;
+
         lt::add_torrent_params &p = loadTorrentParams.ltAddTorrentParams;
         p.flags |= lt::torrent_flags::update_subscribe;
         p.flags |= lt::torrent_flags::duplicate_is_error;
@@ -696,14 +722,29 @@ void SessionImpl::prepareStartup()
 
         // Known-before-loaded: duplicate adds racing the restore must hit the
         // friendly isKnownTorrent() rejection, not libtorrent's silent error.
+#ifdef QBT_USES_LIBTORRENT2
+        const InfoHash restoringInfoHash {p.info_hashes};
+#else
+        const InfoHash restoringInfoHash {p.info_hash};
+#endif
         m_restoringTorrents.insert(id);
+        if (restoringInfoHash.v1().isValid())
+            m_restoringTorrents.insert(TorrentID::fromSHA1Hash(restoringInfoHash.v1()));
+        if (restoringInfoHash.v2().isValid())
+            m_restoringTorrents.insert(TorrentID::fromSHA256Hash(restoringInfoHash.v2()));
 
         // Register a handler to create the TorrentImpl once libtorrent confirms
         // the add. The stored ltAddTorrentParams already carries piece-verified
         // resume state, so this does not trigger a full recheck.
-        m_addTorrentAlertHandlers.append([this, id, loadTorrentParams](const lt::add_torrent_alert *alert) mutable
+        m_addTorrentAlertHandlers.insert(id,
+                [this, id, restoringInfoHash, loadTorrentParams]
+                (const lt::add_torrent_alert *alert) mutable
         {
             m_restoringTorrents.remove(id);
+            if (restoringInfoHash.v1().isValid())
+                m_restoringTorrents.remove(TorrentID::fromSHA1Hash(restoringInfoHash.v1()));
+            if (restoringInfoHash.v2().isValid())
+                m_restoringTorrents.remove(TorrentID::fromSHA256Hash(restoringInfoHash.v2()));
 
             if (alert->error)
             {
@@ -891,18 +932,34 @@ void SessionImpl::handleAddTorrentAlert(const lt::add_torrent_alert *alert)
 {
     ++m_receivedAddTorrentAlertsCount;
 
-    if (alert->error)
+    // Synchronous add_torrent() also posts an alert. A preview may be removed
+    // and replaced by the real same-hash add before that alert is dispatched;
+    // never let the stale preview alert consume the real add's keyed handler.
+    if (alert->params.userdata.get<MetadataPreviewAddTag>() == &metadataPreviewAddTag)
     {
-        qCWarning(lcSession) << "Failed to add torrent:" << QString::fromStdString(alert->error.message());
-        if (!m_addTorrentAlertHandlers.isEmpty())
-            m_addTorrentAlertHandlers.takeFirst()(alert);
+        qCDebug(lcSession) << "Ignoring metadata preview add alert";
         return;
     }
 
-    if (!m_addTorrentAlertHandlers.isEmpty())
+#ifdef QBT_USES_LIBTORRENT2
+    const InfoHash infoHash {alert->params.info_hashes};
+#else
+    const InfoHash infoHash {alert->params.info_hash};
+#endif
+    AddTorrentAlertHandler handler = m_addTorrentAlertHandlers.take(infoHash.toTorrentID());
+    if (!handler && infoHash.isHybrid())
+        handler = m_addTorrentAlertHandlers.take(TorrentID::fromSHA1Hash(infoHash.v1()));
+
+    if (alert->error)
     {
-        m_addTorrentAlertHandlers.takeFirst()(alert);
+        qCWarning(lcSession) << "Failed to add torrent:" << QString::fromStdString(alert->error.message());
+        if (handler)
+            handler(alert);
+        return;
     }
+
+    if (handler)
+        handler(alert);
     else
     {
         // Torrent restored from resume data at startup, or added elsewhere.
@@ -937,7 +994,36 @@ void SessionImpl::handleStateUpdateAlert(const lt::state_update_alert *alert)
 void SessionImpl::handleMetadataReceivedAlert(const lt::metadata_received_alert *alert)
 {
     if (TorrentImpl *torrent = getTorrent(alert->handle))
+    {
         torrent->handleMetadataReceived();
+        return;
+    }
+
+    const InfoHash infoHash {alert->handle.info_hashes()};
+    auto previewIt = m_downloadedMetadata.find(TorrentID::fromInfoHash(infoHash));
+    if ((previewIt == m_downloadedMetadata.end()) && infoHash.v1().isValid())
+        previewIt = m_downloadedMetadata.find(TorrentID::fromSHA1Hash(infoHash.v1()));
+    if ((previewIt == m_downloadedMetadata.end()) || (previewIt.value() != alert->handle))
+        return;
+
+    const std::shared_ptr<const lt::torrent_info> nativeInfo = alert->handle.torrent_file();
+    for (auto it = m_downloadedMetadata.begin(); it != m_downloadedMetadata.end();)
+    {
+        if (it.value() == alert->handle)
+            it = m_downloadedMetadata.erase(it);
+        else
+            ++it;
+    }
+
+    // A metadata preview is never the user's final torrent: it uses a temporary
+    // save path and upload-only flags. Remove it before notifying the dialog so
+    // accepting the fully populated descriptor can add the real torrent with
+    // the user's selected parameters and path.
+    m_nativeSession->remove_torrent(alert->handle);
+    if (nativeInfo)
+        emit metadataDownloaded(TorrentInfo {*nativeInfo});
+    else
+        qCWarning(lcSession) << "Metadata alert had no torrent info for" << infoHash.toString();
 }
 
 void SessionImpl::handleFileErrorAlert(const lt::file_error_alert *alert)
@@ -1330,22 +1416,31 @@ Torrent *SessionImpl::getTorrent(const TorrentID &id) const
 
 TorrentImpl *SessionImpl::getTorrent(const lt::torrent_handle &nativeHandle) const
 {
-    return m_torrents.value(TorrentID::fromInfoHash(nativeHandle.info_hashes()));
+    TorrentImpl *torrent = static_cast<TorrentImpl *>(findTorrent(
+            InfoHash {nativeHandle.info_hashes()}));
+    return (torrent && (torrent->nativeHandle() == nativeHandle)) ? torrent : nullptr;
 }
 
 Torrent *SessionImpl::findTorrent(const InfoHash &infoHash) const
 {
+    const auto findByID = [this](const TorrentID &id) -> TorrentImpl *
+    {
+        if (TorrentImpl *torrent = m_torrents.value(id))
+            return torrent;
+        return m_hybridTorrentsByAltID.value(id);
+    };
+
     const TorrentID id = TorrentID::fromInfoHash(infoHash);
-    if (TorrentImpl *torrent = m_torrents.value(id))
+    if (TorrentImpl *torrent = findByID(id))
         return torrent;
 
     if (!infoHash.isHybrid())
-        return m_hybridTorrentsByAltID.value(id);
+        return nullptr;
 
-    if (TorrentImpl *torrent = m_torrents.value(TorrentID::fromSHA1Hash(infoHash.v1())))
+    if (TorrentImpl *torrent = findByID(TorrentID::fromSHA1Hash(infoHash.v1())))
         return torrent;
 
-    return m_torrents.value(TorrentID::fromSHA256Hash(infoHash.v2()));
+    return findByID(TorrentID::fromSHA256Hash(infoHash.v2()));
 }
 
 QList<Torrent *> SessionImpl::torrents() const
@@ -1369,10 +1464,19 @@ bool SessionImpl::isKnownTorrent(const InfoHash &infoHash) const
     // add_torrent_alert lands in m_torrents -- without this, a duplicate add
     // in that window slips past the check and fails silently in libtorrent.
     const TorrentID id = infoHash.toTorrentID();
+    if (m_downloadedMetadata.contains(id))
+        return true;
+    if (m_addingTorrents.contains(id))
+        return true;
     if (m_restoringTorrents.contains(id))
         return true;
-    if (infoHash.isHybrid() && m_restoringTorrents.contains(TorrentID::fromSHA1Hash(infoHash.v1())))
-        return true;
+    if (infoHash.isHybrid())
+    {
+        const TorrentID altID = TorrentID::fromSHA1Hash(infoHash.v1());
+        if (m_downloadedMetadata.contains(altID) || m_addingTorrents.contains(altID)
+                || m_restoringTorrents.contains(altID))
+            return true;
+    }
     return (findTorrent(infoHash) != nullptr);
 }
 
@@ -1413,6 +1517,14 @@ bool SessionImpl::addTorrent_impl(const TorrentDescriptor &source, const AddTorr
         return false;
     }
 
+    // Metadata previews are temporary torrents in the same libtorrent session.
+    // Removing one is synchronous with respect to the session index, so the
+    // normal same-hash add below can immediately succeed with the user's real
+    // save path and options.
+    cancelDownloadMetadata(TorrentID::fromInfoHash(infoHash));
+    if (infoHash.isHybrid())
+        cancelDownloadMetadata(TorrentID::fromSHA1Hash(infoHash.v1()));
+
     if (isKnownTorrent(infoHash))
     {
         qCWarning(lcSession) << "Torrent already present in session:" << infoHash.toString();
@@ -1448,11 +1560,27 @@ bool SessionImpl::addTorrent_impl(const TorrentDescriptor &source, const AddTorr
     else
         p.flags &= ~lt::torrent_flags::auto_managed;
 
-    // Register a handler to create the TorrentImpl once libtorrent confirms the add.
-    m_addTorrentAlertHandlers.append([this, loadTorrentParams](const lt::add_torrent_alert *alert) mutable
+    const TorrentID id = TorrentID::fromInfoHash(infoHash);
+    m_addingTorrents.insert(id);
+    if (infoHash.isHybrid())
+        m_addingTorrents.insert(TorrentID::fromSHA1Hash(infoHash.v1()));
+
+    // Register a hash-keyed handler so concurrent adds cannot consume each
+    // other's parameters if libtorrent reports their alerts out of order.
+    m_addTorrentAlertHandlers.insert(id,
+            [this, id, infoHash, loadTorrentParams](const lt::add_torrent_alert *alert) mutable
     {
+        m_addingTorrents.remove(id);
+        if (infoHash.isHybrid())
+            m_addingTorrents.remove(TorrentID::fromSHA1Hash(infoHash.v1()));
+
         if (alert->error)
+        {
+            emit addTorrentFailed(infoHash,
+                    {AddTorrentError::Kind::Other,
+                     QString::fromStdString(alert->error.message())});
             return;
+        }
 
         TorrentImpl *torrent = createTorrent(alert->handle, std::move(loadTorrentParams));
         m_loadedTorrents.append(torrent);
@@ -1511,8 +1639,17 @@ TorrentImpl *SessionImpl::createTorrent(const lt::torrent_handle &nativeHandle, 
 {
     auto *const torrent = new TorrentImpl(this, nativeHandle, std::move(params));
     m_torrents.insert(torrent->id(), torrent);
-    if (const InfoHash infoHash = torrent->infoHash(); infoHash.isHybrid())
-        m_hybridTorrentsByAltID.insert(TorrentID::fromSHA1Hash(infoHash.v1()), torrent);
+    const InfoHash infoHash = torrent->infoHash();
+    if (const TorrentID v1ID = TorrentID::fromSHA1Hash(infoHash.v1());
+            infoHash.v1().isValid() && (v1ID != torrent->id()))
+    {
+        m_hybridTorrentsByAltID.insert(v1ID, torrent);
+    }
+    if (const TorrentID v2ID = TorrentID::fromSHA256Hash(infoHash.v2());
+            infoHash.v2().isValid() && (v2ID != torrent->id()))
+    {
+        m_hybridTorrentsByAltID.insert(v2ID, torrent);
+    }
 
     if (isAddTorrentToQueueTop())
         nativeHandle.queue_position_top();
@@ -1537,16 +1674,23 @@ bool SessionImpl::removeTorrent(const TorrentID &id, const TorrentRemoveOption d
     emit torrentAboutToBeRemoved(torrent, deleteOption);
 
     m_torrents.remove(id);
-    if (const InfoHash infoHash = torrent->infoHash(); infoHash.isHybrid())
-        m_hybridTorrentsByAltID.remove(TorrentID::fromSHA1Hash(infoHash.v1()));
+    for (auto it = m_hybridTorrentsByAltID.begin();
+            it != m_hybridTorrentsByAltID.end();)
+    {
+        if (it.value() == torrent)
+            it = m_hybridTorrentsByAltID.erase(it);
+        else
+            ++it;
+    }
 
-    RemovingTorrentData &removingTorrentData = m_removingTorrents[id];
+    const lt::torrent_handle nativeHandle = torrent->nativeHandle();
+    const TorrentID removalAlertID = InfoHash {nativeHandle.info_hashes()}.toTorrentID();
+    RemovingTorrentData &removingTorrentData = m_removingTorrents[removalAlertID];
     removingTorrentData.name = torrent->name();
     removingTorrentData.removeOption = deleteOption;
     removingTorrentData.contentStoragePath = torrent->actualStorageLocation();
     removingTorrentData.fileNames = torrent->actualFilePaths();
 
-    const lt::torrent_handle nativeHandle = torrent->nativeHandle();
     if (deleteOption == TorrentRemoveOption::KeepContent)
         m_nativeSession->remove_torrent(nativeHandle, lt::session::delete_partfile);
     else
@@ -1587,25 +1731,35 @@ bool SessionImpl::downloadMetadata(const TorrentDescriptor &torrentDescr)
     if (!infoHash.isValid() || torrentDescr.info().has_value())
         return false;
 
-    if (isKnownTorrent(infoHash))
+    const TorrentID id = TorrentID::fromInfoHash(infoHash);
+    if (isKnownTorrent(infoHash) || m_downloadedMetadata.contains(id))
         return false;
 
     qCInfo(lcSession) << "Downloading metadata for" << infoHash.toString();
 
     lt::add_torrent_params p = torrentDescr.ltAddTorrentParams();
+    p.userdata = &metadataPreviewAddTag;
     p.save_path = Utils::Fs::tempPath().toString().toStdString();
     p.flags |= lt::torrent_flags::upload_mode;
+    p.flags |= lt::torrent_flags::duplicate_is_error;
     p.flags &= ~lt::torrent_flags::paused;
     p.flags &= ~lt::torrent_flags::auto_managed;
 
-    const TorrentID id = TorrentID::fromInfoHash(infoHash);
-    m_addTorrentAlertHandlers.append([this, id](const lt::add_torrent_alert *alert)
+    // Use the synchronous insertion API so accept/reject can always cancel a
+    // concrete handle; an async preview had a window where the dialog could be
+    // answered before its add_torrent_alert populated m_downloadedMetadata.
+    lt::error_code error;
+    const lt::torrent_handle handle = m_nativeSession->add_torrent(p, error);
+    if (error || !handle.is_valid())
     {
-        if (!alert->error)
-            m_downloadedMetadata.insert(id, alert->handle);
-    });
+        qCWarning(lcSession) << "Failed to start metadata download:"
+                             << QString::fromStdString(error.message());
+        return false;
+    }
 
-    m_nativeSession->async_add_torrent(p);
+    m_downloadedMetadata.insert(id, handle);
+    if (infoHash.isHybrid())
+        m_downloadedMetadata.insert(TorrentID::fromSHA1Hash(infoHash.v1()), handle);
     return true;
 }
 
@@ -1616,9 +1770,16 @@ bool SessionImpl::cancelDownloadMetadata(const TorrentID &id)
         return false;
 
     const lt::torrent_handle nativeHandle = it.value();
-    m_downloadedMetadata.erase(it);
+    for (auto previewIt = m_downloadedMetadata.begin();
+            previewIt != m_downloadedMetadata.end();)
+    {
+        if (previewIt.value() == nativeHandle)
+            previewIt = m_downloadedMetadata.erase(previewIt);
+        else
+            ++previewIt;
+    }
     if (nativeHandle.is_valid())
-        m_nativeSession->remove_torrent(nativeHandle, lt::session::delete_files);
+        m_nativeSession->remove_torrent(nativeHandle);
 
     qCDebug(lcSession) << "Cancelled metadata download for" << id.toString();
     return true;
@@ -1960,6 +2121,19 @@ void SessionImpl::handleTorrentTagRemoved(TorrentImpl *torrent, const Tag &tag)
 
 void SessionImpl::handleTorrentMetadataReceived(TorrentImpl *torrent)
 {
+    const InfoHash resolvedInfoHash {torrent->nativeHandle().info_hashes()};
+    const TorrentID primaryID = torrent->id();
+    if (const TorrentID v1ID = TorrentID::fromSHA1Hash(resolvedInfoHash.v1());
+            resolvedInfoHash.v1().isValid() && (v1ID != primaryID))
+    {
+        m_hybridTorrentsByAltID.insert(v1ID, torrent);
+    }
+    if (const TorrentID v2ID = TorrentID::fromSHA256Hash(resolvedInfoHash.v2());
+            resolvedInfoHash.v2().isValid() && (v2ID != primaryID))
+    {
+        m_hybridTorrentsByAltID.insert(v2ID, torrent);
+    }
+
     emit torrentMetadataReceived(torrent);
 }
 

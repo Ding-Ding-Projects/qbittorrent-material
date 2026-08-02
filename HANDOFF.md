@@ -1,5 +1,44 @@
 # Handoff
 
+## 2026-08-02 — magnet dialog acceptance reaches the real session
+
+Pressing **Add** in the magnet dialog now creates the requested torrent instead
+of reporting success while leaving the transfer list unchanged. The failure had
+three interacting causes: QML could default-construct a second add controller
+whose accepted signal was not connected to the manager; the metadata-preview
+torrent could still occupy libtorrent's same-hash slot when the real add ran;
+and the GUI emitted success as soon as an asynchronous add was queued instead
+of waiting for the session's result.
+
+Both QML-facing add objects are now factory-owned C++ singletons. Metadata
+previews use concrete synchronous handles, carry a distinct alert tag, remove
+all hash aliases, and are cancelled before a real add. Normal and restored adds
+are correlated by stable torrent ID rather than FIFO alert order; hybrid v1/v2
+metadata preserves both aliases while retaining its original persistence ID.
+The GUI serializes add dialogs, waits for the session's success/failure signal,
+and keeps local torrent files guarded until success. Shutdown first drains
+accepted-but-pending adds so an immediate exit still writes resume data.
+
+Verification:
+
+- All 288 desktop policy and content-integrity checks passed.
+- `run.ps1 -NoRun -Jobs 4` completed a full Release compile, link, and Qt
+  deployment; `git diff --check` passed.
+- The generated CTest inventory is empty (`Total Tests: 0`).
+- A headless low-level IPC smoke used an isolated stopped/offline profile and
+  the synthetic `Codex-Magnet-Repro` magnet. The primary process received the
+  forwarded activation, logged `Adding torrent`, manager `queued`, manager
+  `session confirmed`, and session `Torrent added`, then exited cleanly with
+  code 0. Resume data and the torrent journal both persisted the exact
+  `0123456789012345678901234567890123456789` ID under the isolated profile.
+- Focused engine and manager reviews found no release blocker for the reported
+  magnet-add path.
+
+The remote `handoff/shutdown-20260802-1328` branch remains intentionally
+unmerged because it contains separate unfinished single-instance work. Legacy
+duplicate hybrid resume-key migration and the dialog-disabled fast path's
+duplicate-merge policy remain follow-up debt; neither blocks this fix.
+
 ## 2026-08-02 — text editing keeps standard shortcuts
 
 Application-level Undo, Delete, and Paste handlers now yield while a Qt Quick

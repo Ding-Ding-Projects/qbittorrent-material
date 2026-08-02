@@ -312,6 +312,92 @@ Test-Policy ($mainQml.Contains('shortcut: root.textEditorHasFocus ? "" : Standar
         -and $mainQml -match 'sequences:\s*\[StandardKey\.Paste\][\s\S]*?enabled:\s*root\.currentTabIndex === 0 && !root\.textEditorHasFocus') `
     "Undo, Delete, and Paste yield to focused text editors"
 
+$guiAddManager = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/controllers/guiaddtorrentmanager.h")
+$addTorrentDialog = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/addtorrent/AddNewTorrentDialog.qml")
+Test-Policy ($guiAddManager.Contains('QQueue<PendingDialogRequest> m_pendingDialogRequests') `
+        -and $guiAddManager.Contains('m_dialogPipelineBusy') `
+        -and $guiAddManager.Contains('QTimer::singleShot(0, this') `
+        -and $guiAddManager.Contains('scheduleNextDialogRequest()')) `
+    "add-torrent dialogs use one deferred FIFO that advances on every terminal path"
+Test-Policy ($guiAddManager.Contains('request = PendingDownload {params, true}') `
+        -and $guiAddManager.Contains('request = PendingDownload {params, false}') `
+        -and -not $guiAddManager.Contains('m_downloadedTorrents')) `
+    "remote torrent completions retain per-request parameters even for identical URLs"
+Test-Policy ($guiAddManager.Contains('const bool mergingEnabled = m_session->isMergeTrackersEnabled()') `
+        -and $guiAddManager.Contains('!m_session || !m_session->isMergeTrackersEnabled()') `
+        -and $guiAddManager.Contains('!isPrivate && confirmationAvailable') `
+        -and $guiAddManager.Contains('has no responder; declining merge')) `
+    "tracker merging honors global, privacy, response-time, and missing-responder safeguards"
+Test-Policy ($addTorrentDialog.Contains('function onMergeTrackersRequested(source, name, isPrivate)') `
+        -and ([regex]::Matches($addTorrentDialog, 'closePolicy:\s*Popup\.NoAutoClose')).Count -eq 2 `
+        -and ([regex]::Matches($addTorrentDialog, 'onActivated:\s*[^\r\n]*\.reject\(\)')).Count -eq 2 `
+        -and $addTorrentDialog.Contains('GuiAddTorrentManager.respondMergeTrackers(source, true)') `
+        -and $addTorrentDialog.Contains('GuiAddTorrentManager.respondMergeTrackers(source, false)')) `
+    "add and merge dialogs reject explicitly and the merge prompt always responds"
+
+$sessionHeader = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/base/bittorrent/sessionimpl.h")
+$addTorrentController = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/controllers/addtorrentcontroller.cpp")
+$addTorrentControllerHeader = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/controllers/addtorrentcontroller.h")
+$torrentImpl = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/base/bittorrent/torrentimpl.cpp")
+$torrentInfo = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/base/bittorrent/torrentinfo.cpp")
+$torrentDescriptor = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/base/bittorrent/torrentdescriptor.cpp")
+Test-Policy ($sessionImpl.Contains('m_nativeSession->add_torrent(p, error)') `
+        -and $sessionImpl.Contains('cancelDownloadMetadata(TorrentID::fromInfoHash(infoHash))') `
+        -and $sessionImpl.Contains('emit metadataDownloaded(TorrentInfo {*nativeInfo})') `
+        -and $sessionImpl.Contains('m_nativeSession->remove_torrent(alert->handle)') `
+        -and $addTorrentController.Contains('if (m_session)') `
+        -and -not $addTorrentController.Contains('if (m_session && !hasMetadata())')) `
+    "magnet metadata previews are concrete, delivered, and removed on accept or reject"
+Test-Policy ($sessionImpl.Contains('p.userdata = &metadataPreviewAddTag') `
+        -and $sessionImpl.Contains('userdata.get<MetadataPreviewAddTag>()') `
+        -and $sessionImpl.Contains('p.flags |= lt::torrent_flags::duplicate_is_error') `
+        -and $sessionImpl.Contains('it.value() == alert->handle')) `
+    "metadata preview alerts and aliases cannot consume or remove a real same-hash add"
+Test-Policy ($torrentInfo.Contains('ownV1.isValid() && otherV1.isValid()') `
+        -and $torrentInfo.Contains('ownV2.isValid() && otherV2.isValid()') `
+        -and $torrentDescriptor.Contains('m_ltAddTorrentParams.info_hashes =') `
+        -and $torrentImpl.Contains('m_nativeHandle.set_metadata(') `
+        -and $sessionImpl.Contains('m_hybridTorrentsByAltID.insert(v2ID, torrent)') `
+        -and $sessionImpl.Contains('loadTorrentParams.id = id')) `
+    "partial v1 or v2 magnets safely adopt and persist hybrid metadata"
+Test-Policy ($addTorrentControllerHeader -match `
+            'private:\s*explicit AddTorrentController\(QObject \*parent = nullptr\)' `
+        -and $addTorrentController.Contains('QJSEngine::setObjectOwnership(controller') `
+        -and $guiAddManager.Contains('QJSEngine::setObjectOwnership(manager')) `
+    "add-torrent QML singletons cannot bypass their shared C++ factories"
+Test-Policy ($sessionHeader.Contains('QHash<TorrentID, AddTorrentAlertHandler> m_addTorrentAlertHandlers') `
+        -and $sessionHeader.Contains('QSet<TorrentID> m_addingTorrents') `
+        -and $sessionImpl.Contains('m_addTorrentAlertHandlers.insert(id') `
+        -and $sessionImpl.Contains('emit addTorrentFailed(infoHash')) `
+    "normal torrent adds are known while queued and correlate alerts by info hash"
+Test-Policy ($guiAddManager.Contains('&BitTorrent::Session::torrentAdded') `
+        -and $guiAddManager.Contains('&BitTorrent::Session::addTorrentFailed') `
+        -and $guiAddManager.Contains('QHash<BitTorrent::TorrentID, PendingSessionAdd>') `
+        -and $guiAddManager.Contains('pending.guard->markAsAddedToSession()') `
+        -and $guiAddManager.Contains('queued torrent add from') `
+        -and $guiAddManager.Contains('session confirmed torrent from')) `
+    "the GUI reports and cleans up adds only after the session confirms their outcome"
+Test-Policy ($guiAddManager.Contains('std::optional<BitTorrent::TorrentID> m_activeSessionAddID') `
+        -and $guiAddManager.Contains('const QScopedValueRollback activeAddScope') `
+        -and $guiAddManager.Contains('*m_activeSessionAddID != infoHash.toTorrentID()')) `
+    "same-hash failures from other session callers cannot consume a pending GUI add"
+Test-Policy ($sessionImpl.Contains('while (!m_addTorrentAlertHandlers.isEmpty()') `
+        -and $sessionImpl.Contains('saveResumeData();') `
+        -and $sessionImpl.Contains('while ((m_numResumeData > 0)')) `
+    "shutdown drains accepted torrent adds before the final resume checkpoint"
+Test-Policy ($addTorrentDialog.Contains('function onTorrentAdded(source)') `
+        -and $addTorrentDialog.Contains('function onAddTorrentFailed(source, reason)') `
+        -and $addTorrentDialog.Contains('function onDuplicateTorrent(source, name)')) `
+    "add success, failure, and duplicate outcomes reach persistent notifications"
+
 $legacySnackbarCalls = [System.Collections.Generic.List[string]]::new()
 Get-ChildItem -LiteralPath (Get-RepositoryPath "src/quick/qml") -Filter "*.qml" -File -Recurse |
     ForEach-Object {

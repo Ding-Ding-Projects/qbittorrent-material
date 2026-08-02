@@ -85,6 +85,7 @@ namespace BitTorrent
 
         Session *session() const override;
 
+        TorrentID id() const override;
         InfoHash infoHash() const override;
         QString name() const override;
         QDateTime creationDate() const override;
@@ -323,6 +324,7 @@ namespace BitTorrent
         SpeedMonitor m_payloadRateMonitor;
 
         InfoHash m_infoHash;
+        TorrentID m_id;
 
         QDateTime m_creationDate;
         QString m_creator;

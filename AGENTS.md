@@ -8,4 +8,5 @@
 - After remote proof, remove merged temporary branches, linked worktrees, their on-disk directories, stale worktree metadata, and redundant stashes.
 - The final handoff target is a clean default checkout, no staged, unstaged, untracked, or stashed task work, and zero divergence from the remote default branch. Preserve and report unrelated pre-existing work instead of discarding it.
 - Record significant completion and cleanup decisions in a repository-tracked handoff or memory file and push that update.
+- Use the repository CI workflow for release builds. For install verification, download the installer produced or published by CI for the pushed default-branch commit, install that exact artifact, and test the installed binary; do not substitute a locally packaged build unless the user explicitly asks.
 - Never force-push unless the user explicitly requests a history rewrite and the consequences have been reviewed.

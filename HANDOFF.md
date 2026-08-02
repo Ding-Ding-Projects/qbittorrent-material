@@ -1,5 +1,28 @@
 # Handoff
 
+## 2026-08-02 — broad bug-audit checkpoint 2: bounded downloads
+
+The shared download handler no longer trusts an initially small advertised
+response size and disconnects its limit check. It keeps comparing both received
+and advertised bytes, aborts an over-limit reply with the observed size, checks
+the final in-memory payload as a last line of defense, and clears rejected data
+before reporting failure. Completion is idempotent, so the abort/finished path
+cannot notify consumers twice. This protects torrent, plugin, RSS, GeoIP, and
+program-update downloads that share the handler.
+
+Per-service download throttling now lowercases host names and derives the
+implicit HTTPS port as 443 instead of treating every omitted port as 80. Thus
+implicit and explicit HTTPS URLs share the same sequential-service identity.
+
+Verification:
+
+- `git diff --check` and the PowerShell policy parser passed.
+- All 259 desktop policy and content-integrity checks passed, including new
+  assertions for end-to-end bounds, single completion, host normalization, and
+  scheme-derived HTTPS ports.
+- `run.ps1 -NoRun -Jobs 4` rebuilt the affected engine objects, linked and
+  deployed `qbittorrent.exe`, and exited 0.
+
 ## 2026-08-02 — broad bug-audit checkpoint 1: relocatable builds
 
 The active repository is the clean default checkout at

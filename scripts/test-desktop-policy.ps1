@@ -420,9 +420,20 @@ Test-Policy ($behaviorPage -match 'visible:\s*OptionsController\.windowsDefaultA
 
 $updateController = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/app/appcontroller.cpp")
 $updateParser = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/app/updatecheck.cpp")
+$downloadHandler = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/base/net/downloadhandlerimpl.cpp")
+$downloadManager = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/base/net/downloadmanager.cpp")
 $appCMake = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/CMakeLists.txt")
 Test-Policy ($updateController.Contains('releases/latest') -and $updateController.Contains('.limit(maxReleaseResponseSize)') -and $updateController.Contains('m_updateCheckInProgress') -and $updateController.Contains('result.status != Net::DownloadStatus::Success')) "the program update check is asynchronous, bounded, and failure-safe"
 Test-Policy ($updateParser.Contains('draft') -and $updateParser.Contains('prerelease') -and $updateParser.Contains('^build(?:-|\\.)') -and $updateParser.Contains('latest.buildNumber > current.number')) "the update parser accepts only stable immutable builds and compares run numbers"
+Test-Policy ($downloadHandler.Contains('if (m_isFinished)') `
+        -and $downloadHandler.Contains('m_result.data.size() > m_downloadRequest.limit()') `
+        -and $downloadHandler.Contains('std::max(bytesReceived, bytesTotal)') `
+        -and $downloadHandler -notmatch 'bytesTotal\s*>\s*0\)\s*&&\s*\(bytesTotal\s*<=\s*m_downloadRequest\.limit\(\)') `
+    "bounded downloads enforce the limit through completion and finish only once"
+Test-Policy ($downloadManager.Contains('scheme.compare(u"https"') `
+        -and $downloadManager.Contains('? 443') `
+        -and $downloadManager.Contains('url.host().toLower()')) `
+    "sequential download services normalize hosts and use the HTTPS default port"
 Test-Policy ($appCMake.Contains('QBT_BUILD_ID=\"${QBT_BUILD_ID}\"')) "the packaged release identity is compiled into the update checker"
 Test-Policy (Test-Path -LiteralPath (Get-RepositoryPath "docs/features/delivery/update-check.md") -PathType Leaf) "the in-app update-check behavior and failure modes are documented"
 

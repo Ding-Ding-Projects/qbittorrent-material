@@ -29,6 +29,8 @@
 
 #include "downloadhandlerimpl.h"
 
+#include <algorithm>
+
 #include <QtSystemDetection>
 #include <QUrl>
 
@@ -115,6 +117,9 @@ bool Net::DownloadHandlerImpl::useProxy() const
 
 void Net::DownloadHandlerImpl::processFinishedDownload()
 {
+    if (m_isFinished)
+        return;
+
     qDebug("Download finished: %s", qUtf8Printable(url()));
 
     // Check if the request was successful
@@ -143,6 +148,16 @@ void Net::DownloadHandlerImpl::processFinishedDownload()
 #else
     m_result.data = m_reply->readAll();
 #endif
+
+    if ((m_downloadRequest.limit() > 0) && (m_result.data.size() > m_downloadRequest.limit()))
+    {
+        setError(tr("The file size (%1) exceeds the download limit (%2)")
+                 .arg(Utils::Misc::friendlyUnit(m_result.data.size())
+                      , Utils::Misc::friendlyUnit(m_downloadRequest.limit())));
+        m_result.data.clear();
+        finish();
+        return;
+    }
 
     if (m_downloadRequest.saveToFile())
     {
@@ -188,19 +203,15 @@ void Net::DownloadHandlerImpl::processFinishedDownload()
 
 void Net::DownloadHandlerImpl::checkDownloadSize(const qint64 bytesReceived, const qint64 bytesTotal)
 {
-    if ((bytesTotal > 0) && (bytesTotal <= m_downloadRequest.limit()))
-    {
-        // Total number of bytes is available
-        disconnect(m_reply, &QNetworkReply::downloadProgress, this, &DownloadHandlerImpl::checkDownloadSize);
-        return;
-    }
-
     if ((bytesTotal > m_downloadRequest.limit()) || (bytesReceived > m_downloadRequest.limit()))
     {
-        m_reply->abort();
+        const qint64 observedSize = std::max(bytesReceived, bytesTotal);
         setError(tr("The file size (%1) exceeds the download limit (%2)")
-                 .arg(Utils::Misc::friendlyUnit(bytesTotal)
+                 .arg(Utils::Misc::friendlyUnit(observedSize)
                       , Utils::Misc::friendlyUnit(m_downloadRequest.limit())));
+        disconnect(m_reply, &QNetworkReply::downloadProgress, this, &DownloadHandlerImpl::checkDownloadSize);
+        disconnect(m_reply, &QNetworkReply::finished, this, &DownloadHandlerImpl::processFinishedDownload);
+        m_reply->abort();
         finish();
     }
 }
@@ -257,6 +268,9 @@ void Net::DownloadHandlerImpl::setError(const QString &error)
 
 void Net::DownloadHandlerImpl::finish()
 {
+    if (m_isFinished)
+        return;
+
     m_isFinished = true;
     emit finished(m_result);
 }

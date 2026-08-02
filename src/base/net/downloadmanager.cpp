@@ -470,7 +470,11 @@ Net::DownloadRequest &Net::DownloadRequest::destFileName(const Path &value)
 
 Net::ServiceID Net::ServiceID::fromURL(const QUrl &url)
 {
-    return {url.host(), url.port(80)};
+    const QString scheme = url.scheme();
+    const int defaultPort = (scheme.compare(u"https", Qt::CaseInsensitive) == 0)
+        ? 443
+        : ((scheme.compare(u"http", Qt::CaseInsensitive) == 0) ? 80 : -1);
+    return {url.host().toLower(), url.port(defaultPort)};
 }
 
 std::size_t Net::qHash(const ServiceID &serviceID, const std::size_t seed)

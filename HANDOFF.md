@@ -1,5 +1,23 @@
 # Handoff
 
+## 2026-08-02 — text editing keeps standard shortcuts
+
+Application-level Undo, Delete, and Paste handlers now yield while a Qt Quick
+text editor owns focus. This prevents editing notes, paths, filters, and other
+text fields from undoing journal operations, removing selected torrents, or
+opening an add-torrent request. The shared Remove action remains available to
+menus and toolbars, while its bare Delete shortcut is temporarily released.
+Intentional application commands such as Open, Save, Find, navigation, and the
+command palette remain global.
+
+Verification:
+
+- Qt 6.8 `qmllint` completed with exit code 0; only four pre-existing
+  informational/import typing warnings remained.
+- Desktop policy assertions cover the centralized editor detector and all
+  three guarded standard editing shortcuts.
+- `git diff --check` passed.
+
 ## 2026-08-02 — broad bug-audit checkpoint 3: safe Wiki cleanup
 
 The GitHub Wiki exporter no longer trusts stale paths from its generated-file

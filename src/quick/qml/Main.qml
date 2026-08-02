@@ -218,6 +218,20 @@ ApplicationWindow {
     readonly property bool trayAvailable: DesktopIntegration.available || false
     readonly property int currentTabIndex: centralTabs.currentIndex
 
+    // TextInput and TextEdit expose this common editing surface; TextField and
+    // TextArea inherit it. Reserve their standard editing sequences for the
+    // focused editor while leaving intentional app commands (Open, Save, Find,
+    // command palette, tab navigation, etc.) available.
+    function isTextEditor(item) {
+        return item !== null && item !== undefined
+            && item.cursorPosition !== undefined
+            && item.selectionStart !== undefined
+            && item.selectionEnd !== undefined
+            && item.canPaste !== undefined
+            && item.canUndo !== undefined
+    }
+    readonly property bool textEditorHasFocus: root.isTextEditor(root.activeFocusItem)
+
     // -- Window title (§14) ---------------------------------------------------
     readonly property string appVersion: Qt.application.version.length > 0 ? Qt.application.version : "5.x"
     title: {
@@ -273,7 +287,7 @@ ApplicationWindow {
         shortcut: StandardKey.Undo
         // Never steal Ctrl+Z from a focused text editor (e.g. the Workspace notes).
         enabled: JournalController.canUndo && !JournalController.busy
-                 && !(root.activeFocusItem && (root.activeFocusItem.canUndo !== undefined))
+                 && !root.textEditorHasFocus
         onTriggered: {
             Log.info("ui", "Action: Undo last journaled change")
             JournalController.undoLast()
@@ -306,7 +320,8 @@ ApplicationWindow {
     Action {
         id: actionDelete
         text: qsTr("&Remove")
-        shortcut: StandardKey.Delete
+        // Keep the action clickable, but yield the bare Delete key to editors.
+        shortcut: root.textEditorHasFocus ? "" : StandardKey.Delete
         enabled: root.currentTabIndex === 0 && TransferController.selectionCount > 0
         onTriggered: root.removeSelected()
     }
@@ -913,7 +928,7 @@ ApplicationWindow {
     }
     Shortcut {
         sequences: [StandardKey.Paste]
-        enabled: root.currentTabIndex === 0
+        enabled: root.currentTabIndex === 0 && !root.textEditorHasFocus
         onActivated: {
             Log.info("ui", "Paste-add from clipboard")
             AppController.pasteAdd()

@@ -303,6 +303,14 @@ $mainQml = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/Main
 foreach ($surface in @("DimSumSurprise", "NotificationsSheet", "RegexBuilderSheet", "SettingsSheet")) {
     Test-Policy ($mainQml -match [regex]::Escape($surface)) "Main.qml wires $surface"
 }
+Test-Policy ($mainQml.Contains('function isTextEditor(item)') `
+        -and $mainQml.Contains('readonly property bool textEditorHasFocus: root.isTextEditor(root.activeFocusItem)')) `
+    "global editing shortcuts share a focused text-editor detector"
+Test-Policy ($mainQml.Contains('shortcut: root.textEditorHasFocus ? "" : StandardKey.Delete') `
+        -and $mainQml.Contains('JournalController.busy') `
+        -and $mainQml.Contains('&& !root.textEditorHasFocus') `
+        -and $mainQml -match 'sequences:\s*\[StandardKey\.Paste\][\s\S]*?enabled:\s*root\.currentTabIndex === 0 && !root\.textEditorHasFocus') `
+    "Undo, Delete, and Paste yield to focused text editors"
 
 $legacySnackbarCalls = [System.Collections.Generic.List[string]]::new()
 Get-ChildItem -LiteralPath (Get-RepositoryPath "src/quick/qml") -Filter "*.qml" -File -Recurse |

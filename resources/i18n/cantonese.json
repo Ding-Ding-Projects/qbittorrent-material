@@ -1992,5 +1992,9 @@
   "Open commit %1": "開啟提交 %1",
   "Opens the source commit for this changelog entry": "開啟呢項更新紀錄對應嘅原始碼提交",
   "qBittorrent Material build #49 (6bc2b3f5)": "qBittorrent Material build #49 (6bc2b3f5)",
+  "qBittorrent Material build #50 (59a259c6)": "qBittorrent Material build #50 (59a259c6)",
+  "Introduced the new qBittorrent Material logo across the Windows app, installer, tray, About surface, and documentation.": "新 qBittorrent Material 標誌已經落戶 Windows app、安裝器、系統匣、關於頁同文件，終於唔再玩分身術。",
+  "Added source-commit links to every changelog entry and preserved them in copy and Markdown export.": "每條更新紀錄都有原始碼提交連結，複製同 Markdown 匯出亦帶齊收據。",
+  "Added upstream-compatible transfer filtering by name, save path, info hash v1, and info hash v2.": "加入同上游相容嘅傳輸篩選，可按名稱、儲存路徑、資訊雜湊 v1 同 v2 搵。",
   "Fixed compact filter controls, maximum-playfulness bilingual clipping, and selection-dependent Split Dock actions.": "修正咗緊湊篩選控制、最高玩味雙語文字攝位，同埋 Split Dock 動作依選取狀態啟用。"
 }

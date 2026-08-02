@@ -195,8 +195,8 @@ if ($null -ne $changelog) {
         "the changelog preserves the canonical 34-release history$($missingHistoricalVersions -join ', ')"
     Test-Policy ((@($releaseList.version | Sort-Object -Unique)).Count -eq $releaseList.Count) `
         "changelog release versions are unique"
-    Test-Policy ($releaseVersions -contains "build-49-6bc2b3f5") `
-        "the changelog is current through the compact-filter completion commit"
+    Test-Policy ($releaseVersions -contains "build-50-59a259c6") `
+        "the changelog is current through the branding and transfer-filter completion commit"
 
     foreach ($release in $releaseList) {
         $releaseDate = [DateTime]::MinValue

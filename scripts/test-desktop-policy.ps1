@@ -644,6 +644,36 @@ $preferencesBridge = Get-Content -Raw -LiteralPath `
 Test-Policy ($preferencesSource -match 'readSetting\(u"Preferences/Search/SearchEnabled"_s, true\)' `
         -and $preferencesBridge -match 'm_preferences->isSearchEnabled\(\) : true') `
     "the Search tab is enabled by default and the QML bridge mirrors that default"
+# The Search tab is useless without sources, so plugins ship too. Seeding must
+# never downgrade a user-updated plugin and must never resurrect one the user
+# uninstalled, or the uninstall button would silently do nothing across restarts.
+$bundledEngineDir = Get-RepositoryPath "resources/searchengine/nova3/engines"
+$bundledEngines = @()
+if (Test-Path -LiteralPath $bundledEngineDir -PathType Container) {
+    $bundledEngines = @(Get-ChildItem -LiteralPath $bundledEngineDir -Filter "*.py" -File)
+}
+Test-Policy ($bundledEngines.Count -ge 5) `
+    "the application bundles a usable set of search plugins ($($bundledEngines.Count) found)"
+$unversionedEngines = @($bundledEngines | Where-Object {
+    -not ((Get-Content -LiteralPath $_.FullName -TotalCount 40) -match '^#\s*VERSION:\s*[0-9]')
+})
+Test-Policy ($unversionedEngines.Count -eq 0) `
+    "every bundled search plugin carries a VERSION header$(($unversionedEngines.Name) -join ', ')"
+$enginesInQrc = @($bundledEngines | Where-Object {
+    -not $searchResourcesQrc.Contains("searchengine/nova3/engines/$($_.Name)")
+})
+Test-Policy (($enginesInQrc.Count -eq 0) -and $appCMake.Contains('searchengine/nova3/engines/*.py')) `
+    "both resource paths bundle every search plugin$(($enginesInQrc.Name) -join ', ')"
+Test-Policy ($appCMake -match 'message\(FATAL_ERROR[\s\S]{0,160}No bundled search plugins found') `
+    "a build that bundles no search plugins fails at configure time"
+Test-Policy ($searchPluginManager.Contains('void SearchPluginManager::seedBundledPlugins()') `
+        -and $searchPluginManager.Contains('if (alreadySeeded.contains(name))') `
+        -and $searchPluginManager.Contains('getPluginVersion(bundledPath) <= getPluginVersion(diskPath)')) `
+    "seeding skips uninstalled plugins and never downgrades a newer installed one"
+Test-Policy ($preferencesSource.Contains('u"SearchEngines/seededPlugins"_s') `
+        -and $preferencesSource.Contains('QStringList Preferences::getSeededSearchPlugins() const')) `
+    "the set of already-seeded bundled plugins is persisted so uninstalls stick"
+
 # Scope this to the constructor: reload() legitimately runs both calls inline
 # because the user asked for it and expects a fresh answer.
 $searchManagerCtor = [regex]::Match($searchPluginManager,

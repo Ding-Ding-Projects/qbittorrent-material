@@ -45,5 +45,13 @@
         <file alias="searchengine/nova3/nova2dl.py">searchengine/nova3/nova2dl.py</file>
         <file alias="searchengine/nova3/novaprinter.py">searchengine/nova3/novaprinter.py</file>
         <file alias="searchengine/nova3/socks.py">searchengine/nova3/socks.py</file>
+        <file alias="searchengine/nova3/engines/eztv.py">searchengine/nova3/engines/eztv.py</file>
+        <file alias="searchengine/nova3/engines/jackett.py">searchengine/nova3/engines/jackett.py</file>
+        <file alias="searchengine/nova3/engines/limetorrents.py">searchengine/nova3/engines/limetorrents.py</file>
+        <file alias="searchengine/nova3/engines/piratebay.py">searchengine/nova3/engines/piratebay.py</file>
+        <file alias="searchengine/nova3/engines/solidtorrents.py">searchengine/nova3/engines/solidtorrents.py</file>
+        <file alias="searchengine/nova3/engines/torlock.py">searchengine/nova3/engines/torlock.py</file>
+        <file alias="searchengine/nova3/engines/torrentproject.py">searchengine/nova3/engines/torrentproject.py</file>
+        <file alias="searchengine/nova3/engines/torrentscsv.py">searchengine/nova3/engines/torrentscsv.py</file>
     </qresource>
 </RCC>

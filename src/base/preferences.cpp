@@ -1857,6 +1857,19 @@ void Preferences::setSearchEngDisabled(const QStringList &engines)
     writeSetting(u"SearchEngines/disabledEngines"_s, engines);
 }
 
+QStringList Preferences::getSeededSearchPlugins() const
+{
+    return readSetting<QStringList>(u"SearchEngines/seededPlugins"_s);
+}
+
+void Preferences::setSeededSearchPlugins(const QStringList &plugins)
+{
+    if (plugins == getSeededSearchPlugins())
+        return;
+
+    writeSetting(u"SearchEngines/seededPlugins"_s, plugins);
+}
+
 QString Preferences::getTorImportLastContentDir() const
 {
     return readSetting(u"TorrentImport/LastContentDir"_s, QDir::homePath());

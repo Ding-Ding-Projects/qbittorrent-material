@@ -1,3 +1,6 @@
 [submodule "vendor/qBittorrent"]
 	path = vendor/qBittorrent
 	url = https://github.com/qbittorrent/qBittorrent
+[submodule "vendor/search-plugins"]
+	path = vendor/search-plugins
+	url = https://github.com/qbittorrent/search-plugins

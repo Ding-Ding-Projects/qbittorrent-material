@@ -378,6 +378,10 @@ public:
     void setRegexAsFilteringPatternForSearchJob(bool checked);
     QStringList getSearchEngDisabled() const;
     void setSearchEngDisabled(const QStringList &engines);
+    /// Bundled plugins already written to the profile at least once. A name in
+    /// this list is never re-seeded, so uninstalling a bundled plugin sticks.
+    QStringList getSeededSearchPlugins() const;
+    void setSeededSearchPlugins(const QStringList &plugins);
     QString getTorImportLastContentDir() const;
     void setTorImportLastContentDir(const QString &path);
     QByteArray getTorImportGeometry() const;

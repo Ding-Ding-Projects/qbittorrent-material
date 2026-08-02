@@ -212,6 +212,17 @@ foreach (_nova_file IN LISTS QBT_NOVA_RUNTIME_FILES)
     endif()
 endforeach()
 
+# Likewise the bundled plugins: shipping none would leave the Search tab with no
+# sources and send the user back to a manual install.
+file(GLOB _qbt_nova_engines "${QBT_RES_ROOT}/searchengine/nova3/engines/*.py")
+if (NOT _qbt_nova_engines)
+    message(FATAL_ERROR
+        "No bundled search plugins found under resources/searchengine/nova3/engines/. "
+        "Restore them before building.")
+endif()
+list(LENGTH _qbt_nova_engines _qbt_nova_engine_count)
+message(STATUS "qbittorrent: bundling ${_qbt_nova_engine_count} search plugin(s)")
+
 if (QBT_BUNDLE_QRC AND EXISTS "${QBT_RES_ROOT}/resources.qrc")
     # Opt-in: compile the hand-authored manifest verbatim via AUTORCC (all
     # listed files must exist or rcc will fail — hence off by default).
@@ -238,6 +249,9 @@ else()
         # these to <Data>/nova3 and then runs `python nova2.py --capabilities`;
         # without them every search and every plugin install fails.
         "${QBT_RES_ROOT}/searchengine/nova3/*.py"
+        # The bundled search plugins, seeded into <Data>/nova3/engines on first
+        # run so the Search tab has sources without any user action.
+        "${QBT_RES_ROOT}/searchengine/nova3/engines/*.py"
     )
     file(GLOB_RECURSE QBT_ASSET_FILES CONFIGURE_DEPENDS ${QBT_ASSET_GLOBS})
     if (QBT_ASSET_FILES)

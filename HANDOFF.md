@@ -1,5 +1,60 @@
 # Handoff
 
+## 2026-08-02 — search plugins ship with the application
+
+Requested. Upstream qBittorrent ships no search plugins — they live in the
+separate `qbittorrent/search-plugins` repository, which is also the URL the
+in-app updater already pointed at. That repository is now a pinned submodule at
+`vendor/search-plugins` (commit `17f93a6`, GPL-2.0), and its eight engines —
+eztv, jackett, limetorrents, piratebay, solidtorrents, torlock, torrentproject,
+torrentscsv — are vendored into `resources/searchengine/nova3/engines/` and
+bundled through both resource paths. A build that bundles none fails at
+configure time, the same way a missing runtime file does.
+
+`SearchPluginManager::seedBundledPlugins()` writes them into the profile's
+`nova3/engines` directory during construction, after `updateNova()` and before
+the deferred capabilities probe, so the Search tab has sources the first time it
+is opened with no user action.
+
+Seeding is deliberately conservative, because the naive version — extract
+everything every launch — would make the uninstall button useless and would
+clobber updates:
+
+- A bundled plugin whose version is **not newer** than the installed copy is
+  left alone, so anything fetched from the upstream feed is never downgraded.
+- A bundled plugin that is **absent but already recorded as seeded** is left
+  alone, so an uninstall sticks instead of reappearing on the next launch.
+
+The record lives in the new `SearchEngines/seededPlugins` preference; clearing
+that key restores the full bundled set on the next launch.
+
+Being a point-in-time snapshot, the bundled set will go stale — that is inherent
+to bundling and is why upstream does not. **Search plugins… -> Check for
+updates** remains the refresh path, and it still works against the same URL.
+
+Verification:
+
+- All 309 desktop policy and content-integrity checks passed (303 before; the
+  6 new ones require a usable bundled set, VERSION headers on every engine,
+  both resource paths to carry every engine, the configure-time guard, the two
+  seeding safeguards, and the persisted seeded-plugin record).
+- `run.ps1 -NoRun -Jobs 8` completed a clean Release compile; CMake reported
+  `qbittorrent: bundling 8 search plugin(s)`.
+- All eight engines were executed through the bundled runtime under this
+  machine's Python 3.14.2 before being committed: `nova2.py --capabilities`
+  exits 0 and emits a well-formed entry for each.
+- End-to-end on a brand-new profile with the offscreen platform and no user
+  action: `Bundled search plugins seeded: 8 written, 8 known`, followed by
+  `Search plugin discovered:` for all eight, each `enabled: yes`.
+- Both safeguards were then exercised against that same profile: deleting
+  `piratebay.py` and bumping `torlock.py` to a fake version 99.99, the next
+  launch logged `0 written, 8 known`, left `piratebay` uninstalled, and left
+  `torlock` at 99.99.
+
+Note: `jackett` is a meta-plugin that proxies a local Jackett instance at
+`127.0.0.1:9117`. It is bundled because upstream ships it, but it reports no
+results until the user runs Jackett and configures `jackett.json`.
+
 ## 2026-08-02 — the Search tab is on by default
 
 Requested. `Preferences::isSearchEnabled()` now defaults to `true`, and the QML

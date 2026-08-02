@@ -27,6 +27,29 @@ and a file is only rewritten on disk when the bundled copy is newer. A file
 without that header would never be extracted, so every bundled runtime file must
 keep its header.
 
+## Bundled plugins
+
+Search sources are also shipped, not downloaded on demand. The engines from the
+upstream `qbittorrent/search-plugins` project are vendored under
+`resources/searchengine/nova3/engines/` at a pinned commit and seeded into the
+profile's `nova3/engines` directory on startup, so the Search tab has sources the
+first time it is opened with no user action. Upstream qBittorrent does not do
+this — it downloads plugins on demand — so the bundled set is a point-in-time
+snapshot and **Search plugins… -> Check for updates** remains the way to pick up
+newer versions.
+
+Seeding is deliberately conservative, because the alternative is a plugin list
+the user cannot control:
+
+- A plugin whose bundled copy is **not newer** than the installed one is left
+  alone, so updates fetched from the upstream feed are never downgraded.
+- A plugin that is **absent but already recorded as seeded** is left alone, so
+  uninstalling a bundled plugin sticks across restarts instead of the plugin
+  reappearing on the next launch.
+
+The record of what has been seeded lives in the `SearchEngines/seededPlugins`
+preference. Deleting that key makes the next launch restore the full bundled set.
+
 ## Prerequisites
 
 Search needs a Python interpreter. The application resolves one by executing the

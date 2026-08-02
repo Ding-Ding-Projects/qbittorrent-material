@@ -95,6 +95,7 @@ SearchPluginManager::SearchPluginManager()
     applyProxySettings();
 
     updateNova();
+    seedBundledPlugins();
 
     // Defer the capabilities probe off the construction path. update() spawns
     // Python and blocks on waitForFinished(); measured at ~175 ms here. Search
@@ -656,6 +657,71 @@ void SearchPluginManager::setRuntimeError(const QString &reason)
 
     m_runtimeError = reason;
     emit runtimeErrorChanged(reason);
+}
+
+// Write the plugins bundled in our own resources into the profile, so the
+// Search tab has sources without the user having to install anything.
+void SearchPluginManager::seedBundledPlugins()
+{
+    const Path bundledDir {u":/searchengine/nova3/engines"_s};
+    QDirIterator it {bundledDir.data(), {u"*.py"_s}, QDir::Files};
+    if (!it.hasNext())
+    {
+        qCCritical(lcSearch) << "No bundled search plugins found in the application resources";
+        return;
+    }
+
+    QStringList seeded = Preferences::instance()->getSeededSearchPlugins();
+    const QStringList alreadySeeded = seeded;
+    int written = 0;
+
+    while (it.hasNext())
+    {
+        const Path bundledPath {it.next()};
+        const QString name = bundledPath.removedExtension().filename();
+        const Path diskPath = pluginPath(name);
+
+        if (!diskPath.exists())
+        {
+            // Absent because the user removed it, not because this is a fresh
+            // profile — leave it alone. Uninstalling a bundled plugin must stick.
+            if (alreadySeeded.contains(name))
+                continue;
+        }
+        else if (getPluginVersion(bundledPath) <= getPluginVersion(diskPath))
+        {
+            // Never downgrade a plugin the user updated from the upstream feed.
+            if (!seeded.contains(name))
+                seeded.append(name);
+            continue;
+        }
+
+        Utils::Fs::removeFile(diskPath);
+        if (Utils::Fs::copyFile(bundledPath, diskPath))
+        {
+            ++written;
+            qCInfo(lcSearch).noquote() << QStringLiteral("Seeded bundled search plugin \"%1\" version %2")
+                .arg(name, getPluginVersion(bundledPath).toString());
+        }
+        else
+        {
+            qCWarning(lcSearch).noquote() << QStringLiteral("Could not seed bundled search plugin \"%1\" to %2")
+                .arg(name, diskPath.toString());
+            continue;
+        }
+
+        if (!seeded.contains(name))
+            seeded.append(name);
+    }
+
+    if (seeded != alreadySeeded)
+    {
+        seeded.sort();
+        Preferences::instance()->setSeededSearchPlugins(seeded);
+    }
+
+    qCInfo(lcSearch) << "Bundled search plugins seeded:" << written << "written,"
+        << seeded.size() << "known";
 }
 
 void SearchPluginManager::update()

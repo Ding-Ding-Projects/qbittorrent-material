@@ -117,6 +117,7 @@ private:
     void applyProxySettings();
     void update();
     void updateNova();
+    void seedBundledPlugins();
     void parseVersionInfo(const QByteArray &info);
     void installPlugin_impl(const QString &name, const Path &srcPath);
     bool isUpdateNeeded(const QString &pluginName, const SearchPluginVersion &newVersion) const;

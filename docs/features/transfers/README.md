@@ -7,3 +7,6 @@ desktop client.
   or Info hash v2 while retaining wildcard and regular-expression matching.
 - [Peer contribution](peer-contribution.md): inspect and sort the percentage of
   each peer's current progress supplied by this client.
+- [Search runtime](search-runtime.md): the bundled `nova3` Python runtime the
+  Search tab drives, how its interpreter is resolved, and how each prerequisite
+  failure is reported.

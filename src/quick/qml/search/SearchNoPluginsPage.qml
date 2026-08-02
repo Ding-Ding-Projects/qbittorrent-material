@@ -17,10 +17,16 @@ import qBittorrent
 
 /*!
     \qmltype SearchNoPluginsPage
-    \brief The empty state shown when no search plugins are installed.
+    \brief The empty state shown when search has nothing to offer.
 
-    Mirrors the legacy \c emptyPage: a centered explanation plus a shortcut to
-    install plugins.
+    Two distinct states, because they need different actions from the user:
+    \list
+        \li \e{blocked} — \c SearchController.unavailableReason is non-empty, so
+            search cannot run at all (no Python interpreter, or the bundled nova
+            runtime could not be started). Installing plugins would fail too, so
+            the install shortcut is withheld and the real cause is shown.
+        \li \e{empty} — search works, there simply are no plugins yet.
+    \endlist
 */
 Item {
     id: root
@@ -28,7 +34,11 @@ Item {
     /*! Emitted when the user clicks the install shortcut. */
     signal installRequested()
 
-    Component.onCompleted: Log.debug("search", "SearchNoPluginsPage shown")
+    /*! Why search cannot run, or "" when it can. */
+    readonly property string reason: SearchController.unavailableReason
+    readonly property bool blocked: root.reason.length > 0
+
+    Component.onCompleted: Log.debug("search", "SearchNoPluginsPage shown; blocked=" + root.blocked)
 
     ColumnLayout {
         anchors.centerIn: parent
@@ -36,9 +46,9 @@ Item {
         spacing: Spacing.lg
 
         MDIcon {
-            icon: Icons.extension
+            icon: root.blocked ? Icons.error : Icons.extension
             size: 64
-            color: Theme.color("onSurfaceVariant")
+            color: root.blocked ? Theme.color("error") : Theme.color("onSurfaceVariant")
             Layout.alignment: Qt.AlignHCenter
         }
 
@@ -48,7 +58,9 @@ Item {
             wrapMode: Text.WordWrap
             font: Typography.titleMedium
             color: Theme.color("onSurface")
-            text: qsTr("There aren't any search plugins installed.")
+            text: root.blocked
+                ? qsTr("Search is unavailable.")
+                : qsTr("There aren't any search plugins installed.")
         }
 
         Label {
@@ -57,16 +69,29 @@ Item {
             wrapMode: Text.WordWrap
             font: Typography.bodyMedium
             color: Theme.color("onSurfaceVariant")
-            text: qsTr("Click the \"Search plugins…\" button at the bottom right of the window to install some.")
+            text: root.blocked
+                ? root.reason
+                : qsTr("Click the \"Search plugins…\" button at the bottom right of the window to install some.")
         }
 
         Button {
             Layout.alignment: Qt.AlignHCenter
             highlighted: true
+            visible: !root.blocked
             text: qsTr("Install search plugins")
             onClicked: {
                 Log.info("search", "Install plugins requested from empty page")
                 root.installRequested()
+            }
+        }
+
+        Button {
+            Layout.alignment: Qt.AlignHCenter
+            visible: root.blocked
+            text: qsTr("Check again")
+            onClicked: {
+                Log.info("search", "Re-checking search prerequisites")
+                SearchController.refreshPythonDetection()
             }
         }
     }

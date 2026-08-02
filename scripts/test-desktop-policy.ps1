@@ -576,6 +576,65 @@ Test-Policy ($downloadManager.Contains('scheme.compare(u"https"') `
 Test-Policy ($appCMake.Contains('QBT_BUILD_ID=\"${QBT_BUILD_ID}\"')) "the packaged release identity is compiled into the update checker"
 Test-Policy (Test-Path -LiteralPath (Get-RepositoryPath "docs/features/delivery/update-check.md") -PathType Leaf) "the in-app update-check behavior and failure modes are documented"
 
+# --- Search: the nova3 runtime must actually ship -----------------------------
+# SearchPluginManager hard-codes ":/searchengine/nova3/<file>" and shells out to
+# `python nova2.py --capabilities`. When those resources are absent the whole
+# Search tab is dead and every plugin install rolls back reporting the
+# misleading "Plugin is not supported." Assert the runtime is present, bundled
+# by both resource paths, and guarded at configure time.
+$novaRuntimeFiles = @("helpers.py", "nova2.py", "nova2dl.py", "novaprinter.py", "socks.py")
+$missingNovaFiles = [System.Collections.Generic.List[string]]::new()
+$unversionedNovaFiles = [System.Collections.Generic.List[string]]::new()
+foreach ($novaFile in $novaRuntimeFiles) {
+    $novaPath = Get-RepositoryPath "resources/searchengine/nova3/$novaFile"
+    if (-not (Test-Path -LiteralPath $novaPath -PathType Leaf)) {
+        $missingNovaFiles.Add($novaFile)
+        continue
+    }
+    # updateNova() only extracts a bundled file when its "# VERSION:" header
+    # beats the on-disk copy, so a header-less file would never be installed.
+    $novaHead = Get-Content -LiteralPath $novaPath -TotalCount 40
+    if (-not ($novaHead -match '^#\s*VERSION:\s*[0-9]')) {
+        $unversionedNovaFiles.Add($novaFile)
+    }
+}
+Test-Policy ($missingNovaFiles.Count -eq 0) `
+    "the nova3 search runtime is bundled in the repository$($missingNovaFiles -join ', ')"
+Test-Policy ($unversionedNovaFiles.Count -eq 0) `
+    "every bundled nova3 runtime file carries the VERSION header updateNova compares$($unversionedNovaFiles -join ', ')"
+
+$searchResourcesQrc = Get-Content -Raw -LiteralPath (Get-RepositoryPath "resources/resources.qrc")
+Test-Policy ($appCMake.Contains('searchengine/nova3/*.py') `
+        -and $appCMake.Contains('QBT_NOVA_RUNTIME_FILES') `
+        -and ($appCMake -match 'message\(FATAL_ERROR[\s\S]{0,200}Missing bundled search runtime') `
+        -and $searchResourcesQrc.Contains('searchengine/nova3/nova2.py')) `
+    "both resource paths bundle the nova3 runtime and a missing one fails the configure step"
+
+Test-Policy ($appCMake -match 'find_package\(Qt6 REQUIRED COMPONENTS Xml\)' `
+        -and $appCMake -notmatch 'find_package\(Qt6 QUIET COMPONENTS Xml\)') `
+    "Qt6::Xml is required because the capabilities parser uses QDomDocument unconditionally"
+
+$searchPluginManager = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/base/search/searchpluginmanager.cpp")
+$searchControllerSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/controllers/searchcontroller.cpp")
+$searchEmptyPage = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/search/SearchNoPluginsPage.qml")
+Test-Policy ($searchPluginManager.Contains('setRuntimeError(') `
+        -and $searchPluginManager.Contains('if (!pyInfo.isValid())') `
+        -and $searchPluginManager.Contains('if (!novaScript.exists())') `
+        -and $searchPluginManager.Contains('Bundled search runtime file is missing from the application resources')) `
+    "the search runtime reports missing Python, a missing nova script, and unbundled resources"
+Test-Policy ($searchControllerSource.Contains('Utils::ForeignApps::pythonInfo()') `
+        -and $searchControllerSource -notmatch 'QStandardPaths::findExecutable\(') `
+    "Python detection executes the interpreter instead of trusting a PATH entry"
+Test-Policy ($searchEmptyPage.Contains('SearchController.unavailableReason') `
+        -and $searchEmptyPage.Contains('visible: !root.blocked') `
+        -and $searchEmptyPage.Contains('SearchController.refreshPythonDetection()')) `
+    "the search empty state separates a blocked runtime from having no plugins yet"
+Test-Policy (Test-Path -LiteralPath (Get-RepositoryPath "docs/features/transfers/search-runtime.md") -PathType Leaf) `
+    "the bundled search runtime and its failure modes are documented"
+
 $torrentJournal = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/base/torrentjournal/torrentjournal.cpp")
 Test-Policy ($torrentJournal -match 'if \(!writeTorrentFiles\(torrent, &changed\)\)\s*writeSucceeded = false' `

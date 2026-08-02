@@ -63,11 +63,11 @@ target_link_libraries(qbt_base
         libgit2::libgit2package
 )
 
-# Qt6::Xml is optional (only some engine parsers need it); link it if present.
-find_package(Qt6 QUIET COMPONENTS Xml)
-if (TARGET Qt6::Xml)
-    target_link_libraries(qbt_base PUBLIC Qt6::Xml)
-endif()
+# Qt6::Xml is REQUIRED: SearchPluginManager::update() parses the nova2.py
+# --capabilities XML with QDomDocument unconditionally, so a missing Xml module
+# must fail at configure time rather than as an obscure link error.
+find_package(Qt6 REQUIRED COMPONENTS Xml)
+target_link_libraries(qbt_base PUBLIC Qt6::Xml)
 
 # Windows system libraries used by Utils::OS (SetSuspendState/ExitWindowsEx/
 # AdjustTokenPrivileges for the shutdown/suspend/hibernate actions).
@@ -193,6 +193,25 @@ target_link_libraries(qbittorrent
 # (FlagImageProvider, font loader, FunnyTranslator catalog) rely on.
 set(QBT_RES_ROOT "${CMAKE_SOURCE_DIR}/resources")
 
+# The nova3 search runtime is NOT optional. SearchPluginManager hard-codes the
+# ":/searchengine/nova3/<file>" resource paths, and when they are absent every
+# plugin install rolls itself back with a misleading "Plugin is not supported."
+# Fail at configure time instead of shipping a build whose Search tab is dead.
+set(QBT_NOVA_RUNTIME_FILES
+    helpers.py
+    nova2.py
+    nova2dl.py
+    novaprinter.py
+    socks.py
+)
+foreach (_nova_file IN LISTS QBT_NOVA_RUNTIME_FILES)
+    if (NOT EXISTS "${QBT_RES_ROOT}/searchengine/nova3/${_nova_file}")
+        message(FATAL_ERROR
+            "Missing bundled search runtime: resources/searchengine/nova3/${_nova_file}. "
+            "Search cannot work without it; restore the file before building.")
+    endif()
+endforeach()
+
 if (QBT_BUNDLE_QRC AND EXISTS "${QBT_RES_ROOT}/resources.qrc")
     # Opt-in: compile the hand-authored manifest verbatim via AUTORCC (all
     # listed files must exist or rcc will fail — hence off by default).
@@ -215,6 +234,10 @@ else()
         "${QBT_RES_ROOT}/i18n/*.json"
         "${QBT_RES_ROOT}/experience/*.json"
         "${QBT_RES_ROOT}/dim-sum/*.png"
+        # The nova3 search runtime. SearchPluginManager::updateNova() extracts
+        # these to <Data>/nova3 and then runs `python nova2.py --capabilities`;
+        # without them every search and every plugin install fails.
+        "${QBT_RES_ROOT}/searchengine/nova3/*.py"
     )
     file(GLOB_RECURSE QBT_ASSET_FILES CONFIGURE_DEPENDS ${QBT_ASSET_GLOBS})
     if (QBT_ASSET_FILES)

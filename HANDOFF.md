@@ -1,5 +1,78 @@
 # Handoff
 
+## 2026-08-02 — search works again: the nova3 runtime is now shipped
+
+Reported: "search not working", "search plugins not working". Both symptoms had
+one cause. `SearchPluginManager` extracts the `nova3` Python runtime from
+`:/searchengine/nova3/<file>` into the profile and then runs
+`nova2.py --capabilities` to discover plugins — but this fork never bundled
+those files. No `.py` existed anywhere in the repository and the resource glob
+in `src/CMakeLists.txt` had no `searchengine` entry, so the extraction copied
+nothing, the capabilities query ran against a nonexistent script, and no plugin
+could ever register. That also explains the second symptom precisely:
+`installPlugin_impl` re-queries capabilities after copying a plugin, finds it
+absent from `m_plugins`, deletes the file it just wrote, and reports the
+misleading "Plugin is not supported."
+
+The runtime is now committed under `resources/searchengine/nova3/` (taken from
+the pinned `vendor/qBittorrent` submodule, unmodified, `# VERSION:` headers
+intact) and bundled by both resource paths — the tolerant asset glob and the
+hand-authored `resources.qrc`. A missing runtime file now fails the CMake
+configure step instead of producing a build whose Search tab is silently dead,
+and `Qt6::Xml` was promoted from optional to required because the capabilities
+parser uses `QDomDocument` unconditionally.
+
+Two further defects would have kept search broken on this machine even with the
+runtime present:
+
+- `SearchController::detectPython()` trusted `QStandardPaths::findExecutable()`.
+  On Windows that resolves `python.exe`/`python3.exe` to the zero-byte App
+  Execution Alias stubs in `%LOCALAPPDATA%\Microsoft\WindowsApps`, which are on
+  `PATH` even when Python is not installed. Detection now goes through
+  `Utils::ForeignApps::pythonInfo()`, which executes the candidate with
+  `--version` and falls back to the registry-known install locations. The
+  configured-interpreter branch, which previously set "available" without
+  checking anything at all, is validated the same way.
+- Every prerequisite failure was a `qCWarning` and a silent `return`, so the UI
+  could only ever say "There aren't any search plugins installed." The engine now
+  records a distinct reason for missing Python, a missing nova script, and a
+  runtime that starts but returns nothing usable; `SearchController` exposes it
+  as `unavailableReason`, and the empty state shows the real cause, withholds the
+  install shortcut that could not have succeeded, and offers **Check again**,
+  which re-probes Python and re-runs extraction plus the capabilities query
+  without a restart.
+
+Not changed, having been checked against upstream rather than assumed: the
+Python 3.13 minimum, the `updateNova` version-comparison logic, and the Search
+tab defaulting to off (all match upstream `3c2a58e1`).
+
+Verification:
+
+- All 296 desktop policy and content-integrity checks passed (288 before; the
+  8 new ones cover the bundled runtime, its VERSION headers, both resource
+  paths, the configure guard, required `Qt6::Xml`, the three distinct engine
+  failure reports, interpreter-executing detection, and the split empty state).
+- `run.ps1 -NoRun -Jobs 8` completed a full Release compile, link, and Qt
+  deployment with no errors.
+- The generated resource manifest `build/src/.qt/rcc/app_assets.qrc` grew from
+  13 to 18 entries and maps all five files to exactly the
+  `:/searchengine/nova3/<file>` paths `updateNova()` reads.
+- The bundled runtime was executed against this machine's real interpreter
+  (Python 3.14.2, found via the registry fallback, not the PATH stub):
+  `nova2.py --capabilities` exits 0 and emits `<capabilities />`; with a local
+  probe plugin installed it emits the `<name>/<url>/<categories>` elements
+  `update()` parses; and a search emits the eight-field pipe-separated line
+  `SearchHandler` parses. The `python`/`python3` PATH entries on this machine
+  are confirmed to be Store stubs that print "Python was not found", which is
+  the exact case the old detector accepted.
+
+Known follow-up, not blocking: `SearchPluginManager` is still created lazily by
+the QML Search loader rather than at startup, so extraction only happens once the
+user enables and opens the Search tab; `freeInstance()` is never called;
+`uninstallPlugin()` unconditionally returns `true`, leaving the bundled-plugin
+branch in `SearchController::uninstallPlugins` unreachable; and `refreshTab()`
+deletes a `SearchHandler` without cancelling its running process first.
+
 ## 2026-08-02 — requested follow-up: magnet conversion and silent updates
 
 This is a handoff-only checkpoint; neither feature below has been implemented.

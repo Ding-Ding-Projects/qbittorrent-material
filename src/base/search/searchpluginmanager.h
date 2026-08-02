@@ -82,6 +82,16 @@ public:
 
     QProcessEnvironment proxyEnvironment() const;
 
+    /// Human-readable reason the nova runtime could not be queried, or an empty
+    /// string when the last `nova2.py --capabilities` run succeeded. Lets the UI
+    /// distinguish "no plugins installed yet" from "search cannot run at all".
+    [[nodiscard]] QString runtimeError() const;
+
+    /// Re-extracts the bundled runtime and re-runs the capabilities query. Used
+    /// when the user fixes a prerequisite (installs Python, points Options at an
+    /// interpreter) and asks to try again without restarting.
+    void reload();
+
     static SearchPluginVersion getPluginVersion(const Path &filePath);
     static QString categoryFullName(const QString &categoryName);
     QString pluginFullName(const QString &pluginName) const;
@@ -99,6 +109,10 @@ signals:
     void checkForUpdatesFinished(const QHash<QString, SearchPluginVersion> &updateInfo);
     void checkForUpdatesFailed(const QString &reason);
 
+    /// Emitted whenever the outcome of `nova2.py --capabilities` changes.
+    /// @p reason is empty once the runtime works again.
+    void runtimeErrorChanged(const QString &reason);
+
 private:
     void applyProxySettings();
     void update();
@@ -112,10 +126,13 @@ private:
 
     static Path pluginPath(const QString &name);
 
+    void setRuntimeError(const QString &reason);
+
     static QPointer<SearchPluginManager> m_instance;
 
     const QString m_updateUrl;
 
     QHash<QString, SearchPluginInfo *> m_plugins;
     QProcessEnvironment m_proxyEnv;
+    QString m_runtimeError;
 };

@@ -62,6 +62,11 @@ class SearchController : public QObject
     /// Whether a usable Python interpreter was detected (search is disabled
     /// entirely without it).
     Q_PROPERTY(bool pythonAvailable READ pythonAvailable NOTIFY pythonAvailableChanged)
+    /// Why search cannot run at all, or an empty string when it can. Lets the
+    /// empty page distinguish "no plugins installed yet" (actionable: install
+    /// some) from "Python or the nova runtime is missing" (installing plugins
+    /// would fail too).
+    Q_PROPERTY(QString unavailableReason READ unavailableReason NOTIFY unavailableReasonChanged)
     /// Whether at least one search plugin is installed (drives the empty page).
     Q_PROPERTY(bool pluginsInstalled READ pluginsInstalled NOTIFY pluginsChanged)
     /// Open tabs, as a list of `{ id, pattern, status }` objects (for the TabBar).
@@ -108,7 +113,12 @@ public:
     static SearchController *create(QQmlEngine *qmlEngine, QJSEngine *jsEngine);
 
     [[nodiscard]] bool pythonAvailable() const { return m_pythonAvailable; }
+    [[nodiscard]] QString unavailableReason() const;
     [[nodiscard]] bool pluginsInstalled() const;
+
+    /// Re-probes for a Python interpreter (e.g. after the user installs one or
+    /// points Options at a different executable).
+    Q_INVOKABLE void refreshPythonDetection();
     [[nodiscard]] QVariantList tabs() const;
     [[nodiscard]] QVariantList pluginScopes() const;
     [[nodiscard]] QStringList history() const { return m_history; }
@@ -196,6 +206,7 @@ public:
 
 signals:
     void pythonAvailableChanged();
+    void unavailableReasonChanged();
     void pluginsChanged();
     void tabsChanged();
     void historyChanged();

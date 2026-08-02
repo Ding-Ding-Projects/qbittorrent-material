@@ -601,12 +601,25 @@ void SearchPluginManager::updateNova()
         const Path filePathBundled = Path(u":/searchengine/nova3"_s) / filename;
         const Path filePathDisk = enginePath / filename;
 
+        if (!filePathBundled.exists())
+        {
+            // The build did not embed the nova runtime. Every search and every
+            // plugin install will fail; say so once, here, where it is provable.
+            qCCritical(lcSearch).noquote() << QStringLiteral("Bundled search runtime file is missing from the application resources: %1")
+                .arg(filePathBundled.toString());
+            return;
+        }
+
         if (getPluginVersion(filePathBundled) <= getPluginVersion(filePathDisk))
             return;
 
         qCDebug(lcSearch) << "Updating bundled nova file on disk:" << filename.toString();
         Utils::Fs::removeFile(filePathDisk);
-        Utils::Fs::copyFile(filePathBundled, filePathDisk);
+        if (!Utils::Fs::copyFile(filePathBundled, filePathDisk))
+        {
+            qCWarning(lcSearch).noquote() << QStringLiteral("Could not extract the search runtime file %1 to %2")
+                .arg(filename.toString(), filePathDisk.toString());
+        }
     };
 
     updateFile(Path(u"helpers.py"_s));
@@ -616,9 +629,60 @@ void SearchPluginManager::updateNova()
     updateFile(Path(u"socks.py"_s));
 }
 
+QString SearchPluginManager::runtimeError() const
+{
+    return m_runtimeError;
+}
+
+void SearchPluginManager::reload()
+{
+    qCInfo(lcSearch) << "Reloading the search runtime on request";
+    updateNova();
+    update();
+}
+
+void SearchPluginManager::setRuntimeError(const QString &reason)
+{
+    if (m_runtimeError == reason)
+        return;
+
+    m_runtimeError = reason;
+    emit runtimeErrorChanged(reason);
+}
+
 void SearchPluginManager::update()
 {
     qCDebug(lcSearch) << "Refreshing search engine capabilities via nova2.py --capabilities";
+
+    // Fail loudly on the two prerequisites the user can actually act on, rather
+    // than letting QProcess fail obscurely and leaving the Search tab claiming
+    // that no plugins are installed.
+    const Utils::ForeignApps::PythonInfo pyInfo = Utils::ForeignApps::pythonInfo();
+    if (!pyInfo.isValid())
+    {
+        const QString reason = tr("Python was not found. Search needs a Python %1 or later interpreter on PATH, or one selected in Options.")
+            .arg(Utils::ForeignApps::PythonInfo::MINIMUM_SUPPORTED_VERSION.toString());
+        qCWarning(lcSearch).noquote() << reason;
+        setRuntimeError(reason);
+        return;
+    }
+    if (!pyInfo.isSupportedVersion())
+    {
+        // Not fatal — nova may still run — but record it so a later failure is
+        // attributable instead of looking like "no plugins installed".
+        qCWarning(lcSearch).noquote() << QStringLiteral("Python %1 is below the supported minimum %2")
+            .arg(pyInfo.version.toString(), Utils::ForeignApps::PythonInfo::MINIMUM_SUPPORTED_VERSION.toString());
+    }
+    const Path pythonPath = pyInfo.executablePath;
+
+    const Path novaScript = engineLocation() / Path(u"nova2.py"_s);
+    if (!novaScript.exists())
+    {
+        const QString reason = tr("The bundled search runtime is missing. Expected \"%1\".").arg(novaScript.toString());
+        qCWarning(lcSearch).noquote() << reason;
+        setRuntimeError(reason);
+        return;
+    }
 
     QProcess nova;
     nova.setProcessEnvironment(proxyEnvironment());
@@ -630,23 +694,27 @@ void SearchPluginManager::update()
     {
         Utils::ForeignApps::PYTHON_ISOLATE_MODE_FLAG,
         Utils::ForeignApps::PYTHON_UTF8_MODE_FLAG,
-        (engineLocation() / Path(u"nova2.py"_s)).toString(),
+        novaScript.toString(),
         u"--capabilities"_s
     };
-    nova.start(Utils::ForeignApps::pythonInfo().executablePath.data(), params, QIODevice::ReadOnly);
+    nova.start(pythonPath.data(), params, QIODevice::ReadOnly);
     nova.waitForFinished();
 
-    if (const auto errMsg = QString::fromUtf8(nova.readAllStandardError()).trimmed()
-        ; !errMsg.isEmpty())
+    const auto stdErrMsg = QString::fromUtf8(nova.readAllStandardError()).trimmed();
+    if (!stdErrMsg.isEmpty())
     {
-        qCWarning(lcSearch).noquote() << tr("Error occurred when fetching search engine capabilities. Error: \"%1\".").arg(errMsg);
+        qCWarning(lcSearch).noquote() << tr("Error occurred when fetching search engine capabilities. Error: \"%1\".").arg(stdErrMsg);
     }
 
     const auto capabilities = QString::fromUtf8(nova.readAllStandardOutput());
     QDomDocument xmlDoc;
     if (!xmlDoc.setContent(capabilities))
     {
+        const QString reason = stdErrMsg.isEmpty()
+            ? tr("The search runtime returned no usable plugin capabilities.")
+            : tr("The search runtime failed to start. Error: \"%1\".").arg(stdErrMsg);
         qCWarning(lcSearch).noquote() << QStringLiteral("Could not parse nova search engine capabilities. Output: %1").arg(capabilities);
+        setRuntimeError(reason);
         return;
     }
 
@@ -654,8 +722,11 @@ void SearchPluginManager::update()
     if (root.tagName() != u"capabilities")
     {
         qCWarning(lcSearch).noquote() << QStringLiteral("Invalid XML for nova search engine capabilities. Output: %1").arg(capabilities);
+        setRuntimeError(tr("The search runtime reported malformed plugin capabilities."));
         return;
     }
+
+    setRuntimeError({});
 
     for (QDomNode engineNode = root.firstChild(); !engineNode.isNull(); engineNode = engineNode.nextSibling())
     {

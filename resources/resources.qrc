@@ -14,6 +14,8 @@
       :/branding/logo-mark.png              (window and normal tray artwork)
       :/branding/logo-monochrome.png        (monochrome tray artwork)
       :/html/gpl.html                       (About dialog license text)
+      :/searchengine/nova3/*.py             (nova3 search runtime, extracted to
+                                             <Data>/nova3 by SearchPluginManager)
 
   NOTE: By default the build does NOT compile this file verbatim — it uses a
   tolerant glob of whatever assets currently exist (see src/CMakeLists.txt), so
@@ -38,5 +40,10 @@
         <file alias="branding/logo-mark.png">branding/logo-mark.png</file>
         <file alias="branding/logo-monochrome.png">branding/logo-monochrome.png</file>
         <file alias="html/gpl.html">html/gpl.html</file>
+        <file alias="searchengine/nova3/helpers.py">searchengine/nova3/helpers.py</file>
+        <file alias="searchengine/nova3/nova2.py">searchengine/nova3/nova2.py</file>
+        <file alias="searchengine/nova3/nova2dl.py">searchengine/nova3/nova2dl.py</file>
+        <file alias="searchengine/nova3/novaprinter.py">searchengine/nova3/novaprinter.py</file>
+        <file alias="searchengine/nova3/socks.py">searchengine/nova3/socks.py</file>
     </qresource>
 </RCC>

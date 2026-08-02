@@ -293,7 +293,10 @@ Item {
             id: contentLoader
             Layout.fillWidth: true
             Layout.fillHeight: true
-            sourceComponent: SearchController.pluginsInstalled ? resultsComponent : emptyComponent
+            // A blocked runtime wins over installed plugins: they cannot run.
+            sourceComponent: (SearchController.pluginsInstalled
+                    && (SearchController.unavailableReason.length === 0))
+                ? resultsComponent : emptyComponent
         }
 
             }

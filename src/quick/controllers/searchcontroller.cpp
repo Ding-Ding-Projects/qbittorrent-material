@@ -17,7 +17,6 @@
 #include <QClipboard>
 #include <QDesktopServices>
 #include <QGuiApplication>
-#include <QStandardPaths>
 #include <QUrl>
 #include <QVariantMap>
 
@@ -27,6 +26,7 @@
 #include "base/search/searchhandler.h"
 #include "base/search/searchpluginmanager.h"
 #include "base/settingsstorage.h"
+#include "base/utils/foreignapps.h"
 #include "base/utils/fs/path.h"
 #include "models/searchresultsmodel.h"
 
@@ -89,6 +89,12 @@ SearchController::SearchController(QObject *parent)
         connect(mgr, &SearchPluginManager::checkForUpdatesFailed, this, [this](const QString &reason) {
             qCWarning(lcSearch) << "Update check failed:" << reason;
             emit pluginUpdateCheckFailed(reason);
+        });
+        // The nova runtime can only be probed once the manager exists, so the
+        // empty state has to react to it rather than read it once at startup.
+        connect(mgr, &SearchPluginManager::runtimeErrorChanged, this, [this](const QString &reason) {
+            qCWarning(lcSearch) << "Search runtime state changed:" << (reason.isEmpty() ? u"ok"_s : reason);
+            emit unavailableReasonChanged();
         });
     }
 
@@ -761,27 +767,64 @@ const SearchController::SearchTab *SearchController::tabById(int id) const
 
 void SearchController::detectPython()
 {
-    // Prefer a user-configured interpreter; else probe the PATH.
-    const Path configured = Preferences::instance()->getPythonExecutablePath();
-    if (!configured.isEmpty())
+    // Utils::ForeignApps::pythonInfo() actually executes the candidate with
+    // `--version`. That matters on Windows, where %LOCALAPPDATA%\Microsoft\
+    // WindowsApps contains zero-byte "python.exe"/"python3.exe" App Execution
+    // Alias stubs that are on PATH even when Python is not installed — a plain
+    // PATH lookup reports those as a real interpreter and search then dies with
+    // an unexplained process failure.
+    // It also honours (and validates) the interpreter configured in Options,
+    // and searches the registry-known install paths on Windows.
+    const Utils::ForeignApps::PythonInfo pyInfo = Utils::ForeignApps::pythonInfo();
+
+    const bool wasAvailable = m_pythonAvailable;
+    m_pythonAvailable = pyInfo.isValid();
+
+    if (m_pythonAvailable)
     {
-        m_pythonAvailable = true;
-        qCDebug(lcSearch) << "Python from preferences:" << configured.toString();
-        return;
+        qCInfo(lcSearch) << "Python detected:" << pyInfo.executablePath.toString()
+                         << "version" << pyInfo.version.toString()
+                         << "supported:" << pyInfo.isSupportedVersion();
+    }
+    else
+    {
+        qCWarning(lcSearch) << "No usable Python interpreter detected; search is unavailable";
     }
 
-    for (const QString &exe : {u"python3"_s, u"python"_s})
+    if (wasAvailable != m_pythonAvailable)
+        emit pythonAvailableChanged();
+}
+
+void SearchController::refreshPythonDetection()
+{
+    qCDebug(lcSearch) << "Re-running Python detection on request";
+    detectPython();
+
+    // Re-probing Python alone would leave the manager's stale runtime error in
+    // place, so a user who has just installed Python would still be told it is
+    // missing. Re-extract the runtime and re-query capabilities as well; that
+    // also picks up plugins that could not be registered while search was down.
+    if (m_pythonAvailable)
     {
-        if (!QStandardPaths::findExecutable(exe).isEmpty())
-        {
-            m_pythonAvailable = true;
-            qCDebug(lcSearch) << "Python found on PATH:" << exe;
-            return;
-        }
+        if (auto *mgr = SearchPluginManager::instance())
+            mgr->reload();
     }
 
-    m_pythonAvailable = false;
-    qCWarning(lcSearch) << "No Python interpreter detected; search disabled";
-    // TODO(engine): use Utils::ForeignApps::pythonInfo() for full version/validity
-    // checking (and the Windows auto-install offer) once that helper is ported.
+    emit unavailableReasonChanged();
+    emit pluginsChanged();
+}
+
+QString SearchController::unavailableReason() const
+{
+    if (!m_pythonAvailable)
+    {
+        return tr("Python was not found. Search needs a Python %1 or later interpreter on PATH, "
+                  "or one selected in Options.")
+            .arg(Utils::ForeignApps::PythonInfo::MINIMUM_SUPPORTED_VERSION.toString());
+    }
+
+    if (auto *mgr = SearchPluginManager::instance())
+        return mgr->runtimeError();
+
+    return {};
 }

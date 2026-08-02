@@ -49,6 +49,40 @@ function Die($m)  { Write-Host "ERROR: $m" -ForegroundColor Red; exit 1 }
 
 function Have($cmd) { return [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 
+function Get-NormalizedPath($path) {
+    try {
+        return [IO.Path]::GetFullPath($path).TrimEnd([char[]] @('\', '/'))
+    }
+    catch {
+        return ([string] $path).TrimEnd([char[]] @('\', '/'))
+    }
+}
+
+function Get-CMakeCacheValue($name) {
+    $cachePath = Join-Path $BuildDir 'CMakeCache.txt'
+    if (-not (Test-Path -LiteralPath $cachePath -PathType Leaf)) { return $null }
+
+    $pattern = '^' + [regex]::Escape($name) + '(?::[^=]*)?=(.*)$'
+    foreach ($line in Get-Content -LiteralPath $cachePath) {
+        if ($line -match $pattern) { return $Matches[1] }
+    }
+    return $null
+}
+
+function Reset-MovedCMakeBuild {
+    $cachedSource = Get-CMakeCacheValue 'CMAKE_HOME_DIRECTORY'
+    $cachedBuild = Get-CMakeCacheValue 'CMAKE_CACHEFILE_DIR'
+    $sourceMoved = $cachedSource -and -not [StringComparer]::OrdinalIgnoreCase.Equals(
+        (Get-NormalizedPath $cachedSource), (Get-NormalizedPath $Repo))
+    $buildMoved = $cachedBuild -and -not [StringComparer]::OrdinalIgnoreCase.Equals(
+        (Get-NormalizedPath $cachedBuild), (Get-NormalizedPath $BuildDir))
+
+    if ($sourceMoved -or $buildMoved) {
+        Warn "The build cache belongs to another checkout ($cachedSource); regenerating build/."
+        Remove-Item -LiteralPath $BuildDir -Recurse -Force
+    }
+}
+
 function Find-Python {
     $candidates = @(
         'python',
@@ -246,7 +280,13 @@ function Ensure-Vcpkg {
 Info "qBittorrent Material - automatic build & run"
 Info "Repo: $Repo"
 
-if ($Clean -and (Test-Path $BuildDir)) { Info "Cleaning build/"; Remove-Item -Recurse -Force $BuildDir }
+if ($Clean -and (Test-Path $BuildDir)) {
+    Info "Cleaning build/"
+    Remove-Item -LiteralPath $BuildDir -Recurse -Force
+}
+elseif (Test-Path $BuildDir) {
+    Reset-MovedCMakeBuild
+}
 
 $vcvars = Find-VcVars
 if (-not $vcvars) {

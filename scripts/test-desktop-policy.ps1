@@ -243,6 +243,17 @@ Test-Policy ($sourceCMake -match 'quick/qml/\*\.qml') "CMake discovers every des
 Test-Policy ($sourceCMake -match 'experience/\*\.json') "CMake bundles the offline experience catalogs"
 Test-Policy ($sourceCMake -match 'dim-sum/\*\.png') "CMake bundles the local dim-sum images"
 
+$windowsBuildHelper = Get-Content -Raw -LiteralPath (Get-RepositoryPath "run.ps1")
+$posixBuildHelper = Get-Content -Raw -LiteralPath (Get-RepositoryPath "run.sh")
+Test-Policy ($windowsBuildHelper -match 'CMAKE_HOME_DIRECTORY' `
+        -and $windowsBuildHelper -match 'CMAKE_CACHEFILE_DIR' `
+        -and $windowsBuildHelper -match 'Reset-MovedCMakeBuild') `
+    "the Windows build helper regenerates a relocated CMake build tree"
+Test-Policy ($posixBuildHelper -match 'CMAKE_HOME_DIRECTORY' `
+        -and $posixBuildHelper -match 'CMAKE_CACHEFILE_DIR' `
+        -and $posixBuildHelper -match 'clean_build') `
+    "the POSIX build helper regenerates a relocated CMake build tree"
+
 $mainQml = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/Main.qml")
 foreach ($surface in @("DimSumSurprise", "NotificationsSheet", "RegexBuilderSheet", "SettingsSheet")) {
     Test-Policy ($mainQml -match [regex]::Escape($surface)) "Main.qml wires $surface"

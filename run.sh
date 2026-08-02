@@ -11,16 +11,41 @@ REPO="$(cd "$(dirname "$0")" && pwd)"
 BUILD="$REPO/build"
 JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 RUN=1
+CLEAN=0
 for arg in "$@"; do
     case "$arg" in
         --no-run) RUN=0 ;;
-        --clean)  rm -rf "$BUILD" ;;
+        --clean)  CLEAN=1 ;;
     esac
 done
 
 info() { printf '\033[36m==> %s\033[0m\n' "$*"; }
+warn() { printf '\033[33m!!  %s\033[0m\n' "$*"; }
 die()  { printf '\033[31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
+
+clean_build() {
+    [ "$BUILD" = "$REPO/build" ] || die "Refusing to clean unexpected build path: $BUILD"
+    [ ! -e "$BUILD" ] || rm -rf -- "$BUILD"
+}
+
+cmake_cache_value() {
+    [ -f "$BUILD/CMakeCache.txt" ] || return 0
+    sed -n "s/^$1:[^=]*=//p" "$BUILD/CMakeCache.txt" | head -n1
+}
+
+if [ "$CLEAN" -eq 1 ]; then
+    info "Cleaning build/"
+    clean_build
+elif [ -f "$BUILD/CMakeCache.txt" ]; then
+    CACHED_SOURCE="$(cmake_cache_value CMAKE_HOME_DIRECTORY)"
+    CACHED_BUILD="$(cmake_cache_value CMAKE_CACHEFILE_DIR)"
+    if { [ -n "$CACHED_SOURCE" ] && [ "${CACHED_SOURCE%/}" != "${REPO%/}" ]; } ||
+       { [ -n "$CACHED_BUILD" ] && [ "${CACHED_BUILD%/}" != "${BUILD%/}" ]; }; then
+        warn "The build cache belongs to another checkout ($CACHED_SOURCE); regenerating build/."
+        clean_build
+    fi
+fi
 
 install_deps() {
     if have apt-get; then

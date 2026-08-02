@@ -1,5 +1,36 @@
 # Handoff
 
+## 2026-08-02 — broad bug-audit checkpoint 1: relocatable builds
+
+The active repository is the clean default checkout at
+`C:\Users\antho\Documents\Codex\2026-08-01\replace-qbittorrnt-on-my-machine-with`,
+on `master` with `origin/master` at `9f651d1` when this audit began. There is one
+worktree, one local branch, and no stash.
+
+The first baseline native build reproduced a deterministic helper failure: the
+ignored `build/CMakeCache.txt` had been created through `Q:\`, so CMake rejected
+the checkout's current source and binary paths before compiling. Both one-click
+helpers now read `CMAKE_HOME_DIRECTORY` and `CMAKE_CACHEFILE_DIR`, detect a moved
+checkout, and recreate only the repository-owned generated `build/` tree. The
+POSIX cleanup path additionally refuses any target other than the exact
+`$REPO/build` directory. Desktop policy coverage protects both helpers.
+
+Checkpoint verification:
+
+- PowerShell parsed `run.ps1` and `scripts/test-desktop-policy.ps1` with no errors.
+- Git Bash parsed `run.sh -n` with no errors.
+- `git diff --check` passed.
+- All 257 desktop policy and content-integrity checks passed.
+- `run.ps1 -NoRun -Jobs 4` detected the stale `Q:\` cache, regenerated the
+  build tree, compiled all 433 native/QML-cache steps, linked, deployed the Qt
+  runtime, and exited 0.
+
+High-confidence findings queued for the next checkpoints include strict and
+single-shot download-size enforcement, hostile Wiki export manifests, transitive
+CI action pinning, transfer selection after proxy sorting, and global shortcuts
+while a text editor owns focus. Each remains uncommitted until its own fix and
+targeted proof are complete.
+
 ## 2026-08-01 — Windows Default Apps parity
 
 The Behavior page now exposes upstream qBittorrent's Windows file-association

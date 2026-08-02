@@ -132,7 +132,7 @@ Dialog {
                         spacing: Spacing.lg
 
                         Image {
-                            source: "qrc:/branding/logo-mark.svg"
+                            source: "qrc:/branding/logo-mark.png"
                             sourceSize.width: 64
                             sourceSize.height: 64
                             fillMode: Image.PreserveAspectFit

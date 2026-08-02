@@ -43,13 +43,13 @@ namespace
         switch (style)
         {
         case ThemeManager::Normal:
-            return u":/branding/logo-mark.svg"_qs;
+            return u":/branding/logo-mark.png"_qs;
         case ThemeManager::Monochrome:
         default:
             // Legacy profiles may retain the historic dark-monochrome value
             // (2). Treat every non-normal value as monochrome so their tray
             // artwork remains visually compatible.
-            return u":/branding/logo-monochrome.svg"_qs;
+            return u":/branding/logo-monochrome.png"_qs;
         }
     }
 }

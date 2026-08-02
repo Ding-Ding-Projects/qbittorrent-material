@@ -118,6 +118,12 @@ $requiredDesktopFiles = @(
     "src/quick/qml/shell/SettingsSheet.qml",
     "src/quick/qml/workspace/WorkspaceSearchPanel.qml",
     "src/quick/qml/workspace/WorkspaceTabStrip.qml",
+    "resources/branding/logo-mark.png",
+    "resources/branding/logo-monochrome.png",
+    "resources/branding/logo-horizontal.png",
+    "resources/branding/qbittorrent-material.ico",
+    "resources/branding/qbittorrent-material.rc",
+    "docs/assets/logo-mark.png",
     "resources/experience/changelog.json",
     "resources/experience/dim-sum.json"
 )
@@ -189,6 +195,8 @@ if ($null -ne $changelog) {
         "the changelog preserves the canonical 34-release history$($missingHistoricalVersions -join ', ')"
     Test-Policy ((@($releaseList.version | Sort-Object -Unique)).Count -eq $releaseList.Count) `
         "changelog release versions are unique"
+    Test-Policy ($releaseVersions -contains "build-49-6bc2b3f5") `
+        "the changelog is current through the compact-filter completion commit"
 
     foreach ($release in $releaseList) {
         $releaseDate = [DateTime]::MinValue
@@ -203,6 +211,16 @@ if ($null -ne $changelog) {
             -and @($release.changes).Count -gt 0 `
             -and $dateValid
         Test-Policy $complete "changelog entry '$($release.version)' has a date, title, and change list"
+
+        $commit = [string] $release.commit
+        $commitFormatValid = $commit -match '^[0-9a-f]{40}$'
+        Test-Policy $commitFormatValid `
+            "changelog entry '$($release.version)' carries a full lowercase commit SHA"
+        if ($commitFormatValid) {
+            $commitType = & git -C $RepositoryRoot cat-file -t $commit 2>$null
+            Test-Policy (($LASTEXITCODE -eq 0) -and ($commitType -eq "commit")) `
+                "changelog entry '$($release.version)' references an existing Git commit"
+        }
     }
 }
 
@@ -262,9 +280,57 @@ foreach ($filterPanel in @(
         "$filterPanel bounds and elides long translated labels"
 }
 
+$changelogQml = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/dialogs/ChangelogPage.qml")
+$experienceSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/controllers/experiencecontroller.cpp")
+Test-Policy ($changelogQml -match 'entry\.commit' `
+        -and $changelogQml -match 'Qt\.openUrlExternally\(root\.commitBaseUrl \+ commitId\)' `
+        -and $changelogQml -match 'Accessible\.name:\s*qsTr\("Open commit %1"\)') `
+    "the changelog exposes each source commit as an accessible link"
+Test-Policy ($experienceSource -match 'Commit:\s*\[%1\]\(%2%1\)' `
+        -and $experienceSource -match 'kCommitBaseUrl') `
+    "copied and exported changelog Markdown preserves full commit links"
+
+Test-DecodablePng "resources/branding/logo-mark.png"
+Test-DecodablePng "resources/branding/logo-monochrome.png"
+Test-DecodablePng "resources/branding/logo-horizontal.png"
+Test-DecodablePng "docs/assets/logo-mark.png"
+
+$applicationSource = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/app/application.cpp")
+$desktopIntegrationSource = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/app/desktopintegration.cpp")
+$appCMake = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/CMakeLists.txt")
+Test-Policy ($applicationSource -match ':/branding/logo-mark\.png') `
+    "the global window icon uses the canonical raster mark"
+Test-Policy ($desktopIntegrationSource -match ':/branding/logo-mark\.png' `
+        -and $desktopIntegrationSource -match ':/branding/logo-monochrome\.png') `
+    "normal and monochrome tray modes use the current product mark"
+Test-Policy ($appCMake -match 'qbittorrent-material\.rc') `
+    "the Windows executable embeds the multi-resolution product icon"
+
 $transfersPage = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/shell/TransfersPage.qml")
 Test-Policy ($transfersPage -match 'enabled:\s*TransferController\.selectionCount\s*>\s*0') `
     "selection-only Split Dock actions expose their disabled state"
+
+$transferFilterProxyHeader = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/models/torrentfilterproxymodel.h")
+$transferFilterProxySource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/models/torrentfilterproxymodel.cpp")
+$transferListView = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/transferlist/TransferListView.qml")
+Test-Policy ($transferFilterProxyHeader -match 'Q_PROPERTY\(int textFilterColumn') `
+    "the transfer proxy exposes its selected text-filter column"
+Test-Policy ($transferFilterProxySource -match 'TR_NAME' `
+        -and $transferFilterProxySource -match 'TR_SAVE_PATH' `
+        -and $transferFilterProxySource -match 'infoHash\(\)\.v1\(\)\.toString\(\)' `
+        -and $transferFilterProxySource -match 'infoHash\(\)\.v2\(\)\.toString\(\)') `
+    "transfer filtering covers name, save path, and both info-hash generations"
+Test-Policy ($transferListView -match 'text:\s*qsTr\("Filter by:"\)' `
+        -and $transferListView -match 'TransferListModel\.TR_NAME' `
+        -and $transferListView -match 'TransferListModel\.TR_SAVE_PATH' `
+        -and $transferListView -match 'TransferListModel\.TR_INFOHASH_V1' `
+        -and $transferListView -match 'TransferListModel\.TR_INFOHASH_V2') `
+    "the transfer toolbar offers all upstream desktop filter-by choices"
 
 $workflowPath = Get-RepositoryPath ".github/workflows/release-every-push.yml"
 Test-Policy (Test-Path -LiteralPath $workflowPath -PathType Leaf) "the push release workflow exists"

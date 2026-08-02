@@ -3,8 +3,14 @@
 ## Behavior
 
 The About surface includes an offline changelog tab. Its bundled catalog
-contains the 34 existing releases, including explicit “no detailed changes
-recorded” entries where no factual changelog was available.
+contains the complete existing release history, including explicit “no
+detailed changes recorded” entries where no factual changelog was available.
+
+Every entry carries the full commit SHA that completed it. The short commit
+button opens that exact revision in the project's source repository, exposes
+the complete identifier to assistive technology, and is included as a Markdown
+link in copied and exported views. Commit identity remains factual in every
+language and funny level.
 
 Search and date range are one composed filter. Text search is plain text by
 default and can opt into Qt `QRegularExpression` (PCRE2). Flags are validated
@@ -46,16 +52,17 @@ validation and match/depth safeguards.
 
 ## Verification
 
-- `scripts/test-desktop-policy.ps1` validates the catalog JSON, checks at least
-  34 uniquely versioned entries, and requires a date, title, and non-empty
-  change list for every entry.
+- `scripts/test-desktop-policy.ps1` validates the catalog JSON, preserves the
+  canonical 34-release baseline, requires a date, title, non-empty change list,
+  and full 40-character SHA for every entry, and asks Git to prove each SHA is
+  an existing commit. It also checks the viewer and Markdown-export wiring.
 - The integrated Windows build passed, and the real capture path rendered the
   changelog surface after runtime integration fixes.
 - Acceptance should combine a date preset with plain text, repeat with regex,
   exercise invalid and partial dates, verify the honest empty state, and compare
   copied/exported output with the visible filtered list.
-- New releases must add factual catalog entries in a later app build; the
-  current build does not query GitHub at runtime.
+- Project-changing tasks add factual catalog entries when their completing
+  commit exists; the current build does not query GitHub at runtime.
 
 ## Related articles
 

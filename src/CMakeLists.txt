@@ -106,6 +106,14 @@ qt_add_executable(qbittorrent WIN32 MACOSX_BUNDLE
     "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp"
 )
 
+if (WIN32)
+    # Embed the product mark in qbittorrent.exe so Explorer, shortcuts, file
+    # associations, and the NSIS installer all display the same identity.
+    target_sources(qbittorrent PRIVATE
+        "${CMAKE_SOURCE_DIR}/resources/branding/qbittorrent-material.rc"
+    )
+endif()
+
 target_include_directories(qbittorrent PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/quick"
@@ -192,6 +200,7 @@ else()
         "${QBT_RES_ROOT}/fonts/*.ttf"
         "${QBT_RES_ROOT}/fonts/*.otf"
         "${QBT_RES_ROOT}/branding/*.svg"
+        "${QBT_RES_ROOT}/branding/*.png"
         "${QBT_RES_ROOT}/icons/flags/*.svg"
         "${QBT_RES_ROOT}/icons/flags/*.png"
         "${QBT_RES_ROOT}/icons/tray/*.svg"

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="resources/branding/logo-horizontal.svg" width="620" alt="qBittorrent Material">
+  <img src="resources/branding/logo-horizontal.png" width="620" alt="qBittorrent Material">
 </p>
 
 <p align="center">

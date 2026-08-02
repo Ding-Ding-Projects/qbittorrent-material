@@ -11,8 +11,8 @@
       :/experience/changelog.json           (offline in-app release history)
       :/experience/dim-sum.json             (startup delight catalog)
       :/dim-sum/*.png                       (bundled startup delight photos)
-      :/branding/logo-mark.svg              (window and normal tray artwork)
-      :/branding/logo-monochrome.svg        (monochrome tray artwork)
+      :/branding/logo-mark.png              (window and normal tray artwork)
+      :/branding/logo-monochrome.png        (monochrome tray artwork)
       :/html/gpl.html                       (About dialog license text)
 
   NOTE: By default the build does NOT compile this file verbatim — it uses a
@@ -35,8 +35,8 @@
         <file alias="dim-sum/har-gow.png">dim-sum/har-gow.png</file>
         <file alias="dim-sum/siu-mai.png">dim-sum/siu-mai.png</file>
         <file alias="dim-sum/egg-tart.png">dim-sum/egg-tart.png</file>
-        <file alias="branding/logo-mark.svg">branding/logo-mark.svg</file>
-        <file alias="branding/logo-monochrome.svg">branding/logo-monochrome.svg</file>
+        <file alias="branding/logo-mark.png">branding/logo-mark.png</file>
+        <file alias="branding/logo-monochrome.png">branding/logo-monochrome.png</file>
         <file alias="html/gpl.html">html/gpl.html</file>
     </qresource>
 </RCC>

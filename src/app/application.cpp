@@ -139,7 +139,7 @@ Application::Application(int &argc, char **argv)
     setApplicationVersion(QCoreApplication::applicationVersion().isEmpty()
             ? u"5.3.0-material"_qs : QCoreApplication::applicationVersion());
     setApplicationDisplayName(u"qBittorrent"_qs);
-    const QIcon brandIcon(u":/branding/logo-mark.svg"_qs);
+    const QIcon brandIcon(u":/branding/logo-mark.png"_qs);
     if (!brandIcon.isNull())
         setWindowIcon(brandIcon);
     else

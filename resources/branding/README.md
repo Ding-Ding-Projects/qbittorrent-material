@@ -1,58 +1,45 @@
 # qBittorrent Material brand assets
 
-This directory contains the original visual identity for the Material desktop
-rewrite. The mark combines three product ideas in one compact shape:
-
-- the white circular bowl and descending stroke form a lowercase **q**;
-- the cyan center arrow expresses **download motion**;
-- three cyan points represent **connected peers**.
-
-The artwork was created specifically for this project and does not reuse the
-official qBittorrent logo or third-party artwork.
+The product mark is a rounded cyan and deep-blue lowercase **q** whose tail
+becomes a download arrow. It was created specifically for this project and is
+distributed under `GPL-3.0-or-later` with the rest of the source tree.
 
 ## Files
 
 | Asset | Best use |
 | --- | --- |
-| `logo-mark.svg` | App icon, favicon, social avatar, compact navigation |
-| `logo-horizontal.svg` | Hero areas, repository headers, release pages |
-| `logo-monochrome.svg` | Single-color printing, embossing, symbolic UI |
+| `logo-mark.png` | Canonical 1024 px transparent app mark, window icon, normal tray icon, PWA icon, and compact navigation |
+| `logo-monochrome.png` | Ink-color silhouette for the monochrome tray preference |
+| `logo-horizontal.png` | Repository and release-page header lockup |
+| `qbittorrent-material.ico` | Multi-resolution Windows executable, shortcut, association, and installer icon |
+| `qbittorrent-material.rc` | Windows resource declaration consumed by CMake |
 
-The documentation site keeps a byte-for-byte copy of `logo-mark.svg` at
-`docs/assets/logo-mark.svg`, allowing GitHub Pages to serve it without coupling
-the site to the application resource path.
-
-## Palette
-
-| Token | Value | Purpose |
-| --- | --- | --- |
-| Primary indigo | `#4F46E5` | Core Material identity |
-| Deep indigo | `#4338CA` | Gradient depth |
-| Cyan | `#0891B2` | Gradient destination |
-| Bright cyan | `#67E8F9` | Motion and peer accents |
-| Ink | `#172554` | Monochrome default |
-| White | `#FFFFFF` | High-contrast q silhouette |
+The documentation site keeps a copy of the canonical mark at
+`docs/assets/logo-mark.png`, allowing GitHub Pages and the PWA manifest to serve
+the same identity as the desktop application.
 
 ## Usage rules
 
-- Keep clear space around the mark equal to at least one node diameter.
-- Use the full-color mark at **24 CSS pixels or larger**. At smaller sizes, use
-  the monochrome asset so the peer nodes remain crisp.
-- Do not rotate, stretch, recolor individual pieces, or remove the q tail.
-- The full-color mark is light/dark safe because its contrast surface is part
-  of the asset. The horizontal lockup also carries its own dark surface.
-- `logo-monochrome.svg` uses `currentColor`; set CSS `color` on the embedded SVG
-  when a different one-color treatment is needed.
-- Preserve the SVG `<title>` and `<desc>` when embedding inline. When the logo
-  is decorative, use an empty HTML `alt` attribute to avoid duplicate labels.
+- Preserve the transparent clear space around the mark; do not crop to the
+  painted bounds.
+- Use the full-color mark at 24 CSS pixels or larger. Prefer the monochrome
+  asset for constrained one-color system surfaces.
+- Do not rotate, stretch, or recolor individual parts of the mark.
+- When the mark is decorative, use an empty HTML `alt` attribute to avoid a
+  duplicate accessible name next to the visible product wordmark.
 
-## Qt resource path
+## Runtime resource paths
 
-The application bundles the mark at `:/branding/logo-mark.svg`. Qt uses it as
-the global window icon and as the system-tray fallback when platform-specific
-tray artwork is unavailable.
+The application bundles the normal mark at `:/branding/logo-mark.png` and the
+monochrome treatment at `:/branding/logo-monochrome.png`. Qt uses them for the
+global window icon and system tray. On Windows, the resource compiler also
+embeds `qbittorrent-material.ico` into the executable, which makes the same mark
+available to Explorer, Start-menu shortcuts, file associations, and NSIS.
 
-## Licensing
+## Source and reproducibility
 
-These assets are distributed with the project under
-`GPL-3.0-or-later`, consistent with the repository source.
+The canonical raster was produced from the project-owned generated artwork by
+removing its solid chroma background, fitting the visible mark inside a 1024 px
+transparent canvas, and preserving a clear-space margin. The horizontal,
+monochrome, documentation, and ICO variants are deterministic mechanical
+derivatives of that canonical raster.

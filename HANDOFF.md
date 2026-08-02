@@ -1,5 +1,16 @@
 # Handoff
 
+## 2026-08-01 — verifiable changelog history
+
+The offline changelog now carries the full source commit for every historical
+entry and the compact-filter fix. Each entry exposes an accessible short commit
+button that opens the exact repository revision; copy and Markdown export keep
+the full SHA and link so traceability survives outside the app. Desktop policy
+checks require a 40-character identifier, prove every referenced object is a
+real local Git commit, and cover the viewer and export wiring. No commit was
+guessed: the current entry points to the existing compact-filter completion
+commit `6bc2b3f54e88622d48f724d616d93a72d94d0c64`.
+
 ## 2026-07-30 — desktop experience, Workspace, appearance, and delivery
 
 The current tree adds the cross-app language/funny-level controls, persistent
@@ -109,3 +120,33 @@ The Split Dock Start, Stop, and Remove toolbar actions now disable when no
 torrent is selected instead of appearing actionable and silently doing nothing.
 The Add torrent action remains available. Desktop policy assertions cover the
 scrollbar reservation, bounded labels, and selection-dependent action state.
+
+## 2026-08-01 — unified application logo
+
+The generated cyan/deep-blue q-and-download mark is now the canonical desktop
+and documentation identity. Its magenta key was removed into a transparent
+1024 px PNG with preserved clear space. Deterministic derivatives provide the
+monochrome tray treatment, README lockup, documentation/PWA mark, and a
+seven-size Windows ICO embedded directly in the executable for Explorer,
+shortcuts, file associations, and NSIS.
+
+Verification:
+
+- Alpha inspection confirmed transparent and opaque pixels in both canonical
+  mark copies, with visible bounds safely inside the 1024 px canvas.
+- Pillow decoded all PNG assets and confirmed ICO frames at 16, 24, 32, 48,
+  64, 128, and 256 px.
+- `scripts/test-desktop-policy.ps1` passed all 136 checks, including canonical
+  runtime paths and Windows resource embedding.
+
+## 2026-08-01 — transfer filter-by parity
+
+The transfer toolbar now mirrors upstream desktop field selection for Name,
+Save path, Info hash v1, and Info hash v2. Existing case-insensitive wildcard
+and Qt regular-expression behavior is preserved and reapplied immediately when
+the selected field changes. Partial hash prefixes work independently for v1,
+v2, and hybrid torrents without weakening the active status/sidebar filters.
+
+Desktop policy coverage requires the four choices and both hash-generation
+branches. The feature article records local-only behavior, empty-hash behavior,
+and the remaining runtime acceptance matrix.

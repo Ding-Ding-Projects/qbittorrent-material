@@ -170,9 +170,9 @@ $wikiAppImages = Join-Path $wikiImages "app"
 $wikiSiteImages = Join-Path $wikiImages "site"
 New-Item -ItemType Directory -Force -Path $wikiAppImages | Out-Null
 New-Item -ItemType Directory -Force -Path $wikiSiteImages | Out-Null
-Copy-Item -LiteralPath (Join-Path $docsRoot "assets\logo-mark.svg") `
-    -Destination (Join-Path $wikiImages "logo-mark.svg") -Force
-$generatedPaths.Add("images/logo-mark.svg")
+Copy-Item -LiteralPath (Join-Path $docsRoot "assets\logo-mark.png") `
+    -Destination (Join-Path $wikiImages "logo-mark.png") -Force
+$generatedPaths.Add("images/logo-mark.png")
 Get-ChildItem -LiteralPath (Join-Path $docsRoot "images\app") -File |
     ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $wikiAppImages $_.Name) -Force

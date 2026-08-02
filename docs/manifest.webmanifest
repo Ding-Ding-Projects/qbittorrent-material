@@ -15,15 +15,15 @@
   "categories": ["developer", "documentation", "utilities"],
   "icons": [
     {
-      "src": "assets/logo-mark.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "assets/logo-mark.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "assets/logo-mark.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "assets/logo-mark.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
       "purpose": "maskable"
     }
   ],
@@ -168,14 +168,14 @@
       "short_name": "Search",
       "description": "Open the complete searchable project wiki",
       "url": "./#wiki",
-      "icons": [{ "src": "assets/logo-mark.svg", "sizes": "any", "type": "image/svg+xml" }]
+      "icons": [{ "src": "assets/logo-mark.png", "sizes": "1024x1024", "type": "image/png" }]
     },
     {
       "name": "Screenshot gallery",
       "short_name": "Gallery",
       "description": "Explore every documented application view",
       "url": "./#gallery",
-      "icons": [{ "src": "assets/logo-mark.svg", "sizes": "any", "type": "image/svg+xml" }]
+      "icons": [{ "src": "assets/logo-mark.png", "sizes": "1024x1024", "type": "image/png" }]
     }
   ]
 }

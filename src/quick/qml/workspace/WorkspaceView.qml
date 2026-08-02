@@ -121,7 +121,7 @@ Item {
                 spacing: Spacing.md
 
                 Image {
-                    source: "qrc:/branding/logo-mark.svg"
+                    source: "qrc:/branding/logo-mark.png"
                     sourceSize.width: 34
                     sourceSize.height: 34
                     Layout.preferredWidth: 34

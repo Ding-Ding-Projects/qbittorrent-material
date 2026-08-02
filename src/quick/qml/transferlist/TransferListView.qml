@@ -321,7 +321,8 @@ Item {
 
                 FilterTextField {
                     id: filterField
-                    Layout.preferredWidth: 360
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 300
                     Layout.maximumWidth: 480
                     placeholder: qsTr("Filter torrent list")
                     Component.onCompleted: {
@@ -333,7 +334,7 @@ Item {
                     onTextChanged: {
                         if (!view.proxy)
                             return;
-                        Log.debug("ui", "Transfer name filter -> '" + text + "'");
+                        Log.debug("ui", "Transfer column filter -> '" + text + "'");
                         view.proxy.textFilter = text;
                     }
                     onRegexEnabledChanged: {
@@ -341,6 +342,42 @@ Item {
                             return;
                         Log.debug("ui", "Transfer name filter regex -> " + regexEnabled);
                         view.proxy.useRegex = regexEnabled;
+                    }
+                }
+
+                Label {
+                    text: qsTr("Filter by:")
+                    font: Typography.labelLarge
+                    color: Theme.color("onSurfaceVariant")
+                }
+
+                ComboBox {
+                    id: filterColumnCombo
+                    Layout.preferredWidth: 150
+                    implicitHeight: Spacing.controlHeight
+                    textRole: "label"
+                    valueRole: "column"
+                    model: [
+                        { label: qsTr("Name"), column: TransferListModel.TR_NAME },
+                        { label: qsTr("Save path"), column: TransferListModel.TR_SAVE_PATH },
+                        { label: qsTr("Info hash v1"), column: TransferListModel.TR_INFOHASH_V1 },
+                        { label: qsTr("Info hash v2"), column: TransferListModel.TR_INFOHASH_V2 }
+                    ]
+                    Component.onCompleted: {
+                        if (!view.proxy)
+                            return
+                        for (let index = 0; index < model.length; ++index) {
+                            if (model[index].column === view.proxy.textFilterColumn) {
+                                currentIndex = index
+                                break
+                            }
+                        }
+                    }
+                    onActivated: (index) => {
+                        if (!view.proxy || index < 0)
+                            return
+                        view.proxy.textFilterColumn = model[index].column
+                        Log.debug("ui", "Transfer filter column -> " + model[index].label)
                     }
                 }
 

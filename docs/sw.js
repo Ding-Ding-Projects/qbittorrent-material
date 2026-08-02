@@ -8,7 +8,7 @@ const APP_SHELL = [
   "./assets/site.css",
   "./assets/site.js",
   "./assets/search-worker.js",
-  "./assets/logo-mark.svg",
+  "./assets/logo-mark.png",
   "./manifest.webmanifest",
   "./images/app/01-main-window.png",
   "./images/app/02-toolbar-and-filter.png",

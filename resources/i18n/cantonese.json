@@ -1988,5 +1988,9 @@
   "µTP-TCP mixed mode algorithm": "µTP-TCP 溝埋模式演算法",
   "µTorrent compatible list URL:": "µTorrent 相容清單網址:",
   "μTP": "μTP",
-  "∞": "∞"
+  "∞": "∞",
+  "Open commit %1": "開啟提交 %1",
+  "Opens the source commit for this changelog entry": "開啟呢項更新紀錄對應嘅原始碼提交",
+  "qBittorrent Material build #49 (6bc2b3f5)": "qBittorrent Material build #49 (6bc2b3f5)",
+  "Fixed compact filter controls, maximum-playfulness bilingual clipping, and selection-dependent Split Dock actions.": "修正咗緊湊篩選控制、最高玩味雙語文字攝位，同埋 Split Dock 動作依選取狀態啟用。"
 }

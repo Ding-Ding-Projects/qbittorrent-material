@@ -189,6 +189,34 @@ void TorrentFilterProxyModel::setTextFilter(const QString &text)
     emit filterChanged();
 }
 
+int TorrentFilterProxyModel::textFilterColumn() const
+{
+    return m_textFilterColumn;
+}
+
+void TorrentFilterProxyModel::setTextFilterColumn(const int column)
+{
+    switch (column)
+    {
+    case TransferListModel::TR_NAME:
+    case TransferListModel::TR_SAVE_PATH:
+    case TransferListModel::TR_INFOHASH_V1:
+    case TransferListModel::TR_INFOHASH_V2:
+        break;
+    default:
+        qCWarning(lcModel) << "TorrentFilterProxyModel: unsupported text filter column" << column;
+        return;
+    }
+
+    if (m_textFilterColumn == column)
+        return;
+
+    m_textFilterColumn = column;
+    qCDebug(lcModel) << "TorrentFilterProxyModel: text filter column ->" << column;
+    invalidateFilter();
+    emit filterChanged();
+}
+
 bool TorrentFilterProxyModel::useRegex() const
 {
     return m_useRegex;
@@ -223,7 +251,26 @@ bool TorrentFilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex 
         return false;
 
     if (!m_textPattern.isEmpty() && m_regex.isValid())
-        return m_regex.match(torrent->name()).hasMatch();
+    {
+        QString candidate;
+        switch (m_textFilterColumn)
+        {
+        case TransferListModel::TR_SAVE_PATH:
+            candidate = torrent->savePath().toString();
+            break;
+        case TransferListModel::TR_INFOHASH_V1:
+            candidate = torrent->infoHash().v1().toString();
+            break;
+        case TransferListModel::TR_INFOHASH_V2:
+            candidate = torrent->infoHash().v2().toString();
+            break;
+        case TransferListModel::TR_NAME:
+        default:
+            candidate = torrent->name();
+            break;
+        }
+        return m_regex.match(candidate).hasMatch();
+    }
 
     return true;
 }

@@ -26,7 +26,8 @@
  *        @c TransferListModel driving the visible transfer list.
  *
  * Holds a @ref TorrentFilter (status + category + tag + tracker host + announce
- * status + id set + private) plus a free-text name filter (wildcard or regex).
+ * status + id set + private) plus a selectable free-text column filter
+ * (wildcard or regex).
  * Implements a natural, type-aware two-level sort: the active sort column plus a
  * remembered previous column as the tie-breaker (matching legacy qBittorrent's
  * `TransferListSortModel`).
@@ -43,6 +44,7 @@ class TorrentFilterProxyModel : public QSortFilterProxyModel
     Q_PROPERTY(QString tagFilter READ tagFilter WRITE setTagFilter NOTIFY filterChanged)
     Q_PROPERTY(QString trackerFilter READ trackerFilter WRITE setTrackerFilter NOTIFY filterChanged)
     Q_PROPERTY(QString textFilter READ textFilter WRITE setTextFilter NOTIFY filterChanged)
+    Q_PROPERTY(int textFilterColumn READ textFilterColumn WRITE setTextFilterColumn NOTIFY filterChanged)
     Q_PROPERTY(bool useRegex READ useRegex WRITE setUseRegex NOTIFY filterChanged)
     Q_PROPERTY(int count READ rowCount NOTIFY countChanged)
 
@@ -60,6 +62,8 @@ public:
     void setTrackerFilter(const QString &trackerHost);
     [[nodiscard]] QString textFilter() const;
     void setTextFilter(const QString &text);
+    [[nodiscard]] int textFilterColumn() const;
+    void setTextFilterColumn(int column);
     [[nodiscard]] bool useRegex() const;
     void setUseRegex(bool enabled);
 
@@ -93,6 +97,7 @@ private:
 
     TorrentFilter m_filter;
     QString m_textPattern;
+    int m_textFilterColumn = 1;    ///< TransferListModel::TR_NAME by default
     bool m_useRegex = false;
     QRegularExpression m_regex;
 

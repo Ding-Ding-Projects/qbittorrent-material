@@ -33,6 +33,7 @@ namespace
     const QString kDimSumEnabledKey = u"Experience/DimSumSurpriseEnabled"_s;
     const QString kFirstRunCompleteKey = u"Experience/FirstRunCompleted"_s;
     const QString kRegexSafetyPrefix = u"(*LIMIT_MATCH=100000)(*LIMIT_DEPTH=1000)(?:"_s;
+    const QString kCommitBaseUrl = u"https://github.com/Ding-Ding-Projects/qbittorrent-material/commit/"_s;
 
     QDate parseUserDate(const QString &text)
     {
@@ -221,12 +222,13 @@ QVariantMap ExperienceController::filterChangelog(const QString &query, const bo
         if (to.isValid() && date.isValid() && date > to)
             continue;
         const QString title = entry.value(u"title"_s).toString();
+        const QString commit = entry.value(u"commit"_s).toString();
         const QStringList changes = entry.value(u"changes"_s).toStringList();
         QStringList localizedChanges;
         for (const QString &change : changes)
             localizedChanges.append(m_cantoneseCatalog.value(change).toString());
         const QString searchable = entry.value(u"version"_s).toString() + u'\n'
-            + title + u'\n' + changes.join(u'\n') + u'\n'
+            + title + u'\n' + commit + u'\n' + changes.join(u'\n') + u'\n'
             + m_cantoneseCatalog.value(title).toString() + u'\n'
             + localizedChanges.join(u'\n');
         if (!boundedQuery.isEmpty())
@@ -324,6 +326,9 @@ QString ExperienceController::markdownFor(const QVariantList &entries)
         const QVariantMap entry = value.toMap();
         output += u"## %1 — %2\n\n"_s.arg(entry.value(u"version"_s).toString(),
             entry.value(u"date"_s).toString());
+        const QString commit = entry.value(u"commit"_s).toString();
+        if (!commit.isEmpty())
+            output += u"Commit: [%1](%2%1)\n\n"_s.arg(commit, kCommitBaseUrl);
         const QString title = entry.value(u"title"_s).toString();
         if (!title.isEmpty()) output += title + u"\n\n"_s;
         const QStringList changes = entry.value(u"changes"_s).toStringList();

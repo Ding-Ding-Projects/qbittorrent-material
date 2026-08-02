@@ -14,6 +14,8 @@ import qBittorrent
 Item {
     id: root
 
+    readonly property string commitBaseUrl: "https://github.com/Ding-Ding-Projects/qbittorrent-material/commit/"
+
     readonly property var filterResult: Experience.filterChangelog(
         changelogSearch.text, changelogSearch.regexEnabled, changelogSearch.regexFlags,
         fromDate.text, toDate.text)
@@ -36,6 +38,7 @@ Item {
             localized.push({
                 "version": entry.version,
                 "date": entry.date,
+                "commit": entry.commit,
                 "title": I18n.t(entry.title),
                 "changes": changes
             })
@@ -198,6 +201,16 @@ Item {
                             font: Typography.titleMedium
                             color: Theme.color("onSurface")
                             elide: Text.ElideRight
+                        }
+                        Button {
+                            readonly property string commitId: releaseCard.modelData.commit || ""
+                            visible: commitId.length === 40
+                            text: commitId.substring(0, 8)
+                            flat: true
+                            font: Typography.labelMedium
+                            Accessible.name: qsTr("Open commit %1").arg(commitId)
+                            Accessible.description: qsTr("Opens the source commit for this changelog entry")
+                            onClicked: Qt.openUrlExternally(root.commitBaseUrl + commitId)
                         }
                         Label {
                             text: releaseCard.modelData.date

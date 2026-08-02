@@ -313,6 +313,7 @@ if ($null -eq $VcDir -or $VcDir.Name -ine 'VC' -or $null -eq $VcDir.Parent) {
 $env:VCPKG_VISUAL_STUDIO_PATH = $VcDir.Parent.FullName
 Info "Pinning vcpkg to the selected Visual Studio: $env:VCPKG_VISUAL_STUDIO_PATH"
 Import-VcVars $vcvars
+$env:VCPKG_ROOT = $VcpkgRoot
 
 Ensure-Tool 'git' 'Git.Git' 'Git'
 Ensure-Tool 'cmake' 'Kitware.CMake' 'CMake'
@@ -376,10 +377,12 @@ if ($Package) {
 
 # Ensure Qt runtime DLLs are next to the exe for a portable run.
 $windeployqt = Join-Path $QtPrefix 'bin\windeployqt.exe'
-if (Test-Path $windeployqt) {
-    Info "Deploying Qt runtime (windeployqt)..."
-    & $windeployqt --qmldir "$Repo\src\quick\qml" --release "$($exe.FullName)" | Out-Null
+if (-not (Test-Path -LiteralPath $windeployqt -PathType Leaf)) {
+    Die "Qt deployment tool not found: $windeployqt"
 }
+Info "Deploying Qt runtime (windeployqt)..."
+& $windeployqt --qmldir "$Repo\src\quick\qml" --release "$($exe.FullName)" | Out-Null
+if ($LASTEXITCODE -ne 0) { Die "Qt runtime deployment failed." }
 
 if ($NoRun) {
     Info "Done (build only). Run it with: `"$($exe.FullName)`""

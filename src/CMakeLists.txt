@@ -242,10 +242,27 @@ install(TARGETS qbittorrent
 # install/package time, including the Qt libraries, plugins, QML imports, and
 # compiler runtime needed by the application. Third-party engine libraries are
 # linked statically through the x64-windows-static-md vcpkg triplet.
+set(_qbt_qt_deploy_tool_options)
+if (WIN32)
+    # windeployqt deploys the default qwindows platform plugin, but the release
+    # smoke test also launches with QT_QPA_PLATFORM=offscreen. Include that
+    # non-default plugin explicitly and keep single-config installs aligned with
+    # the target binary so a Release package cannot pick qoffscreend.dll.
+    list(APPEND _qbt_qt_deploy_tool_options --include-plugins qoffscreen)
+    if (NOT CMAKE_CONFIGURATION_TYPES)
+        if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+            list(APPEND _qbt_qt_deploy_tool_options --debug)
+        else()
+            list(APPEND _qbt_qt_deploy_tool_options --release)
+        endif()
+    endif()
+endif()
+
 qt_generate_deploy_qml_app_script(
     TARGET qbittorrent
     OUTPUT_SCRIPT qbt_deploy_script
     NO_UNSUPPORTED_PLATFORM_ERROR
     DEPLOY_USER_QML_MODULES_ON_UNSUPPORTED_PLATFORM
+    DEPLOY_TOOL_OPTIONS ${_qbt_qt_deploy_tool_options}
 )
 install(SCRIPT "${qbt_deploy_script}")

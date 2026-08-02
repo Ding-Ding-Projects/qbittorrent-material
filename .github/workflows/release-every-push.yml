@@ -123,8 +123,16 @@ jobs:
         with:
           arch: x64
 
+      # The install-qt wrapper action delegates through mutable @v6/@v4 tags.
+      # Invoke its internal action directly after pinning Python ourselves so
+      # every downloaded action in this write-capable release job is immutable.
+      - name: Set up Python for the Qt installer
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+
       - name: Install Qt
-        uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4
+        uses: jurplel/install-qt-action/action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4
         with:
           version: "6.8.3"
           host: windows
@@ -193,12 +201,25 @@ jobs:
           $installedExe = Join-Path $smokeRoot "bin/qbittorrent.exe"
           # Qt's CMake deployment API keeps plugins at the install prefix,
           # beside bin/, rather than nesting them under the executable folder.
-          $platformPlugin = Join-Path $smokeRoot "plugins/platforms/qwindows.dll"
+          $platformPluginRoot = Join-Path $smokeRoot "plugins/platforms"
+          $windowsPlatformPlugin = Join-Path $platformPluginRoot "qwindows.dll"
+          $offscreenPlatformPlugin = Join-Path $platformPluginRoot "qoffscreen.dll"
+          $debugPlatformPlugins = @(
+            Join-Path $platformPluginRoot "qwindowsd.dll"
+            Join-Path $platformPluginRoot "qoffscreend.dll"
+          )
           if (-not (Test-Path -LiteralPath $installedExe)) {
             throw "Installed executable is missing: $installedExe"
           }
-          if (-not (Test-Path -LiteralPath $platformPlugin)) {
-            throw "Qt platform plugin is missing: $platformPlugin"
+          foreach ($platformPlugin in @($windowsPlatformPlugin, $offscreenPlatformPlugin)) {
+            if (-not (Test-Path -LiteralPath $platformPlugin)) {
+              throw "Qt platform plugin is missing: $platformPlugin"
+            }
+          }
+          foreach ($debugPlatformPlugin in $debugPlatformPlugins) {
+            if (Test-Path -LiteralPath $debugPlatformPlugin) {
+              throw "Debug Qt platform plugin leaked into Release package: $debugPlatformPlugin"
+            }
           }
 
           $gitExecutable = (Get-Command git.exe -CommandType Application -ErrorAction Stop `
@@ -225,13 +246,52 @@ jobs:
           }
           $env:QBT_WORKSPACE_ROOT = $workspaceRoot
           $env:QT_QPA_PLATFORM = "offscreen"
-          $process = Start-Process -FilePath $installedExe -PassThru
-          Start-Sleep -Seconds 10
-          if ($process.HasExited) {
-            throw "Installed application exited during smoke test with code $($process.ExitCode)."
+
+          $smokeLogRoot = Join-Path $env:RUNNER_TEMP "qbt-material-smoke-logs"
+          New-Item -ItemType Directory -Force -Path $smokeLogRoot | Out-Null
+          function Write-SmokeOutput($launch) {
+            foreach ($stream in @(
+              @{ Name = "stdout"; Path = $launch.Stdout },
+              @{ Name = "stderr"; Path = $launch.Stderr }
+            )) {
+              Write-Host "::group::$($launch.Label) $($stream.Name)"
+              if (Test-Path -LiteralPath $stream.Path) {
+                $content = Get-Content -Raw -LiteralPath $stream.Path
+                if ([string]::IsNullOrEmpty($content)) { Write-Host "<empty>" }
+                else { Write-Host $content }
+              }
+              else { Write-Host "<missing>" }
+              Write-Host "::endgroup::"
+            }
           }
-          Stop-Process -Id $process.Id -Force
-          $process.WaitForExit()
+          function Start-SmokeApplication([string] $label) {
+            $safeLabel = $label -replace '[^A-Za-z0-9_-]', '-'
+            $stdout = Join-Path $smokeLogRoot "$safeLabel.stdout.log"
+            $stderr = Join-Path $smokeLogRoot "$safeLabel.stderr.log"
+            Remove-Item -Force -LiteralPath $stdout, $stderr -ErrorAction SilentlyContinue
+            $process = Start-Process -FilePath $installedExe -PassThru `
+              -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+            Start-Sleep -Seconds 10
+            $launch = [pscustomobject]@{
+              Label = $label
+              Process = $process
+              Stdout = $stdout
+              Stderr = $stderr
+            }
+            if ($process.HasExited) {
+              Write-SmokeOutput $launch
+              throw "$label exited during smoke test with code $($process.ExitCode)."
+            }
+            return $launch
+          }
+          function Stop-SmokeApplication($launch) {
+            Stop-Process -Id $launch.Process.Id -Force
+            $launch.Process.WaitForExit()
+            Write-SmokeOutput $launch
+          }
+
+          $initialLaunch = Start-SmokeApplication "Installed application"
+          Stop-SmokeApplication $initialLaunch
 
           $workspaceJson = Join-Path $workspaceRoot "workspace.json"
           $workspaceGit = Join-Path $workspaceRoot ".git"
@@ -262,13 +322,8 @@ jobs:
           $orphanPath = Join-Path $workspaceRoot "tabs/$orphanId.md"
           [IO.File]::WriteAllText($orphanPath, $orphanContent, [Text.UTF8Encoding]::new($false))
 
-          $recoveryProcess = Start-Process -FilePath $installedExe -PassThru
-          Start-Sleep -Seconds 10
-          if ($recoveryProcess.HasExited) {
-            throw "Installed application exited during crash-recovery smoke test with code $($recoveryProcess.ExitCode)."
-          }
-          Stop-Process -Id $recoveryProcess.Id -Force
-          $recoveryProcess.WaitForExit()
+          $recoveryLaunch = Start-SmokeApplication "Crash-recovery application"
+          Stop-SmokeApplication $recoveryLaunch
 
           $recoveredState = Get-Content -Raw -LiteralPath $workspaceJson | ConvertFrom-Json
           $recoveredTabs = @($recoveredState.tabs)
@@ -293,13 +348,8 @@ jobs:
           $closedMetadata = $recoveredState | ConvertTo-Json -Depth 20
           [IO.File]::WriteAllText($workspaceJson, $closedMetadata, [Text.UTF8Encoding]::new($false))
 
-          $closeRecoveryProcess = Start-Process -FilePath $installedExe -PassThru
-          Start-Sleep -Seconds 10
-          if ($closeRecoveryProcess.HasExited) {
-            throw "Installed application exited during interrupted-close smoke test with code $($closeRecoveryProcess.ExitCode)."
-          }
-          Stop-Process -Id $closeRecoveryProcess.Id -Force
-          $closeRecoveryProcess.WaitForExit()
+          $closeRecoveryLaunch = Start-SmokeApplication "Interrupted-close application"
+          Stop-SmokeApplication $closeRecoveryLaunch
 
           $closedState = Get-Content -Raw -LiteralPath $workspaceJson | ConvertFrom-Json
           if (@($closedState.tabs).Count -ne 1 `

@@ -68,7 +68,7 @@ Menu {
         enabled: root.canCopy
         visible: root.matches(text)
         height: visible ? implicitHeight : 0
-        Accessible.keyShortcut: "Ctrl+C"
+        Accessible.description: qsTr("Keyboard shortcut Ctrl+C")
 
         contentItem: RowLayout {
             spacing: Spacing.sm

@@ -95,7 +95,8 @@ Menu {
         height: visible ? implicitHeight : 0
         leftPadding: 44
         rightPadding: 88
-        Accessible.keyShortcut: startShortcut.text
+        Accessible.description: startShortcut.text.length > 0
+            ? qsTr("Keyboard shortcut %1").arg(startShortcut.text) : ""
         MDIcon {
             icon: Icons.play_arrow; size: 18; x: Spacing.md
             anchors.verticalCenter: parent.verticalCenter
@@ -122,7 +123,8 @@ Menu {
         height: visible ? implicitHeight : 0
         leftPadding: 44
         rightPadding: 88
-        Accessible.keyShortcut: stopShortcut.text
+        Accessible.description: stopShortcut.text.length > 0
+            ? qsTr("Keyboard shortcut %1").arg(stopShortcut.text) : ""
         MDIcon {
             icon: Icons.pause; size: 18; x: Spacing.md
             anchors.verticalCenter: parent.verticalCenter
@@ -165,7 +167,8 @@ Menu {
         height: visible ? implicitHeight : 0
         leftPadding: 44
         rightPadding: 88
-        Accessible.keyShortcut: removeShortcut.text
+        Accessible.description: removeShortcut.text.length > 0
+            ? qsTr("Keyboard shortcut %1").arg(removeShortcut.text) : ""
         MDIcon {
             icon: Icons.deleteIcon; size: 18; x: Spacing.md
             anchors.verticalCenter: parent.verticalCenter

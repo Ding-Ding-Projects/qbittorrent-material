@@ -242,8 +242,12 @@ $sourceCMake = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/CMakeLists
 Test-Policy ($sourceCMake -match 'quick/qml/\*\.qml') "CMake discovers every desktop QML surface"
 Test-Policy ($sourceCMake -match 'experience/\*\.json') "CMake bundles the offline experience catalogs"
 Test-Policy ($sourceCMake -match 'dim-sum/\*\.png') "CMake bundles the local dim-sum images"
+Test-Policy ($sourceCMake -match 'DEPLOY_TOOL_OPTIONS\s+\$\{_qbt_qt_deploy_tool_options\}' `
+        -and $sourceCMake -match '--include-plugins qoffscreen') `
+    "Windows packages include the offscreen platform plugin used by release smoke tests"
 
 $windowsBuildHelper = Get-Content -Raw -LiteralPath (Get-RepositoryPath "run.ps1")
+$windowsLauncher = Get-Content -Raw -LiteralPath (Get-RepositoryPath "run.cmd")
 $posixBuildHelper = Get-Content -Raw -LiteralPath (Get-RepositoryPath "run.sh")
 Test-Policy ($windowsBuildHelper -match 'CMAKE_HOME_DIRECTORY' `
         -and $windowsBuildHelper -match 'CMAKE_CACHEFILE_DIR' `
@@ -253,6 +257,14 @@ Test-Policy ($posixBuildHelper -match 'CMAKE_HOME_DIRECTORY' `
         -and $posixBuildHelper -match 'CMAKE_CACHEFILE_DIR' `
         -and $posixBuildHelper -match 'clean_build') `
     "the POSIX build helper regenerates a relocated CMake build tree"
+Test-Policy ($windowsBuildHelper -match '\$env:VCPKG_ROOT\s*=\s*\$VcpkgRoot' `
+        -and $windowsBuildHelper -match 'Qt deployment tool not found' `
+        -and $windowsBuildHelper -match '\$LASTEXITCODE -ne 0\) \{ Die "Qt runtime deployment failed') `
+    "the Windows helper pins vcpkg state and fails closed when Qt deployment fails"
+Test-Policy ($windowsLauncher -match 'qbt_exit_code=%ERRORLEVEL%' `
+        -and $windowsLauncher -match 'QBT_NO_PAUSE' `
+        -and $windowsLauncher -match 'exit /b %qbt_exit_code%') `
+    "the Windows launcher preserves failures and supports noninteractive invocation"
 
 $wikiSafetyTest = Get-RepositoryPath "scripts/test-wiki-export-safety.ps1"
 Test-Policy (Test-Path -LiteralPath $wikiSafetyTest -PathType Leaf) `
@@ -492,13 +504,14 @@ Test-Policy ($transferContextMenu -match 'placeholderText:\s*qsTr\("Search actio
 Test-Policy ($transferContextMenu -match 'root\.startAction\.shortcut\.toString\(\)' `
         -and $transferContextMenu -match 'root\.stopAction\.shortcut\.toString\(\)' `
         -and $transferContextMenu -match 'root\.removeAction\.shortcut\.toString\(\)' `
+        -and ([regex]::Matches($transferContextMenu, 'Accessible\.description:\s*[^\r\n]*Shortcut|Accessible\.description:\s*[^\r\n]*\r?\n\s*\? qsTr\("Keyboard shortcut')).Count -ge 3 `
         -and $transfersPage -match 'startAction:\s*root\.shell\.actionStart' `
         -and $transfersPage -match 'stopAction:\s*root\.shell\.actionStop' `
         -and $transfersPage -match 'removeAction:\s*root\.shell\.actionDelete') `
-    "transfer context shortcuts derive from the shared registered actions"
+    "transfer context shortcuts derive from shared actions and use Qt 6.8 accessibility properties"
 Test-Policy ($logContextMenu -match 'Accessible\.name:\s*qsTr\("Search log actions"\)' `
         -and $logContextMenu -match 'visible:\s*root\.matches\(text\)' `
-        -and $logContextMenu -match 'Accessible\.keyShortcut:\s*"Ctrl\+C"' `
+        -and $logContextMenu -match 'Accessible\.description:\s*qsTr\("Keyboard shortcut Ctrl\+C"\)' `
         -and $logContextMenu -match 'Qt\.callLater\(menuSearch\.forceActiveFocus\)') `
     "the log context menu filters locally and truthfully exposes its Copy shortcut"
 Test-Policy (Test-Path -LiteralPath `
@@ -568,6 +581,14 @@ if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {
         "an absent release tag does not leak an expected native failure code"
     Test-Policy ($workflow -notmatch '(?m)^\s*uses:\s*[^@\s]+@(?![0-9a-f]{40}(?:\s|#|$))') `
         "every external GitHub Action is pinned to a full commit"
+    Test-Policy ($workflow -match 'actions/setup-python@[0-9a-f]{40}' `
+            -and $workflow -match 'jurplel/install-qt-action/action@[0-9a-f]{40}') `
+        "the Qt installer bypasses its mutable wrapper dependencies"
+    Test-Policy ($workflow -match 'qoffscreen\.dll' `
+            -and $workflow -match 'qoffscreend\.dll' `
+            -and $workflow -match 'RedirectStandardOutput' `
+            -and $workflow -match 'Write-SmokeOutput') `
+        "installed-package smoke tests assert release plugins and retain launch diagnostics"
     Test-Policy ($workflow -match '(?ms)name:\s*Check out the pushed commit.*?fetch-depth:\s*0') `
         "the release checkout includes full history for changelog commit validation"
     Test-Policy ($workflow -notmatch '--draft|--prerelease') `

@@ -67,6 +67,34 @@ Checkpoint verification:
 - PowerShell parsed `run.ps1` and `scripts/test-desktop-policy.ps1` with no errors.
 - Git Bash parsed `run.sh -n` with no errors.
 - `git diff --check` passed.
+
+## 2026-08-02 — installed-package startup and release diagnostics
+
+The release package now explicitly deploys Qt's `qoffscreen` platform plugin,
+which the installed-application smoke test selects, and rejects debug platform
+plugins in a Release payload. The actual historical `-1` startup failure was
+also traced to four uses of `Accessible.keyShortcut`, which Qt 6.8 does not
+provide; transfer and log context menus now expose the same truthful shortcut
+text through supported accessible descriptions.
+
+The release workflow invokes the pinned internal Qt installer action after a
+separately pinned Python setup, avoiding the wrapper's mutable nested action
+tags. Each installed launch captures and prints stdout and stderr on success or
+failure. The Windows launch helpers now preserve failing exit codes, allow a
+noninteractive no-pause call, pin vcpkg to the selected installation, and fail
+when `windeployqt` is absent or unsuccessful.
+
+Verification:
+
+- A clean short-path Release stage contained `qwindows.dll` and
+  `qoffscreen.dll`, with neither debug variant.
+- Initial, crash-recovery, and interrupted-close installed-tree launches each
+  stayed alive for 10 seconds under `QT_QPA_PLATFORM=offscreen`, emitted no
+  critical/QML-load errors, and passed workspace recovery, Git status, and
+  `git fsck` assertions.
+- CPack's NSIS generator completed successfully from the short-path build.
+- `actionlint` 1.7.12 passed and the 226-line embedded package PowerShell block
+  parsed successfully.
 - All 257 desktop policy and content-integrity checks passed.
 - `run.ps1 -NoRun -Jobs 4` detected the stale `Q:\` cache, regenerated the
   build tree, compiled all 433 native/QML-cache steps, linked, deployed the Qt

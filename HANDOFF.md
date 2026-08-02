@@ -1,5 +1,44 @@
 # Handoff
 
+## 2026-08-02 — NordVPN/OpenVPN isolation design checkpoint
+
+The requested VPN feature has two independent parts. The profile-management
+part should support an unlimited number of imported `.ovpn` configurations and
+keep every add, edit, replacement, and removal in an application-owned local
+Git repository. Its history UI must support text and date-range filters,
+action sorting, and distinct action colors. Credentials and generated auth
+material must never enter that repository, logs, command lines, CI artifacts,
+or GitHub; Nord manual connections require separate service credentials.
+
+The networking requirement is strict: qBittorrent traffic must fail closed
+unless the selected Nord tunnel is verified, while unrelated applications
+must retain their ordinary physical route. Stock OpenVPN cannot provide that
+combination on Windows. `redirect-gateway` changes host-wide routing;
+`route-nopull` prevents that change but supplies no reliable per-process route.
+The current engine only sets libtorrent `listen_interfaces`, and source-address
+binding alone does not prove adapter selection or protect DNS, Qt networking,
+search child processes, magnet metadata preview, DHT/LSD, startup restoration,
+or every force-resume/announce path.
+
+Do not ship or describe an in-process `QProcess`/OpenVPN wrapper as a per-app
+kill switch. The exact requirement needs an authoritative external per-process
+tunneling backend or a separately elevated and signed Windows isolation
+service/callout that provides VPN-interface routing, tunnel-scoped DNS, and
+persistent WFP fail-closed enforcement. qBittorrent must initialize that policy
+before constructing/restoring its native session and derive one engine-level
+`trafficAllowed` state. A device-wide OpenVPN manager plus interface binding is
+a smaller alternative, but it violates the explicit requirement that other
+applications stay outside the VPN and therefore requires user approval.
+
+No OpenVPN executable or downloaded `.ovpn` profile was available on this
+machine during the review. CI can test a sanitized profile parser, local-Git
+history, and a fake management/interface state machine, but a real Nord test
+must remain a local credentialed installed-package test. Before implementation,
+the user must choose between (1) the larger strict Windows isolation backend,
+(2) device-wide OpenVPN with a qBittorrent traffic gate, or (3) binding to an
+already managed external VPN whose routing/isolation guarantee is outside this
+application.
+
 ## 2026-08-02 — magnet dialog acceptance reaches the real session
 
 Pressing **Add** in the magnet dialog now creates the requested torrent instead

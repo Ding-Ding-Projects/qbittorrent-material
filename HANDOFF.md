@@ -1,5 +1,23 @@
 # Handoff
 
+## 2026-08-02 — urgent shutdown handoff (do not merge this branch yet)
+
+The user reports that magnet add links do not work; reproduce and fix that
+before treating the add-torrent pipeline as complete. The current branch is a
+durability checkpoint created during an imminent shutdown, not a reviewed
+release candidate. Its final QML close-policy and Downloads-page changes have
+not received the full build/runtime pass.
+
+The single-instance patch also has unresolved review findings: the IPC payload
+needs framing, complete accumulation, and a receiver acknowledgement; argument
+forwarding must preserve all non-option sources; instance identity must cover
+and normalize profile/configuration selectors; legacy-server compatibility is
+still best-effort. Keep those files isolated until the protocol is corrected
+and the concurrent-launch/crash-recovery harness passes on the rebuilt binary.
+
+Safe resume point: `master`/`origin/master` at `817f523`. Preserved WIP:
+`handoff/shutdown-20260802-1328` at `5ae5937` plus this handoff update.
+
 ## 2026-08-02 — serialized add-torrent dialogs and merge confirmation
 
 Add requests that require the shared Material dialog now run through one FIFO,

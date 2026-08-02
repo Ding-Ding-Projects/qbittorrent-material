@@ -15,9 +15,12 @@
 #include <memory>
 
 #include <QHash>
+#include <QMetaMethod>
 #include <QObject>
+#include <QQueue>
 #include <QQmlEngine>
 #include <QString>
+#include <QTimer>
 #include <QUrl>
 
 #include "base/bittorrent/addtorrentparams.h"
@@ -127,23 +130,121 @@ public:
             return addSourceToSession(source, params);
         }
 
-        // Remote source: download the .torrent first, then re-enter.
+        // AddTorrentController intentionally owns one dialog context. Serialize
+        // requests that require that dialog so a multi-file picker (or several
+        // activation requests) cannot overwrite the context that is currently
+        // on screen.
+        if (m_dialogPipelineBusy)
+        {
+            m_pendingDialogRequests.enqueue(PendingDialogRequest {source, params});
+            qCInfo(lcUi) << "GuiAddTorrentManager: queued dialog request for" << source
+                         << "pending=" << m_pendingDialogRequests.size();
+            return true;
+        }
+
+        m_dialogPipelineBusy = true;
+        const bool started = startDialogRequest(source, params);
+        if (!started)
+            scheduleNextDialogRequest();
+        return started;
+    }
+
+    /// QML response to @ref mergeTrackersRequested.
+    Q_INVOKABLE void respondMergeTrackers(const QString &source, const bool accepted)
+    {
+        auto pendingIt = m_pendingMerges.find(source);
+        if ((pendingIt == m_pendingMerges.end()) || pendingIt->isEmpty())
+        {
+            qCWarning(lcUi) << "GuiAddTorrentManager: no pending tracker merge for" << source;
+            return;
+        }
+
+        const BitTorrent::TorrentDescriptor descr = pendingIt->dequeue();
+        if (pendingIt->isEmpty())
+            m_pendingMerges.erase(pendingIt);
+
+        if (!accepted)
+        {
+            qCDebug(lcUi) << "GuiAddTorrentManager: tracker merge declined for" << source;
+            m_guards.remove(source);
+            scheduleNextDialogRequest();
+            return;
+        }
+
+        if (!m_session || !m_session->isMergeTrackersEnabled())
+        {
+            qCInfo(lcUi) << "GuiAddTorrentManager: tracker merging was disabled"
+                         << "while confirmation was open";
+        }
+        else if (BitTorrent::Torrent *torrent = m_session->findTorrent(descr.infoHash()))
+        {
+            const bool descriptorPrivate = descr.info() && descr.info()->isPrivate();
+            if (torrent->isPrivate() || descriptorPrivate)
+            {
+                qCInfo(lcUi) << "GuiAddTorrentManager: tracker merge blocked for private torrent"
+                             << torrent->name();
+            }
+            else
+            {
+                torrent->addTrackers(descr.trackers());
+                torrent->addUrlSeeds(descr.urlSeeds());
+                qCInfo(lcUi) << "GuiAddTorrentManager: merged trackers into" << torrent->name();
+            }
+        }
+        m_guards.remove(source);
+        scheduleNextDialogRequest();
+    }
+
+signals:
+    /// A torrent was successfully added to the session.
+    void torrentAdded(const QString &source);
+    /// Adding failed; @p reason is a human-readable, translated message.
+    void addTorrentFailed(const QString &source, const QString &reason);
+    /// The source duplicates an existing torrent; QML should notify the user.
+    void duplicateTorrent(const QString &source, const QString &name);
+    /// Ask the user whether to merge trackers; the receiver must call
+    /// @ref respondMergeTrackers to release the serialized dialog pipeline.
+    void mergeTrackersRequested(const QString &source, const QString &name, bool isPrivate);
+
+private:
+    // ---- pipeline steps ----------------------------------------------------
+
+    struct PendingDialogRequest
+    {
+        QString source;
+        BitTorrent::AddTorrentParams params;
+    };
+
+    struct PendingDownload
+    {
+        BitTorrent::AddTorrentParams params;
+        bool showDialog = false;
+    };
+
+    bool startDialogRequest(const QString &source
+            , const BitTorrent::AddTorrentParams &params)
+    {
+        const auto *pref = Preferences::instance();
+
+        // Remote source: keep ownership of the serialized dialog slot while
+        // the .torrent is downloaded.
         if (Net::DownloadManager::hasSupportedScheme(source))
         {
             qCInfo(lcNet) << "GuiAddTorrentManager: downloading torrent from" << source;
-            m_downloadedTorrents.insert(source, params);
             Net::DownloadManager::instance()->download(
                     Net::DownloadRequest(source).limit(pref->getTorrentFileSizeLimit())
                     , pref->useProxyForGeneralPurposes()
-                    , this, &GuiAddTorrentManager::onDownloadFinished);
+                    , this, [this, request = PendingDownload {params, true}]
+                    (const Net::DownloadResult &result)
+                    {
+                        onDownloadFinished(result, request);
+                    });
             return true;
         }
 
         // Magnet URI / info-hash string.
         if (const auto parseResult = BitTorrent::TorrentDescriptor::parse(source))
-        {
             return processTorrent(source, parseResult.value(), params);
-        }
         else if (source.startsWith(u"magnet:", Qt::CaseInsensitive))
         {
             emit addTorrentFailed(source, parseResult.error());
@@ -156,10 +257,13 @@ public:
         auto guard = std::make_shared<TorrentFileGuard>(decodedPath);
         if (const auto loadResult = BitTorrent::TorrentDescriptor::loadFromFile(decodedPath))
         {
-            const bool processing = processTorrent(source, loadResult.value(), params);
-            if (processing)
-                m_guards.insert(source, guard);
-            return processing;
+            // Store the guard before emitting either dialog signal so even a
+            // synchronous QML response can release it correctly.
+            m_guards.insert(source, guard);
+            const bool interactionPending = processTorrent(source, loadResult.value(), params);
+            if (!interactionPending)
+                m_guards.remove(source);
+            return interactionPending;
         }
         else
         {
@@ -168,56 +272,58 @@ public:
         }
     }
 
-    /// QML response to @ref mergeTrackersRequested.
-    Q_INVOKABLE void respondMergeTrackers(const QString &source, const bool accepted)
+    void scheduleNextDialogRequest()
     {
-        const BitTorrent::TorrentDescriptor descr = m_pendingMerge.take(source);
-        if (!accepted)
-        {
-            qCDebug(lcUi) << "GuiAddTorrentManager: tracker merge declined for" << source;
-            m_guards.remove(source);
+        if (m_dialogAdvanceScheduled)
             return;
-        }
 
-        if (BitTorrent::Torrent *torrent = m_session
-                ? m_session->findTorrent(descr.infoHash()) : nullptr)
+        // AddTorrentController emits accepted/rejected before clearing its old
+        // context. Advance on the next event-loop turn so presenting the next
+        // request cannot be undone by that cleanup.
+        m_dialogAdvanceScheduled = true;
+        QTimer::singleShot(0, this, [this]
         {
-            torrent->addTrackers(descr.trackers());
-            torrent->addUrlSeeds(descr.urlSeeds());
-            qCInfo(lcUi) << "GuiAddTorrentManager: merged trackers into" << torrent->name();
-        }
-        m_guards.remove(source);
+            m_dialogAdvanceScheduled = false;
+            if (m_pendingDialogRequests.isEmpty())
+            {
+                m_dialogPipelineBusy = false;
+                return;
+            }
+
+            const PendingDialogRequest request = m_pendingDialogRequests.dequeue();
+            qCInfo(lcUi) << "GuiAddTorrentManager: presenting next queued request for"
+                         << request.source << "remaining=" << m_pendingDialogRequests.size();
+            if (!startDialogRequest(request.source, request.params))
+                scheduleNextDialogRequest();
+        });
     }
 
-signals:
-    /// A torrent was successfully added to the session.
-    void torrentAdded(const QString &source);
-    /// Adding failed; @p reason is a human-readable, translated message.
-    void addTorrentFailed(const QString &source, const QString &reason);
-    /// The source duplicates an existing torrent; QML should notify the user.
-    void duplicateTorrent(const QString &source, const QString &name);
-    /// Ask the user (via a Material ConfirmDialog) whether to merge trackers.
-    void mergeTrackersRequested(const QString &source, const QString &name, bool isPrivate);
-
-private:
-    // ---- pipeline steps ----------------------------------------------------
-
-    void onDownloadFinished(const Net::DownloadResult &result)
+    void onDownloadFinished(const Net::DownloadResult &result, const PendingDownload &request)
     {
         const QString source = result.url;
-        const BitTorrent::AddTorrentParams params = m_downloadedTorrents.take(source);
+        bool interactionPending = false;
 
         switch (result.status)
         {
         case Net::DownloadStatus::Success:
             if (const auto loadResult = BitTorrent::TorrentDescriptor::load(result.data))
-                processTorrent(source, loadResult.value(), params);
+            {
+                if (request.showDialog)
+                    interactionPending = processTorrent(source, loadResult.value(), request.params);
+                else
+                    addToSession(source, loadResult.value(), request.params);
+            }
             else
                 emit addTorrentFailed(source, loadResult.error());
             break;
         case Net::DownloadStatus::RedirectedToMagnet:
             if (const auto parseResult = BitTorrent::TorrentDescriptor::parse(result.magnetURI))
-                processTorrent(source, parseResult.value(), params);
+            {
+                if (request.showDialog)
+                    interactionPending = processTorrent(source, parseResult.value(), request.params);
+                else
+                    addToSession(source, parseResult.value(), request.params);
+            }
             else
                 emit addTorrentFailed(source, parseResult.error());
             break;
@@ -225,6 +331,9 @@ private:
             emit addTorrentFailed(source, result.errorString);
             break;
         }
+
+        if (request.showDialog && !interactionPending)
+            scheduleNextDialogRequest();
     }
 
     void onMetadataDownloaded(const BitTorrent::TorrentInfo &metadata)
@@ -233,6 +342,8 @@ private:
         AddTorrentController::instance()->updateMetadata(metadata);
     }
 
+    // Returns true while the serialized pipeline is awaiting either the add
+    // dialog or a tracker-merge confirmation.
     bool processTorrent(const QString &source
             , const BitTorrent::TorrentDescriptor &torrentDescr
             , const BitTorrent::AddTorrentParams &params)
@@ -244,35 +355,42 @@ private:
         if (BitTorrent::Torrent *torrent = m_session
                 ? m_session->findTorrent(infoHash) : nullptr)
         {
-            if (Preferences::instance()->confirmMergeTrackers())
-            {
-                if (hasMetadata)
-                    torrent->setMetadata(*torrentDescr.info());
+            if (hasMetadata)
+                torrent->setMetadata(*torrentDescr.info());
 
-                const bool isPrivate = torrent->isPrivate()
-                        || (hasMetadata && torrentDescr.info()->isPrivate());
-                if (isPrivate)
-                {
-                    qCInfo(lcUi) << "GuiAddTorrentManager: duplicate private torrent"
-                                 << torrent->name();
-                    emit duplicateTorrent(source, torrent->name());
-                }
-                else
-                {
-                    m_pendingMerge.insert(source, torrentDescr);
-                    emit mergeTrackersRequested(source, torrent->name(), false);
-                }
-            }
-            else
+            const bool isPrivate = torrent->isPrivate()
+                    || (hasMetadata && torrentDescr.info()->isPrivate());
+            const bool mergingEnabled = m_session->isMergeTrackersEnabled();
+            const bool confirmationEnabled = Preferences::instance()->confirmMergeTrackers();
+            const bool confirmationAvailable = isSignalConnected(
+                    QMetaMethod::fromSignal(
+                            &GuiAddTorrentManager::mergeTrackersRequested));
+
+            if (mergingEnabled && confirmationEnabled && !isPrivate && confirmationAvailable)
             {
-                qCInfo(lcUi) << "GuiAddTorrentManager: duplicate torrent" << torrent->name();
-                if (m_session->isMergeTrackersEnabled())
-                {
-                    torrent->addTrackers(torrentDescr.trackers());
-                    torrent->addUrlSeeds(torrentDescr.urlSeeds());
-                }
-                emit duplicateTorrent(source, torrent->name());
+                // Keep the add-dialog pipeline occupied until QML responds.
+                // This prevents the next add dialog or merge prompt from
+                // opening over the confirmation currently on screen.
+                m_pendingMerges[source].enqueue(torrentDescr);
+                emit mergeTrackersRequested(source, torrent->name(), false);
+                return true;
             }
+
+            if (mergingEnabled && confirmationEnabled && !isPrivate && !confirmationAvailable)
+            {
+                // The current shell has no merge-confirmation connection. Do
+                // not retain an unanswerable request or merge without consent.
+                qCWarning(lcUi) << "GuiAddTorrentManager: tracker merge confirmation"
+                                << "has no responder; declining merge";
+            }
+
+            qCInfo(lcUi) << "GuiAddTorrentManager: duplicate torrent" << torrent->name();
+            if (mergingEnabled && !confirmationEnabled && !isPrivate)
+            {
+                torrent->addTrackers(torrentDescr.trackers());
+                torrent->addUrlSeeds(torrentDescr.urlSeeds());
+            }
+            emit duplicateTorrent(source, torrent->name());
 
             return false;
         }
@@ -302,12 +420,14 @@ private:
         const BitTorrent::TorrentDescriptor descr = controller->currentDescriptor();
         addToSession(source, descr, controller->builtParams());
         m_guards.remove(source);
+        scheduleNextDialogRequest();
     }
 
     void onDialogRejected(const QString &source)
     {
         qCDebug(lcUi) << "GuiAddTorrentManager: dialog rejected for" << source;
         m_guards.remove(source);
+        scheduleNextDialogRequest();
     }
 
     // ---- session hand-off --------------------------------------------------
@@ -317,12 +437,15 @@ private:
         if (Net::DownloadManager::hasSupportedScheme(source))
         {
             // Defer: download then add without a dialog.
-            m_downloadedTorrents.insert(source, params);
             Net::DownloadManager::instance()->download(
                     Net::DownloadRequest(source).limit(
                             Preferences::instance()->getTorrentFileSizeLimit())
                     , Preferences::instance()->useProxyForGeneralPurposes()
-                    , this, &GuiAddTorrentManager::onDownloadFinished);
+                    , this, [this, request = PendingDownload {params, false}]
+                    (const Net::DownloadResult &result)
+                    {
+                        onDownloadFinished(result, request);
+                    });
             return true;
         }
 
@@ -359,7 +482,9 @@ private:
     }
 
     BitTorrent::Session *m_session = nullptr;
-    QHash<QString, BitTorrent::AddTorrentParams> m_downloadedTorrents;
     QHash<QString, std::shared_ptr<TorrentFileGuard>> m_guards;
-    QHash<QString, BitTorrent::TorrentDescriptor> m_pendingMerge;
+    QHash<QString, QQueue<BitTorrent::TorrentDescriptor>> m_pendingMerges;
+    QQueue<PendingDialogRequest> m_pendingDialogRequests;
+    bool m_dialogPipelineBusy = false;
+    bool m_dialogAdvanceScheduled = false;
 };

@@ -56,13 +56,20 @@ int main(int argc, char *argv[])
         if (!app.isPrimaryInstance())
         {
             qCInfo(lcApp) << "Another instance is already running; forwarding request and exiting";
-            app.notifyPrimaryInstance();
-            return 0;
+            if (!app.notifyPrimaryInstance())
+            {
+                qCCritical(lcApp)
+                    << "Launch request handoff failed; exiting with an error so the request "
+                       "is not silently dropped";
+                exitCode = 1;
+            }
         }
-
-        // --- 4. Boot the UI + event loop. ------------------------------------
-        exitCode = app.run();
-        qCInfo(lcApp) << "Event loop returned; exit code =" << exitCode;
+        else
+        {
+            // --- 4. Boot the UI + event loop. --------------------------------
+            exitCode = app.run();
+            qCInfo(lcApp) << "Event loop returned; exit code =" << exitCode;
+        }
     }
     catch (const std::exception &err)
     {

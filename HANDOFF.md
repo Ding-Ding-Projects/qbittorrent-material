@@ -1,5 +1,29 @@
 # Handoff
 
+## 2026-08-02 — serialized add-torrent dialogs and merge confirmation
+
+Add requests that require the shared Material dialog now run through one FIFO,
+including local files, magnets, remote downloads, failures, duplicates, and
+identical sources. Per-download parameters travel in the completion closure, so
+two requests for the same URL cannot overwrite each other. Local torrent-file
+guards are installed before any signal can respond synchronously.
+
+The previously unwired tracker-merge confirmation now has a live Material
+responder. It holds the FIFO until accepted or declined, refuses private
+torrents, honors the global merge toggle both before prompting and when the
+answer arrives, and fails closed if no responder exists. Both add and merge
+dialogs prohibit outside-click auto-close and route Escape through explicit
+rejection, so every dismissal releases controller state and advances the FIFO.
+
+Verification:
+
+- The manager header and generated QML registration/moc translation units pass
+  MSVC syntax compilation.
+- Qt 6.8 `qmllint` exits 0; only pre-existing model/delegate diagnostics remain.
+- Desktop policy assertions cover FIFO advancement, per-request remote state,
+  merge-toggle/private safeguards, the live responder, and safe close policy.
+- `git diff --check` passes.
+
 ## 2026-08-02 — text editing keeps standard shortcuts
 
 Application-level Undo, Delete, and Paste handlers now yield while a Qt Quick

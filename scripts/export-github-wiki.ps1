@@ -17,21 +17,107 @@ $utf8WithoutBom = [System.Text.UTF8Encoding]::new($false)
 $manifestPath = Join-Path $wikiRoot ".qbt-material-generated.json"
 $previousGeneratedPaths = @()
 $generatedPaths = [System.Collections.Generic.List[string]]::new()
+$isWindowsPlatform = ($env:OS -eq "Windows_NT")
+$pathComparison = if ($isWindowsPlatform) {
+    [System.StringComparison]::OrdinalIgnoreCase
+}
+else {
+    [System.StringComparison]::Ordinal
+}
+$wikiPrefix = $wikiRoot.TrimEnd([char[]] @('\', '/')) `
+    + [System.IO.Path]::DirectorySeparatorChar
 
 if (-not (Test-Path -LiteralPath (Join-Path $wikiRoot ".git"))) {
     throw "WikiWorkingTree must be a cloned Git repository: $wikiRoot"
 }
 
+function Resolve-GeneratedManifestPath([object] $entry) {
+    if ($entry -isnot [string] -or [string]::IsNullOrWhiteSpace($entry)) {
+        throw "Every generated-file manifest entry must be a non-empty string."
+    }
+
+    $relativePath = [string] $entry
+    if ([System.IO.Path]::IsPathRooted($relativePath)) {
+        throw "Generated-file manifest entries must be relative paths: $relativePath"
+    }
+    if ($relativePath.Contains('\')) {
+        throw "Generated-file manifest entries must use forward slashes: $relativePath"
+    }
+    if ($relativePath -match '[\x00-\x1f\x7f<>:\"|?*]') {
+        throw "Generated-file manifest entry contains an unsafe path character: $relativePath"
+    }
+
+    $segments = @($relativePath -split '/', -1)
+    foreach ($segment in $segments) {
+        if ([string]::IsNullOrWhiteSpace($segment) `
+                -or $segment -eq "." `
+                -or $segment -eq ".." `
+                -or $segment.StartsWith(".") `
+                -or $segment.EndsWith(".") `
+                -or $segment.EndsWith(" ")) {
+            throw "Generated-file manifest entry contains an unsafe path segment: $relativePath"
+        }
+    }
+
+    # The exporter owns only root-level Markdown pages and its three image
+    # destinations. Never let a manifest claim Git metadata, arbitrary nested
+    # Wiki content, or another file namespace as generated output.
+    $namespacePath = if ($isWindowsPlatform) {
+        $relativePath.ToLowerInvariant()
+    }
+    else {
+        $relativePath
+    }
+    $isRootMarkdown = $namespacePath -cmatch '^[^/]+\.md$'
+    $isLogo = $namespacePath -ceq 'images/logo-mark.png'
+    $isCapturedImage = $namespacePath -cmatch '^images/(?:app|site)/[^/]+$'
+    if (-not ($isRootMarkdown -or $isLogo -or $isCapturedImage)) {
+        throw "Generated-file manifest entry is outside an exporter-owned namespace: $relativePath"
+    }
+
+    try {
+        $nativeRelativePath = $relativePath.Replace(
+            '/', [System.IO.Path]::DirectorySeparatorChar)
+        $candidate = [System.IO.Path]::GetFullPath(
+            (Join-Path $wikiRoot $nativeRelativePath))
+    }
+    catch {
+        throw "Generated-file manifest entry is not a valid path: $relativePath"
+    }
+    if (-not $candidate.StartsWith($wikiPrefix, $pathComparison)) {
+        throw "Generated-file manifest entry resolves outside the Wiki tree: $relativePath"
+    }
+
+    return [pscustomobject]@{
+        RelativePath = $relativePath
+        FullPath = $candidate
+    }
+}
+
 if (Test-Path -LiteralPath $manifestPath) {
     try {
         $previousManifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
-        if ($previousManifest.files) {
-            $previousGeneratedPaths = @($previousManifest.files)
-        }
     }
     catch {
         throw "Could not parse the existing Wiki export manifest: $manifestPath"
     }
+
+    if ($previousManifest.schemaVersion -ne 1) {
+        throw "Unsupported Wiki export manifest schema in ${manifestPath}: $($previousManifest.schemaVersion)"
+    }
+    if ($previousManifest.PSObject.Properties.Name -notcontains "files" `
+            -or $null -eq $previousManifest.files) {
+        throw "Wiki export manifest does not contain a files array: $manifestPath"
+    }
+
+    # Validate the complete manifest before writing even one exported page.
+    # This makes a hostile or corrupted manifest fail closed without touching
+    # the Wiki checkout, its .git directory, or paths beside the checkout.
+    $validatedPaths = [System.Collections.Generic.List[object]]::new()
+    foreach ($entry in @($previousManifest.files)) {
+        $validatedPaths.Add((Resolve-GeneratedManifestPath $entry))
+    }
+    $previousGeneratedPaths = @($validatedPaths)
 }
 
 function Write-Utf8([string] $path, [string] $content) {
@@ -185,7 +271,6 @@ Get-ChildItem -LiteralPath (Join-Path $docsRoot "images\site") -File |
     }
 
 $currentGeneratedPaths = @($generatedPaths | Sort-Object -Unique)
-$wikiPrefix = $wikiRoot.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
 
 function Assert-NoReparsePointAncestor([string] $candidate, [string] $relativePath) {
     $normalizedRelative = $candidate.Substring($wikiPrefix.Length)
@@ -205,14 +290,19 @@ function Assert-NoReparsePointAncestor([string] $candidate, [string] $relativePa
     }
 }
 
-foreach ($relativePath in $previousGeneratedPaths) {
-    if ($currentGeneratedPaths -contains $relativePath) {
+foreach ($previousPath in $previousGeneratedPaths) {
+    $relativePath = $previousPath.RelativePath
+    $isCurrentPath = $false
+    foreach ($currentPath in $currentGeneratedPaths) {
+        if ([string]::Equals($currentPath, $relativePath, $pathComparison)) {
+            $isCurrentPath = $true
+            break
+        }
+    }
+    if ($isCurrentPath) {
         continue
     }
-    $candidate = [System.IO.Path]::GetFullPath((Join-Path $wikiRoot $relativePath))
-    if (-not $candidate.StartsWith($wikiPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw "Refusing to remove a generated path outside the Wiki tree: $relativePath"
-    }
+    $candidate = $previousPath.FullPath
     if (Test-Path -LiteralPath $candidate -PathType Leaf) {
         Assert-NoReparsePointAncestor -candidate $candidate -relativePath $relativePath
         Remove-Item -Force -LiteralPath $candidate

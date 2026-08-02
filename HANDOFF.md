@@ -1,5 +1,29 @@
 # Handoff
 
+## 2026-08-02 — broad bug-audit checkpoint 3: safe Wiki cleanup
+
+The GitHub Wiki exporter no longer trusts stale paths from its generated-file
+manifest. It validates the manifest schema and every entry before writing any
+page, accepts only root Markdown and the exporter-owned image namespaces,
+rejects rooted paths, traversal, backslashes, dot directories, unsafe path
+characters, and non-string entries, then performs cleanup only through the
+prevalidated full paths. Path containment is case-insensitive on Windows and
+case-sensitive on platforms whose filesystems distinguish case; reparse-point
+ancestor checks remain in place.
+
+The focused regression script exercises seven hostile manifests, including
+`.git/config` and paths outside the Wiki checkout, and proves that the previous
+Home page, Git config, and outside canary are unchanged. It also proves that
+valid stale generated pages and images are still removed.
+
+Verification:
+
+- The exporter and regression script parse under PowerShell 7 and Windows
+  PowerShell 5.1.
+- The focused hostile/valid manifest suite passes under both PowerShell hosts.
+- The suite is invoked by the desktop policy gate so the destructive boundary
+  is checked in CI rather than documented only.
+
 ## 2026-08-02 — broad bug-audit checkpoint 2: bounded downloads
 
 The shared download handler no longer trusts an initially small advertised

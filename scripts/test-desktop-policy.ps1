@@ -254,6 +254,22 @@ Test-Policy ($posixBuildHelper -match 'CMAKE_HOME_DIRECTORY' `
         -and $posixBuildHelper -match 'clean_build') `
     "the POSIX build helper regenerates a relocated CMake build tree"
 
+$wikiSafetyTest = Get-RepositoryPath "scripts/test-wiki-export-safety.ps1"
+Test-Policy (Test-Path -LiteralPath $wikiSafetyTest -PathType Leaf) `
+    "the Wiki exporter has hostile-manifest regression coverage"
+if (Test-Path -LiteralPath $wikiSafetyTest -PathType Leaf) {
+    try {
+        & $wikiSafetyTest -RepositoryRoot $RepositoryRoot |
+            ForEach-Object { Write-Host $_ }
+        Test-Policy $true `
+            "the Wiki exporter rejects hostile manifests before touching any canary"
+    }
+    catch {
+        Test-Policy $false `
+            "the Wiki exporter rejects hostile manifests before touching any canary ($($_.Exception.Message))"
+    }
+}
+
 $mainQml = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/Main.qml")
 foreach ($surface in @("DimSumSurprise", "NotificationsSheet", "RegexBuilderSheet", "SettingsSheet")) {
     Test-Policy ($mainQml -match [regex]::Escape($surface)) "Main.qml wires $surface"

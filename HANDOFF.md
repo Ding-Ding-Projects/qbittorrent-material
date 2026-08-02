@@ -2,8 +2,10 @@
 
 ## 2026-08-02 — urgent shutdown handoff (do not merge this branch yet)
 
-The user reports that magnet add links do not work; reproduce and fix that
-before treating the add-torrent pipeline as complete. The current branch is a
+The user reports that a magnet reaches the Add dialog, but pressing Add creates
+no torrent. Reproduce the acceptance path from `AddTorrentController` through
+`GuiAddTorrentManager::onDialogAccepted()` and `Session::addTorrent()` before
+treating the add-torrent pipeline as complete. The current branch is a
 durability checkpoint created during an imminent shutdown, not a reviewed
 release candidate. Its final QML close-policy and Downloads-page changes have
 not received the full build/runtime pass.

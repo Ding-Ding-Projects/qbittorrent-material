@@ -1,0 +1,3 @@
+[submodule "vendor/qBittorrent"]
+	path = vendor/qBittorrent
+	url = https://github.com/qbittorrent/qBittorrent

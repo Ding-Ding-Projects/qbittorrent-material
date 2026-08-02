@@ -156,10 +156,15 @@ private:
 
     void scheduleTorrentFlush();
     void flushTorrentJournal();
+    [[nodiscard]] bool flushTorrentJournalImpl();
+    void requeueActionBatch(QList<TorrentJournalNS::JournalOpRecord> ops,
+        QSet<BitTorrent::TorrentID> dirtyTorrents, bool sessionDirty,
+        bool preserveOps = false);
     void scheduleSettingsFlush();
     void flushSettingsJournal();
     [[nodiscard]] QString buildSummary(const QList<TorrentJournalNS::JournalOpRecord> &ops) const;
-    void commitActions(const QString &summary, const QList<TorrentJournalNS::JournalOpRecord> &ops,
+    [[nodiscard]] bool commitActions(const QString &summary,
+        const QList<TorrentJournalNS::JournalOpRecord> &ops,
         const Annotation &annotation);
 
     [[nodiscard]] Annotation currentAnnotationFor(
@@ -174,6 +179,7 @@ private:
     QList<TorrentJournalNS::JournalOpRecord> m_pendingOps;
     QSet<BitTorrent::TorrentID> m_dirtyTorrents;
     bool m_sessionDirty = false;
+    bool m_preservePendingOps = false;
     QTimer m_torrentFlushTimer;
 
     struct SettingsChange

@@ -6,6 +6,8 @@
 
 #include "torrentjournal.h"
 
+#include <utility>
+
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -694,7 +696,7 @@ void TorrentJournal::onTorrentAboutToBeRemoved(BitTorrent::Torrent *torrent,
     // 1) Land every pending edit (and the torrent's final state) in its own
     //    commit so the delete commit's PARENT holds the complete last state.
     m_dirtyTorrents.insert(torrent->id());
-    flushTorrentJournal();
+    const bool previousBatchCommitted = flushTorrentJournalImpl();
 
     // 2) Remove the torrent's files from the working tree and commit that as
     //    the delete entry.
@@ -708,7 +710,20 @@ void TorrentJournal::onTorrentAboutToBeRemoved(BitTorrent::Torrent *torrent,
         torrent->name(), keepContent ? u"kept files"_s : u"deleted files"_s};
     const QString summary = u"delete: "_s + torrent->name()
         + (keepContent ? u" (kept files)"_s : u" (with files)"_s);
-    commitActions(summary, {op}, currentAnnotationFor({op}));
+
+    // Never let commitAll() sweep a failed preceding batch into a commit that
+    // is labelled only as a deletion. The failed batch has already been put
+    // back at the front of m_pendingOps, so append the later delete operation
+    // and let the retry preserve their chronological order.
+    if (!previousBatchCommitted)
+    {
+        m_pendingOps.append(op);
+        m_torrentFlushTimer.start();
+        return;
+    }
+
+    if (!commitActions(summary, {op}, currentAnnotationFor({op})))
+        requeueActionBatch({op}, {}, false);
 }
 
 void TorrentJournal::onSettingsValueChanged(const QString &key, const QVariant &oldValue,
@@ -781,7 +796,10 @@ bool TorrentJournal::writeTorrentFiles(const BitTorrent::Torrent *torrent, bool 
             {
                 QString error;
                 if (!Git::GitRepositoryStore::writeFileAtomically(blobPath, result.value(), &error))
+                {
                     qCWarning(lcApp) << "Torrent blob write failed for" << torrentId << ":" << error;
+                    return false;
+                }
                 else if (changed)
                     *changed = true;
             }
@@ -818,14 +836,46 @@ void TorrentJournal::scheduleTorrentFlush()
 
 void TorrentJournal::flushTorrentJournal()
 {
+    (void)flushTorrentJournalImpl();
+}
+
+void TorrentJournal::requeueActionBatch(QList<JournalOpRecord> ops,
+    QSet<BitTorrent::TorrentID> dirtyTorrents, const bool sessionDirty,
+    const bool preserveOps)
+{
+    // A flush is synchronous today, but prepend the failed snapshot to any
+    // work that may have arrived re-entrantly so history remains chronological.
+    const bool hasOps = !ops.isEmpty();
+    if (hasOps)
+    {
+        ops.append(m_pendingOps);
+        m_pendingOps = std::move(ops);
+    }
+    m_dirtyTorrents.unite(dirtyTorrents);
+    m_sessionDirty = m_sessionDirty || sessionDirty;
+    m_preservePendingOps = m_preservePendingOps || (preserveOps && hasOps);
+
+    // This is a retry, not a new user edit. Restart the debounce timer even if
+    // the failed flush came from an annotated scope; the event loop normally
+    // dispatches it after that synchronous scope has ended.
+    m_torrentFlushTimer.start();
+}
+
+bool TorrentJournal::flushTorrentJournalImpl()
+{
     if (!m_available)
-        return;
+        return false;
     m_torrentFlushTimer.stop();
     if (m_pendingOps.isEmpty() && m_dirtyTorrents.isEmpty() && !m_sessionDirty)
-        return;
+        return true;
 
     BitTorrent::Session *session = BitTorrent::Session::instance();
-    const QSet<BitTorrent::TorrentID> dirty = std::exchange(m_dirtyTorrents, {});
+    QSet<BitTorrent::TorrentID> dirty = std::exchange(m_dirtyTorrents, {});
+    QList<JournalOpRecord> ops = std::exchange(m_pendingOps, {});
+    const bool sessionDirty = std::exchange(m_sessionDirty, false);
+    const bool preserveOps = std::exchange(m_preservePendingOps, false);
+
+    bool writeSucceeded = true;
     QSet<QString> unchangedIds;
     for (const BitTorrent::TorrentID &id : dirty)
     {
@@ -833,35 +883,64 @@ void TorrentJournal::flushTorrentJournal()
         if (!torrent)
             continue; // being removed — the delete handler owns its files
         bool changed = false;
-        if (writeTorrentFiles(torrent, &changed) && !changed)
+        if (!writeTorrentFiles(torrent, &changed))
+            writeSucceeded = false;
+        else if (!changed)
             unchangedIds.insert(id.toString());
     }
 
-    if (m_sessionDirty)
+    if (sessionDirty && !writeSessionFile())
+        writeSucceeded = false;
+
+    // Do not create a partial/mislabelled commit when even one required state
+    // file failed to reach the worktree. Successful writes are harmless to
+    // repeat atomically on the retry.
+    if (!writeSucceeded)
     {
-        (void)writeSessionFile();
-        m_sessionDirty = false;
+        requeueActionBatch(std::move(ops), std::move(dirty), sessionDirty, true);
+        return false;
     }
 
-    QList<JournalOpRecord> ops = std::exchange(m_pendingOps, {});
-    // Catch-all records whose serialized state turned out identical are noise.
-    ops.removeIf([&unchangedIds](const JournalOpRecord &op)
+    // Keep the semantic snapshot intact for a retry. Filtering below is only a
+    // presentation/noise decision for this commit attempt; it must not destroy
+    // records when commitAll() itself fails.
+    QList<JournalOpRecord> retryOps = ops;
+
+    // Catch-all records whose serialized state turned out identical are noise
+    // only on a first attempt. After any failed write/commit, part or all of the
+    // desired state may already be in the worktree; filtering on the retry
+    // would incorrectly erase the semantic operation that explains it.
+    if (!preserveOps)
     {
-        return (op.kind == JournalOpKind::Config) && unchangedIds.contains(op.torrentId);
-    });
+        ops.removeIf([&unchangedIds](const JournalOpRecord &op)
+        {
+            return (op.kind == JournalOpKind::Config) && unchangedIds.contains(op.torrentId);
+        });
+    }
     if (ops.isEmpty())
     {
         // Still commit silently if files changed without a describable op
         // (should not happen in practice; the no-op check makes this free).
         bool committed = false;
-        (void)m_actionStore->commitAll(encodeCommitMessage(u"edit: state sync"_s, {},
-            JournalOrigin::User), nullptr, &committed);
+        QString error;
+        if (!m_actionStore->commitAll(encodeCommitMessage(u"edit: state sync"_s, {},
+                JournalOrigin::User), nullptr, &committed, &error))
+        {
+            qCWarning(lcApp) << "Torrent journal commit failed:" << error;
+            requeueActionBatch(std::move(retryOps), std::move(dirty), sessionDirty, true);
+            return false;
+        }
         if (committed)
             emit historyChanged(Repo::Actions);
-        return;
+        return true;
     }
 
-    commitActions(buildSummary(ops), ops, currentAnnotationFor(ops));
+    if (!commitActions(buildSummary(ops), ops, currentAnnotationFor(ops)))
+    {
+        requeueActionBatch(std::move(retryOps), std::move(dirty), sessionDirty, true);
+        return false;
+    }
+    return true;
 }
 
 TorrentJournal::Annotation TorrentJournal::currentAnnotationFor(
@@ -890,8 +969,6 @@ TorrentJournal::Annotation TorrentJournal::currentAnnotationFor(
         if (allExpected)
         {
             const Expectation expectation = m_expectations.value(ops.first().torrentId);
-            for (const JournalOpRecord &op : ops)
-                m_expectations.remove(op.torrentId);
             return {expectation.origin, expectation.undoesCommitId, {}, {}};
         }
     }
@@ -973,7 +1050,7 @@ QString TorrentJournal::buildSummary(const QList<JournalOpRecord> &ops) const
     }
 }
 
-void TorrentJournal::commitActions(const QString &summary, const QList<JournalOpRecord> &ops,
+bool TorrentJournal::commitActions(const QString &summary, const QList<JournalOpRecord> &ops,
     const Annotation &annotation)
 {
     const QString message = encodeCommitMessage(summary, ops, annotation.origin,
@@ -985,10 +1062,28 @@ void TorrentJournal::commitActions(const QString &summary, const QList<JournalOp
     if (!m_actionStore->commitAll(message, &commitId, &committed, &error))
     {
         qCWarning(lcApp) << "Torrent journal commit failed:" << error;
-        return;
+        return false;
     }
+
+    // Async undo expectations are consumed only after Git accepted the batch.
+    // Leaving them intact across a failed commit lets the retry retain the
+    // original undo annotation instead of being recorded as a user edit.
+    if (!m_scopeActive && (annotation.origin != JournalOrigin::User))
+    {
+        for (const JournalOpRecord &op : ops)
+        {
+            const auto it = m_expectations.find(op.torrentId);
+            if ((it != m_expectations.end())
+                    && (it->origin == annotation.origin)
+                    && (it->undoesCommitId == annotation.undoesCommitId))
+            {
+                m_expectations.erase(it);
+            }
+        }
+    }
+
     if (!committed)
-        return;
+        return true;
 
     JournalEntry entry = decodeCommitMessage(message);
     entry.commitId = commitId;
@@ -999,6 +1094,7 @@ void TorrentJournal::commitActions(const QString &summary, const QList<JournalOp
     emit entryCommitted(Repo::Actions, entry);
     emit historyChanged(Repo::Actions);
     emit statusChanged();
+    return true;
 }
 
 void TorrentJournal::scheduleSettingsFlush()
@@ -1013,6 +1109,22 @@ void TorrentJournal::flushSettingsJournal()
     m_settingsFlushTimer.stop();
 
     const QHash<QString, SettingsChange> changes = std::exchange(m_pendingSettings, {});
+
+    const auto requeueChanges = [this, &changes]
+    {
+        // The failed snapshot predates anything that arrived re-entrantly.
+        // Preserve its earliest old value, while retaining the newer pending
+        // value as the eventual state for a key changed again during the flush.
+        for (auto it = changes.cbegin(); it != changes.cend(); ++it)
+        {
+            auto pending = m_pendingSettings.find(it.key());
+            if (pending == m_pendingSettings.end())
+                m_pendingSettings.insert(it.key(), it.value());
+            else
+                pending->oldValue = it->oldValue;
+        }
+        m_settingsFlushTimer.start();
+    };
 
     // Merge the changed keys into the accumulated settings.json.
     const QString filePath = QDir(m_settingsStore->rootPath()).filePath(u"settings.json"_s);
@@ -1031,6 +1143,7 @@ void TorrentJournal::flushSettingsJournal()
             QJsonDocument(doc).toJson(QJsonDocument::Indented), &error))
     {
         qCWarning(lcApp) << "Settings journal write failed:" << error;
+        requeueChanges();
         return;
     }
 
@@ -1052,6 +1165,7 @@ void TorrentJournal::flushSettingsJournal()
     if (!m_settingsStore->commitAll(message, &commitId, &committed, &error))
     {
         qCWarning(lcApp) << "Settings journal commit failed:" << error;
+        requeueChanges();
         return;
     }
     if (!committed)

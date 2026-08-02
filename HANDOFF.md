@@ -278,3 +278,28 @@ per-setting command-palette controls/teleport, search and true shortcut labels
 across every context menu, systematic bilingual release code names and photos,
 full search-builder coverage for settings/properties, universal rendered-element
 appearance editing, and broader bulk/export-everything coverage.
+
+## 2026-08-02 — retry-safe torrent and settings history
+
+Torrent-history flushes now keep their complete operation, dirty-torrent, and
+session snapshots until every required atomic write and Git commit succeeds.
+Retries retain pre-filter semantic records, preserve asynchronous undo
+annotations, and treat a failed metadata-blob write as a batch failure instead
+of silently committing an incomplete restorable snapshot. Settings-history
+writes and commits likewise restore the earliest old value and latest new value
+to the pending queue after failure.
+
+The pre-delete flush is now checked: a failed earlier batch is kept ahead of
+the later delete operation instead of being swept into a misleading
+delete-only commit. The non-vetoable engine removal signal still imposes one
+explicit boundary: if final JSON or blob bytes cannot reach the worktree before
+the engine destroys the torrent object, a later retry can restore only the last
+successfully committed snapshot. Fully preserving those unwritten bytes needs
+a cached snapshot plus a deferred two-phase delete, or a vetoable engine API.
+
+Verification:
+
+- `qbt_base` rebuilt successfully with MSVC after the final retry changes.
+- `scripts/test-desktop-policy.ps1` covers action, blob, annotation, and
+  settings requeue invariants.
+- `git diff --check` passed for the journal implementation and header.

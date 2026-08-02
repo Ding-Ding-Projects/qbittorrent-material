@@ -453,6 +453,19 @@ Test-Policy ($downloadManager.Contains('scheme.compare(u"https"') `
 Test-Policy ($appCMake.Contains('QBT_BUILD_ID=\"${QBT_BUILD_ID}\"')) "the packaged release identity is compiled into the update checker"
 Test-Policy (Test-Path -LiteralPath (Get-RepositoryPath "docs/features/delivery/update-check.md") -PathType Leaf) "the in-app update-check behavior and failure modes are documented"
 
+$torrentJournal = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/base/torrentjournal/torrentjournal.cpp")
+Test-Policy ($torrentJournal -match 'if \(!writeTorrentFiles\(torrent, &changed\)\)\s*writeSucceeded = false' `
+        -and $torrentJournal -match 'if \(sessionDirty && !writeSessionFile\(\)\)\s*writeSucceeded = false' `
+        -and $torrentJournal -match 'requeueActionBatch\(std::move\(retryOps\), std::move\(dirty\), sessionDirty, true\)') `
+    "torrent journal write and commit failures retain the complete action batch for retry"
+Test-Policy ($torrentJournal -match 'Torrent blob write failed[\s\S]*?return false;' `
+        -and $torrentJournal -match 'Async undo expectations are consumed only after Git accepted the batch') `
+    "torrent blob failures retry and undo annotations survive failed commits"
+Test-Policy ($torrentJournal -match 'Settings journal write failed:[\s\S]*?requeueChanges\(\);' `
+        -and $torrentJournal -match 'Settings journal commit failed:[\s\S]*?requeueChanges\(\);') `
+    "settings journal changes survive write and commit failures"
+
 $transferContextMenu = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/transferlist/TransferRowContextMenu.qml")
 $logContextMenu = Get-Content -Raw -LiteralPath `

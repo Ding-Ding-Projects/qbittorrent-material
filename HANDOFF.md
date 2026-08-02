@@ -1,5 +1,58 @@
 # Handoff
 
+## 2026-08-02 — the workspace tab strip draws tabs again
+
+Reported: "browser style tabs missing". The strip was never missing — it is
+instantiated unconditionally in `WorkspaceView.qml` and is not gated by any
+preference. It was invisible, because every one of its states resolved to the
+same colour as its own background.
+
+`ThemeManager::buildNamedIdMap()` aliases `surfaceWarm` to `primaryContainer`,
+and `Theme.color()` resolves that alias before consulting the palette, so the
+two tokens are the same colour by construction. The strip painted itself
+`surfaceWarm` while the selected tab painted itself `primaryContainer`, and
+unselected tabs painted `"transparent"`. For the default Tonal Rail light
+palette that made the strip, the selected tab, and every unselected tab all
+`#e3dfff` — a single flat band with a label and a `+`, with a tab shape
+appearing only under the pointer.
+
+The strip is now the recessed tray (`surfaceVariant`) and each state has its own
+fill: unselected `surface` with a hairline `outlineVariant` border, hovered
+`surfaceContainerHigh`, selected `primaryContainer`. For Tonal Rail light that
+is `#f1eff9` / `#ffffff` / `#e6e2f1` / `#e3dfff` — four distinct values. Per-tab
+appearance overrides still win, unchanged.
+
+Two related defects went with it. The "scroll the active tab into view" handler
+called `tabList.positionViewAtIndex()`, but `tabList` belonged to a hidden
+legacy tab bar, so the visible strip never scrolled and an overflowed active tab
+stayed off screen; the strip now exposes `positionTabInView()` and the handler
+targets it. And that legacy bar — `visible: false`, `Layout.preferredHeight: 0`,
+but still building a delegate per tab — duplicated the live strip's
+`workspaceTabBar`, `workspaceTab_<id>`, `workspaceTabClose_<id>`, and
+`workspaceAddTabButton` object names, so objectName-driven automation could bind
+to the invisible copy and pass while the user saw nothing. It had no remaining
+references and is deleted.
+
+Verification:
+
+- All 301 desktop policy and content-integrity checks passed (296 before; the
+  5 new ones pin the `surfaceWarm` alias as the reason the strip must not use
+  that token, require the strip's tray colour to differ from the selected tab,
+  require all three tab states to paint distinct fills, require the scroll
+  handler to target the visible strip, and require exactly one tab bar).
+- `run.ps1 -NoRun -Jobs 8` completed a clean Release compile, link, and Qt
+  deployment; `WorkspaceView.qml` recompiled through qmlcachegen with balanced
+  braces after the deletion.
+- `docs/WORKSPACE_TABS.md` said to select **Workspace** in the navigation; the
+  live label is **Notes** (`CentralTabs.qml`, `AppHeader.qml`). Corrected.
+
+Known follow-up, not blocking: `docs/images/app/09-custom-workspace-tabs.png`
+still shows the old flat bar and predates the strip, so it should be recaptured;
+`AppNavigationSidebar.qml` is dead code that is not instantiated anywhere; and
+the strip's `Accessible.PageTab`/`PageTabList` roles should be checked against a
+cold-start log, since an unsupported role on Qt 6.8 caused a comparable problem
+before.
+
 ## 2026-08-02 — search works again: the nova3 runtime is now shipped
 
 Reported: "search not working", "search plugins not working". Both symptoms had

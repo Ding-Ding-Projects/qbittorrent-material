@@ -50,8 +50,11 @@ Item {
     Connections {
         target: WorkspaceManager
         function onActiveIndexChanged() {
+            // Must target the live strip: `tabList` belongs to the hidden legacy
+            // bar below, so the visible tabs never scrolled and an active tab
+            // that had overflowed stayed off screen.
             if (WorkspaceManager.activeIndex >= 0)
-                tabList.positionViewAtIndex(WorkspaceManager.activeIndex, ListView.Contain)
+                modernTabStrip.positionTabInView(WorkspaceManager.activeIndex)
         }
         function onOperationFinished(success, message, location) {
             workspaceSnackbar.show(message,
@@ -215,127 +218,6 @@ Item {
                 overflowPopup.returnFocusItem = anchorItem
                 overflowPopup.open()
                 overflowSearch.forceActiveFocus()
-            }
-        }
-
-        Rectangle {
-            visible: false
-            enabled: false
-            Layout.preferredHeight: 0
-            Layout.fillWidth: true
-            implicitHeight: Spacing.controlHeight + Spacing.sm
-            color: Theme.color("surfaceWarm")
-            border.width: 0
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.margins: Spacing.xs
-                spacing: 0
-
-                ListView {
-                    id: tabList
-                    objectName: "workspaceTabBar"
-                    Accessible.name: qsTr("Workspace tabs")
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    orientation: ListView.Horizontal
-                    boundsBehavior: Flickable.StopAtBounds
-                    clip: true
-                    spacing: 2
-                    model: WorkspaceManager
-                    currentIndex: WorkspaceManager.activeIndex
-
-                    delegate: TabButton {
-                        id: tabButton
-                        required property int index
-                        required property string tabId
-                        required property string name
-                        width: Math.max(132, Math.min(230, implicitWidth))
-                        height: ListView.view.height
-                        leftPadding: Spacing.sm
-                        rightPadding: Spacing.xs
-                        checked: index === WorkspaceManager.activeIndex
-                        objectName: "workspaceTab_" + tabId
-                        Accessible.name: qsTr("Workspace tab %1").arg(name)
-                        onClicked: WorkspaceManager.activeIndex = index
-
-                        background: Rectangle {
-                            radius: Spacing.radiusControl
-                            color: tabButton.checked
-                                ? Theme.color("primaryContainer")
-                                : (tabButton.hovered ? Theme.color("surface") : "transparent")
-
-                            Behavior on color {
-                                ColorAnimation { duration: Spacing.motionFast }
-                            }
-                        }
-
-                        contentItem: RowLayout {
-                            spacing: Spacing.xs
-                            MDIcon {
-                                icon: Icons.article
-                                size: 16
-                                color: tabButton.checked
-                                    ? Theme.color("primary") : Theme.color("onSurfaceVariant")
-                            }
-                            Label {
-                                text: tabButton.name
-                                textFormat: Text.PlainText
-                                elide: Text.ElideRight
-                                font: Typography.titleSmall
-                                color: tabButton.checked
-                                    ? Theme.color("primary") : Theme.color("onSurfaceVariant")
-                                Layout.fillWidth: true
-                            }
-                            IconButton {
-                                objectName: "workspaceTabClose_" + tabButton.tabId
-                                Accessible.name: qsTr("Close %1").arg(tabButton.name)
-                                symbol: Icons.close
-                                size: 14
-                                tooltip: qsTr("Close tab")
-                                enabled: WorkspaceManager.writable
-                                onClicked: WorkspaceManager.closeTab(tabButton.index)
-                            }
-                        }
-
-                        TapHandler {
-                            acceptedButtons: Qt.RightButton
-                            onTapped: {
-                                WorkspaceManager.activeIndex = tabButton.index
-                                tabContextMenu.targetIndex = tabButton.index
-                                tabContextMenu.popup()
-                            }
-                        }
-                        TapHandler {
-                            acceptedButtons: Qt.MiddleButton
-                            enabled: WorkspaceManager.writable
-                            onTapped: WorkspaceManager.closeTab(tabButton.index)
-                        }
-                        TapHandler {
-                            acceptedButtons: Qt.LeftButton
-                            enabled: WorkspaceManager.writable
-                            onDoubleTapped: tabSettings.openForIndex(tabButton.index)
-                        }
-                    }
-                }
-
-                Rectangle {
-                    Layout.preferredWidth: Spacing.outlineWidth
-                    Layout.fillHeight: true
-                    color: Theme.color("outlineVariant")
-                }
-
-                IconButton {
-                    id: addTabButton
-                    objectName: "workspaceAddTabButton"
-                    Accessible.name: qsTr("New workspace tab")
-                    Layout.preferredWidth: Spacing.controlHeight
-                    Layout.fillHeight: true
-                    symbol: Icons.add
-                    tooltip: qsTr("New tab (Ctrl+T)")
-                    enabled: WorkspaceManager.writable
-                    onClicked: root.createTab()
-                }
             }
         }
 

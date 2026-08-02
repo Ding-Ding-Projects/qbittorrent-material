@@ -40,8 +40,22 @@ Rectangle {
     signal overflowRequested(Item anchorItem)
 
     implicitHeight: Spacing.controlHeight + Spacing.sm
-    color: Theme.color("surfaceWarm")
+    // NOT "surfaceWarm": that token is aliased to primaryContainer, which is
+    // exactly the selected tab's fill, so the active tab used to be invisible
+    // against its own strip. The strip is the recessed tray; tabs sit on it.
+    color: Theme.color("surfaceVariant")
     border.width: 0
+
+    /*! Scrolls the tab with workspace index \a index into view without stealing
+        focus. Pinned tabs are always on screen, so only the ordinary list moves. */
+    function positionTabInView(index) {
+        for (var i = 0; i < ordinaryItems.length; ++i) {
+            if (ordinaryItems[i].kind === "tab" && ordinaryItems[i].tab.index === index) {
+                ordinaryList.positionViewAtIndex(i, ListView.Contain)
+                return
+            }
+        }
+    }
 
     function focusTabByIndex(index) {
         WorkspaceManager.activeIndex = index
@@ -125,12 +139,16 @@ Rectangle {
         background: Rectangle {
             radius: tabData.appearance.radius !== undefined
                 ? tabData.appearance.radius : Spacing.radiusControl
+            // Every state needs its own fill or the tabs read as one flat band.
+            // Unselected tabs were "transparent", which on a same-coloured strip
+            // meant browser-style tab shapes were never drawn at all.
             color: control.checked
                 ? (tabData.appearance.checkedColor || Theme.color("primaryContainer"))
                 : (control.hovered
-                    ? (tabData.appearance.hoverColor || Theme.color("surface"))
-                    : (tabData.appearance.backgroundColor || "transparent"))
-            border.width: tabData.appearance.borderWidth || 0
+                    ? (tabData.appearance.hoverColor || Theme.color("surfaceContainerHigh"))
+                    : (tabData.appearance.backgroundColor || Theme.color("surface")))
+            border.width: tabData.appearance.borderWidth
+                || (control.checked ? 0 : Spacing.outlineWidth)
             border.color: tabData.appearance.borderColor || Theme.color("outlineVariant")
             Behavior on color { ColorAnimation { duration: Spacing.motionFast } }
         }

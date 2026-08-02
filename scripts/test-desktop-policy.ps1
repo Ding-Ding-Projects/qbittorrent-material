@@ -635,6 +635,34 @@ Test-Policy ($searchEmptyPage.Contains('SearchController.unavailableReason') `
 Test-Policy (Test-Path -LiteralPath (Get-RepositoryPath "docs/features/transfers/search-runtime.md") -PathType Leaf) `
     "the bundled search runtime and its failure modes are documented"
 
+# --- Workspace: the browser-style tab strip must actually be visible ----------
+# "surfaceWarm" is aliased to primaryContainer in ThemeManager's named-id map,
+# which is exactly the selected tab's fill. Painting the strip with it made the
+# active tab invisible against its own background, and unselected tabs had no
+# fill at all, so no tab shapes were drawn.
+$workspaceStrip = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/workspace/WorkspaceTabStrip.qml")
+$workspaceView = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/workspace/WorkspaceView.qml")
+$themeManager = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/theme/thememanager.cpp")
+Test-Policy ($themeManager.Contains('m_namedIdMap.insert(u"surfaceWarm"_s, u"primaryContainer"_s)')) `
+    "surfaceWarm is still an alias of primaryContainer, so the strip must not use it"
+Test-Policy ($workspaceStrip -match 'implicitHeight: Spacing\.controlHeight \+ Spacing\.sm[\s\S]{0,400}?color: Theme\.color\("surfaceVariant"\)' `
+        -and $workspaceStrip -notmatch 'color: Theme\.color\("surfaceWarm"\)') `
+    "the workspace tab strip paints a recessed tray that differs from the selected tab"
+Test-Policy ($workspaceStrip.Contains('tabData.appearance.backgroundColor || Theme.color("surface")') `
+        -and $workspaceStrip.Contains('tabData.appearance.hoverColor || Theme.color("surfaceContainerHigh")') `
+        -and $workspaceStrip.Contains('tabData.appearance.checkedColor || Theme.color("primaryContainer")')) `
+    "selected, unselected, and hovered workspace tabs each paint a distinct fill"
+Test-Policy ($workspaceStrip.Contains('function positionTabInView(index)') `
+        -and $workspaceView.Contains('modernTabStrip.positionTabInView(WorkspaceManager.activeIndex)') `
+        -and $workspaceView -notmatch 'tabList\.positionViewAtIndex') `
+    "activating a workspace tab scrolls the visible strip rather than a hidden list"
+Test-Policy ($workspaceView -notmatch 'objectName: "workspaceTabBar"' `
+        -and ([regex]::Matches(($workspaceStrip + $workspaceView), 'objectName: "workspaceAddTabButton"')).Count -eq 1) `
+    "the workspace has exactly one tab bar, so automation cannot bind an invisible copy"
+
 $torrentJournal = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/base/torrentjournal/torrentjournal.cpp")
 Test-Policy ($torrentJournal -match 'if \(!writeTorrentFiles\(torrent, &changed\)\)\s*writeSucceeded = false' `

@@ -11,8 +11,10 @@ client is not required.
 
 ## Open and navigate the workspace
 
-Select **Workspace** in the persistent application navigation or press `Alt+5`. The row
-inside that view behaves like a browser tab strip:
+Select **Notes** in the persistent application navigation or press `Alt+5`. The row
+inside that view behaves like a browser tab strip: the strip itself is a recessed
+surface and each tab is drawn as its own shape on top of it, so the selected tab,
+unselected tabs, and the hovered tab are all distinguishable at rest.
 
 - Select a tab to open its page.
 - Select **+** or press `Ctrl+T` to create a page.

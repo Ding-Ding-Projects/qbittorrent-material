@@ -217,6 +217,40 @@ and the workflow never clobbers an earlier tag or asset.
 See [Immutable Windows Releases](docs/features/delivery/windows-releases.md) for
 the test, token, asset, and verification contract.
 
+## Agent and contributor rules
+
+This repository carries a **sanitized mirror** of the maintainer's shared agent
+instructions, so any agent or contributor working here sees the rules without
+needing access to the canonical source. Machine-specific detail and the
+maintainer's private working vocabulary are deliberately omitted; the
+substantive rules are kept in full.
+
+<details>
+<summary><b>Summary of the shared rules that govern changes to this repository</b></summary>
+
+The full sanitized text lives in [AGENTS.md](AGENTS.md). In outline:
+
+| Area | What it requires |
+| --- | --- |
+| **Scope** | Every rule applies to every user-facing surface individually — app, docs site, landing page, settings screen, panel and dialog. "It is small" is not an exemption. |
+| **Git completion** | Bilingual English + Cantonese commit messages; every task ends merged into the default branch and pushed; never force-push without explicit review. |
+| **Autonomy** | No permission-to-continue questions inside an authorized task; do not stop at a plan, a passing test, or a push. |
+| **CI and releases** | Every push and dispatch publishes one uniquely tagged non-draft release with a genuinely built installer, and states the project's line count from a committed counter run by CI. |
+| **Issues** | Scan open issues on every touched repository, fix what is actionable, comment start/finish with honest verification state, and close only verified work. |
+| **Languages** | English, playful Hong Kong-style Cantonese, and bilingual modes, plus two independent per-language funny-level sliders that style voice but never facts. |
+| **UI quality** | Fix accessibility, clipping and element-size defects as blockers; decorative-looking UI must actually work; every context menu carries its own search field. |
+| **Regex builder** | A full builder reachable from every search bar, anchored beside that field, with plain text as the default and regex an explicit opt-in. |
+| **Notifications** | Non-blocking corner notifications with a reviewable history; modals only for real decisions. |
+| **Destructive actions** | A super-confirmation gate: two independent keys, a full-range slider, progress and completion animation, and an always-available emergency exit. |
+| **Material Design** | Full M3 conformance, per-element appearance editors, word-depth typography, and an infinite colour picker with a colour translator. |
+| **Tabs** | Browser-style tabs with overflow, reorder, pin, group, four tab-discovery searches, and bulk close by text with a preview. |
+| **Overlays and menus** | Overlays paint their own surface, stay bounded by the viewport and scroll; menu items display the shortcut that actually works. |
+| **Export and bulk** | Everything is exportable in every format that can faithfully represent it; every collection supports bulk actions with a stated scope and preview. |
+| **Version history** | Git-backed local history for documents *and* settings, append-only, with a filterable panel. |
+| **Toolchains** | Install what a task needs automatically, user-scoped, from canonical upstreams, without mutating unrelated global toolchains. |
+
+</details>
+
 ## License
 
 GPLv3+, matching upstream qBittorrent.

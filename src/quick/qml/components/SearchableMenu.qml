@@ -105,9 +105,12 @@ Menu {
                 root.filterText.toLocaleLowerCase())
         }
 
+        // The result map's match tally is "count" — reading a wrong key yields
+        // undefined, `undefined > 0` is false, and every item silently vanishes
+        // the moment regex mode is switched on.
         const evaluation = WorkspaceManager.evaluateRegularExpression(
             root.filterText, root.regexFlags, text)
-        return (evaluation.valid === true) && (evaluation.matchCount > 0)
+        return (evaluation.valid === true) && (evaluation.count > 0)
     }
 
     // Via Connections, not `onAboutToShow:`/`onOpened:` handlers: a handler

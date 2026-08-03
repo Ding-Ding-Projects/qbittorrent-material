@@ -81,7 +81,24 @@ ToolButton {
                 elide: Text.ElideRight
                 Layout.fillWidth: true
             }
+            // The menu is where users go to learn what a command's shortcut is;
+            // an item that hides it makes the menu the only route to a command
+            // that has a faster one. Read it from the bound action so the label
+            // and the registered binding cannot drift apart, and show nothing
+            // at all rather than padding the column when there is no binding.
+            Label {
+                id: shortcutLabel
+                text: (ctl.action && ctl.action.shortcut)
+                    ? ctl.action.shortcut.toString() : ""
+                visible: text.length > 0
+                font: Typography.labelMedium
+                color: Theme.color("onSurfaceVariant")
+                opacity: ctl.enabled ? 1.0 : 0.4
+                Layout.rightMargin: Spacing.xs
+            }
         }
+        Accessible.description: shortcutLabel.text.length > 0
+            ? qsTr("Keyboard shortcut %1").arg(shortcutLabel.text) : ""
     }
 
     Menu {

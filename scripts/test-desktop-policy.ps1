@@ -326,6 +326,14 @@ Test-Policy ($searchableMenu.Contains('FilterTextField {') `
         -and $searchableMenu.Contains('function matches(label)') `
         -and $searchableMenu.Contains('WorkspaceManager.evaluateRegularExpression(')) `
     "menu search filters through the app's own regex engine and reaches the builder"
+# The evaluator returns its tally as "count". Reading any other key yields
+# undefined, and `undefined > 0` hides every item as soon as regex is enabled.
+$workspaceManagerSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/models/workspacemanager.cpp")
+Test-Policy ($workspaceManagerSource.Contains('{QStringLiteral("count"), matches.size()}') `
+        -and $searchableMenu.Contains('(evaluation.count > 0)') `
+        -and -not $searchableMenu.Contains('matchCount')) `
+    "menu regex matching reads the evaluator's real result key"
 # A menu item's shortcut Label is right-anchored, so it adds nothing to
 # implicitWidth; without a floor the menu collapses and paints over the label.
 Test-Policy ($searchableMenu.Contains('property int minimumMenuWidth') `

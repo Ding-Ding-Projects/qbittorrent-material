@@ -153,12 +153,17 @@ Dialog {
                 enabled: listUrlField.text.trim().length > 0 && !fetchBusy.running
                 onClicked: {
                     Log.info("ui", "AddTrackersDialog download list: " + listUrlField.text)
-                    if (typeof PropertiesController.fetchTrackerList === "function") {
-                        fetchBusy.running = true
-                        PropertiesController.fetchTrackerList(listUrlField.text.trim())
-                    } else {
-                        Log.warning("ui", "PropertiesController.fetchTrackerList is not available (remote list bridge pending)")
-                    }
+                    fetchBusy.running = true
+                    PropertiesController.fetchTrackerList(listUrlField.text.trim())
+                }
+            }
+
+            // The controller always terminates a fetch, success or failure, so
+            // the indicator can never be left spinning on a dead request.
+            Connections {
+                target: PropertiesController
+                function onTrackerListFetchFinished() {
+                    fetchBusy.running = false
                 }
             }
 

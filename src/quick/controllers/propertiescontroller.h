@@ -181,7 +181,42 @@ public:
     /// Force a refresh of the active tab (e.g. after it becomes visible).
     Q_INVOKABLE void refresh();
 
+    // --- Trackers tab actions ------------------------------------------------
+    // These back the Trackers tab's context menu and dialogs. Every one of them
+    // reports its outcome through @ref trackerActionFinished so the UI can never
+    // present a command as having worked when it did not.
+
+    /// Adds every tracker URL in @a multilineUrls to the current torrent. One
+    /// URL per line; a blank line starts a new tier.
+    Q_INVOKABLE void addTrackers(const QString &multilineUrls);
+
+    /// Replaces @a oldUrl with @a newUrl, keeping that tracker's tier.
+    Q_INVOKABLE void editTracker(const QString &oldUrl, const QString &newUrl);
+
+    /// Removes every tracker whose URL appears in @a urls.
+    Q_INVOKABLE void removeTrackers(const QStringList &urls);
+
+    /// Reannounces to only the trackers whose URLs appear in @a urls.
+    Q_INVOKABLE void reannounceToTrackers(const QStringList &urls);
+
+    /// Reannounces to every tracker of the current torrent.
+    Q_INVOKABLE void reannounceToAllTrackers();
+
+    /// Downloads a newline-separated tracker list from @a url and adds it to the
+    /// current torrent. Bounded, proxied per preference, and always terminated
+    /// by @ref trackerListFetchFinished so the caller's progress state resets
+    /// even on failure.
+    Q_INVOKABLE void fetchTrackerList(const QString &url);
+
 signals:
+    /// Outcome of a Trackers-tab action. @a ok is false when nothing was
+    /// changed, and @a message is always a translated, user-facing sentence.
+    void trackerActionFinished(bool ok, const QString &message);
+
+    /// Always emitted when a @ref fetchTrackerList attempt ends, successfully
+    /// or not, so a busy indicator can never be left spinning.
+    void trackerListFetchFinished();
+
     void currentTorrentChanged();
     void currentTabChanged();
     void generalChanged();

@@ -317,6 +317,42 @@ $guiAddManager = Get-Content -Raw -LiteralPath `
 $addTorrentDialog = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/addtorrent/AddNewTorrentDialog.qml")
 
+# Controls presented as usable must perform their labelled action. The Trackers
+# tab shipped five commands and a download button that routed through shims and
+# only wrote a log line, so the whole surface looked live and did nothing.
+$propertiesControllerHeader = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/controllers/propertiescontroller.h")
+$transferControllerHeader = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/controllers/transfercontroller.h")
+$trackersTab = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/properties/TrackersTab.qml")
+$addTrackersDialog = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/properties/dialogs/AddTrackersDialog.qml")
+$trackersFilterList = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/transferlist/TrackersFilterList.qml")
+$missingTrackerVerbs = @(
+    "void addTrackers(const QString &multilineUrls)",
+    "void editTracker(const QString &oldUrl, const QString &newUrl)",
+    "void removeTrackers(const QStringList &urls)",
+    "void reannounceToTrackers(const QStringList &urls)",
+    "void reannounceToAllTrackers()",
+    "void fetchTrackerList(const QString &url)"
+) | Where-Object { -not $propertiesControllerHeader.Contains($_) }
+Test-Policy ($missingTrackerVerbs.Count -eq 0) `
+    "every Trackers-tab command is backed by a real controller verb$($missingTrackerVerbs -join '; ')"
+Test-Policy ($transferControllerHeader.Contains('int removeTrackerFromAll(const QString &host)')) `
+    "removing a tracker from every torrent is backed by a real controller verb"
+# The shims silently swallowed a missing verb; nothing may reintroduce them.
+Test-Policy (($trackersTab -notmatch 'is not available') `
+        -and ($addTrackersDialog -notmatch 'is not available') `
+        -and ($trackersFilterList -notmatch 'is not available') `
+        -and ($addTrackersDialog -notmatch 'typeof PropertiesController') `
+        -and ($trackersFilterList -notmatch 'typeof TransferController')) `
+    "tracker commands call their controller directly instead of degrading to a log line"
+Test-Policy ($trackersTab.Contains('function onTrackerActionFinished(ok, message)') `
+        -and $addTrackersDialog.Contains('function onTrackerListFetchFinished()')) `
+    "tracker actions report their real outcome and never leave a spinner running"
+
 # Every context menu carries its own keyboard-accessible search field, and that
 # field reaches the regex builder like every other search surface. Menus derive
 # from SearchableMenu so none of that can be forgotten one menu at a time.

@@ -1,5 +1,55 @@
 # Handoff
 
+## 2026-08-02 — the Trackers tab stops pretending
+
+An audit of the app against the shared requirements found the most direct
+"decorative-looking UI must be functional" violation in the tree: the entire
+tracker-mutation surface was dead. `PropertiesController` exposed exactly two
+invokables — `setCurrentTorrent` and `refresh` — while `TrackersTab.qml` routed
+five commands through a `_invoke()` shim that checked whether the verb existed
+and, finding it did not, wrote `tracker mutation bridge pending` to the log and
+returned. Add tracker, edit tracker, remove tracker, reannounce to selected, and
+reannounce to all were all live-looking menu items that did nothing. Two more
+shims did the same for the **Download trackers list** button
+(`PropertiesController.fetchTrackerList`) and for removing a tracker from every
+torrent (`TransferController.removeTrackerFromAll`).
+
+All seven verbs are now real:
+
+- `addTrackers` parses through `BitTorrent::parseTrackerEntries`, so the
+  one-URL-per-line / blank-line-starts-a-tier convention the dialog documents is
+  the convention that is actually stored.
+- `editTracker` rebuilds the whole list rather than remove-then-add, so the
+  edited tracker keeps its position **and its tier**; the naive version silently
+  demotes it to the end of tier 0.
+- `reannounceToTrackers` resolves each URL against the torrent's current tracker
+  list because the engine reannounces by index, and the view's row order is not
+  guaranteed to match.
+- `fetchTrackerList` is bounded to 1 MiB, honours the general-purpose proxy
+  preference, and re-checks that the selected torrent has not changed while the
+  download was in flight before adding anything to it.
+- `removeTrackerFromAll` matches on the URL's **host**, because the filter list
+  groups by host and one host commonly serves several announce URLs — matching
+  the exact string would leave the rest behind and the filter row still
+  populated.
+
+Every one reports its outcome through a new `trackerActionFinished(ok, message)`
+signal, and the fetch additionally always emits `trackerListFetchFinished` on
+both paths so the dialog's busy indicator can never be left spinning on a failed
+request. The QML shims are gone; the commands call their controller directly.
+
+Verification:
+
+- All 322 desktop policy and content-integrity checks passed (318 before). Four
+  new ones: every Trackers-tab command is backed by a real verb, the
+  remove-from-all verb exists, no file may reintroduce a `typeof …` shim or an
+  "is not available" fallback, and both outcome signals are consumed.
+- `run.ps1 -NoRun -Jobs 8` completed a clean Release compile.
+
+Not verified by execution: the commands were not exercised against a live
+torrent with real trackers, so they are covered by compilation and policy
+assertions rather than by an announce round-trip.
+
 ## 2026-08-02 — every context menu is searchable and wide enough
 
 Reported: the right-click menu is not wide enough and is missing its search bar.

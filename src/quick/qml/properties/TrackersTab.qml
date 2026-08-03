@@ -51,13 +51,22 @@ Item {
     function _urlOf(row) { return _urlByRow[row] !== undefined ? _urlByRow[row] : "" }
     function _isSticky(row) { return _stickyByRow[row] === true }
 
-    // Defensive controller call: warns + snackbars when the verb is absent.
+    // Every one of these is a real controller verb; the tab used to route them
+    // through a shim that only wrote a log line, so the whole tracker mutation
+    // menu looked live and did nothing.
     function _invoke(method) {
         const args = Array.prototype.slice.call(arguments, 1)
-        if (typeof PropertiesController[method] === "function")
-            return PropertiesController[method].apply(PropertiesController, args)
-        Log.warning("ui", "PropertiesController." + method + " is not available (tracker mutation bridge pending)")
-        return undefined
+        return PropertiesController[method].apply(PropertiesController, args)
+    }
+
+    // The controller reports every outcome, so a command can never appear to
+    // have worked when it did not.
+    Connections {
+        target: PropertiesController
+        function onTrackerActionFinished(ok, message) {
+            Log.info("ui", "Tracker action: " + message)
+            NotificationCenter.notify(message, ok ? "success" : "warning")
+        }
     }
 
     // Minimal QML-only clipboard (hidden, off-screen TextEdit).

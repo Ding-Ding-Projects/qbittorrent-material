@@ -243,6 +243,39 @@ void TransferController::removeAllTags()
 
 // --- trackers / torrent files ---
 
+int TransferController::removeTrackerFromAll(const QString &host)
+{
+    const QString trimmed = host.trimmed();
+    if (trimmed.isEmpty())
+        return 0;
+
+    // The filter list groups trackers by host, so match on the URL's host
+    // rather than on the whole URL: one host commonly serves several announce
+    // URLs, and removing only the exact string would leave the rest behind and
+    // the filter row still populated.
+    int changed = 0;
+    const QList<Torrent *> torrents = BitTorrent::Session::instance()->torrents();
+    for (Torrent *const torrent : torrents)
+    {
+        QStringList doomed;
+        const QList<BitTorrent::TrackerEntryStatus> trackers = torrent->trackers();
+        for (const BitTorrent::TrackerEntryStatus &status : trackers)
+        {
+            if (QUrl(status.url).host() == trimmed)
+                doomed.append(status.url);
+        }
+
+        if (doomed.isEmpty())
+            continue;
+
+        torrent->removeTrackers(doomed);
+        ++changed;
+    }
+
+    qCInfo(lcUi) << "Removed tracker host" << trimmed << "from" << changed << "torrent(s)";
+    return changed;
+}
+
 QString TransferController::trackersText() const
 {
     const QList<Torrent *> torrents = selectedTorrents();

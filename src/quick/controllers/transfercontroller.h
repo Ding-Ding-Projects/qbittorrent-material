@@ -84,6 +84,9 @@ public:
     Q_INVOKABLE QString trackersText() const;
     /// Replace every selected torrent's trackers with the dialog's tiered text.
     Q_INVOKABLE void setTrackers(const QString &text);
+    /// Remove every tracker served by @p host from every torrent in the session.
+    /// Returns the number of torrents actually changed.
+    Q_INVOKABLE int removeTrackerFromAll(const QString &host);
     /// Export every selected torrent to @p directory. Returns false on any failure.
     Q_INVOKABLE bool exportTorrent(const QString &directory);
 

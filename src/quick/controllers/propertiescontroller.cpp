@@ -27,7 +27,11 @@
 #include "base/bittorrent/session.h"
 #include "base/bittorrent/torrent.h"
 #include "base/bittorrent/torrentinfo.h"
+#include "base/bittorrent/trackerentry.h"
+#include "base/bittorrent/trackerentrystatus.h"
 #include "base/logging.h"
+#include "base/net/downloadmanager.h"
+#include "base/preferences.h"
 #include "base/unicodestrings.h"
 #include "base/utils/fs/path.h"
 #include "base/utils/misc.h"
@@ -41,6 +45,9 @@ using namespace Qt::StringLiterals;
 
 namespace
 {
+    /// Bound for a downloaded tracker list, which is a few KiB of plain text.
+    constexpr qint64 MaxTrackerListSize = 1024 * 1024;
+
     /// Cap for the "ETA" field — mirrors the legacy MAX_ETA (100 days) so that an
     /// arbitrarily large ETA renders as the ∞ sentinel via userFriendlyDuration.
     constexpr qlonglong MAX_ETA = 8640000;
@@ -168,6 +175,197 @@ void PropertiesController::refresh()
 
     refreshGeneral();
     refreshActiveTab();
+}
+
+// ---- Trackers tab actions --------------------------------------------------
+
+void PropertiesController::addTrackers(const QString &multilineUrls)
+{
+    if (!m_torrent)
+    {
+        emit trackerActionFinished(false, tr("No torrent is selected."));
+        return;
+    }
+
+    // parseTrackerEntries handles the one-per-line/blank-line-is-a-new-tier
+    // convention, so the tier the user typed is the tier that is stored.
+    const QList<BitTorrent::TrackerEntry> entries =
+        BitTorrent::parseTrackerEntries(multilineUrls);
+    if (entries.isEmpty())
+    {
+        emit trackerActionFinished(false, tr("No valid tracker URL was given."));
+        return;
+    }
+
+    m_torrent->addTrackers(entries);
+    qCInfo(lcUi) << "Added" << entries.size() << "tracker(s) to" << m_torrent->name();
+    emit trackerActionFinished(true, tr("Added %n tracker(s).", "", static_cast<int>(entries.size())));
+    refresh();
+}
+
+void PropertiesController::editTracker(const QString &oldUrl, const QString &newUrl)
+{
+    if (!m_torrent)
+    {
+        emit trackerActionFinished(false, tr("No torrent is selected."));
+        return;
+    }
+
+    const QString trimmed = newUrl.trimmed();
+    if (trimmed.isEmpty())
+    {
+        emit trackerActionFinished(false, tr("The new tracker URL is empty."));
+        return;
+    }
+    if (trimmed == oldUrl)
+        return;
+
+    // Rebuild the full list so the edited tracker keeps its position and tier;
+    // removing and re-adding would silently move it to the end of tier 0.
+    const QList<BitTorrent::TrackerEntryStatus> current = m_torrent->trackers();
+    QList<BitTorrent::TrackerEntry> replacement;
+    replacement.reserve(current.size());
+    bool found = false;
+    for (const BitTorrent::TrackerEntryStatus &status : current)
+    {
+        if (status.url == trimmed)
+        {
+            emit trackerActionFinished(false, tr("That tracker is already in the list."));
+            return;
+        }
+        if (status.url == oldUrl)
+        {
+            replacement.append({trimmed, status.tier});
+            found = true;
+        }
+        else
+        {
+            replacement.append({status.url, status.tier});
+        }
+    }
+
+    if (!found)
+    {
+        emit trackerActionFinished(false, tr("That tracker is no longer in the list."));
+        return;
+    }
+
+    m_torrent->replaceTrackers(replacement);
+    qCInfo(lcUi) << "Replaced tracker" << oldUrl << "with" << trimmed;
+    emit trackerActionFinished(true, tr("Tracker updated."));
+    refresh();
+}
+
+void PropertiesController::removeTrackers(const QStringList &urls)
+{
+    if (!m_torrent)
+    {
+        emit trackerActionFinished(false, tr("No torrent is selected."));
+        return;
+    }
+    if (urls.isEmpty())
+        return;
+
+    m_torrent->removeTrackers(urls);
+    qCInfo(lcUi) << "Removed" << urls.size() << "tracker(s) from" << m_torrent->name();
+    emit trackerActionFinished(true, tr("Removed %n tracker(s).", "", static_cast<int>(urls.size())));
+    refresh();
+}
+
+void PropertiesController::reannounceToTrackers(const QStringList &urls)
+{
+    if (!m_torrent)
+    {
+        emit trackerActionFinished(false, tr("No torrent is selected."));
+        return;
+    }
+    if (urls.isEmpty())
+        return;
+
+    // forceReannounce works on tracker indexes, so resolve each URL against the
+    // torrent's current list rather than assuming the view's row order matches.
+    const QList<BitTorrent::TrackerEntryStatus> current = m_torrent->trackers();
+    int announced = 0;
+    for (int index = 0; index < current.size(); ++index)
+    {
+        if (!urls.contains(current.at(index).url))
+            continue;
+
+        m_torrent->forceReannounce(index);
+        ++announced;
+    }
+
+    if (announced == 0)
+    {
+        emit trackerActionFinished(false, tr("Those trackers are no longer in the list."));
+        return;
+    }
+
+    qCInfo(lcUi) << "Reannounced to" << announced << "tracker(s)";
+    emit trackerActionFinished(true, tr("Reannounced to %n tracker(s).", "", announced));
+}
+
+void PropertiesController::reannounceToAllTrackers()
+{
+    if (!m_torrent)
+    {
+        emit trackerActionFinished(false, tr("No torrent is selected."));
+        return;
+    }
+
+    m_torrent->forceReannounce();
+    qCInfo(lcUi) << "Reannounced to all trackers of" << m_torrent->name();
+    emit trackerActionFinished(true, tr("Reannounced to every tracker."));
+}
+
+void PropertiesController::fetchTrackerList(const QString &url)
+{
+    const QString trimmed = url.trimmed();
+    if (trimmed.isEmpty())
+    {
+        emit trackerActionFinished(false, tr("No tracker list URL was given."));
+        emit trackerListFetchFinished();
+        return;
+    }
+    if (!m_torrent)
+    {
+        emit trackerActionFinished(false, tr("No torrent is selected."));
+        emit trackerListFetchFinished();
+        return;
+    }
+
+    // Bounded: a tracker list is a few kilobytes of text, and an unbounded
+    // download here would buffer whatever the URL happens to serve.
+    const auto request = Net::DownloadRequest(trimmed)
+        .limit(MaxTrackerListSize);
+    const QString torrentId = m_currentTorrentId;
+
+    qCInfo(lcUi) << "Downloading tracker list from" << trimmed;
+    Net::DownloadManager::instance()->download(request
+        , Preferences::instance()->useProxyForGeneralPurposes()
+        , this, [this, torrentId](const Net::DownloadResult &result)
+    {
+        emit trackerListFetchFinished();
+
+        if (result.status != Net::DownloadStatus::Success)
+        {
+            qCWarning(lcUi) << "Tracker list download failed:" << result.errorString;
+            emit trackerActionFinished(false
+                , tr("Could not download the tracker list. %1").arg(result.errorString));
+            return;
+        }
+
+        // The selection can change while the download is in flight; adding the
+        // list to whatever happens to be selected now would be wrong.
+        if (!m_torrent || (m_currentTorrentId != torrentId))
+        {
+            emit trackerActionFinished(false
+                , tr("The torrent changed while the tracker list was downloading."));
+            return;
+        }
+
+        addTrackers(QString::fromUtf8(result.data));
+    });
 }
 
 void PropertiesController::bindModelsToTorrent()

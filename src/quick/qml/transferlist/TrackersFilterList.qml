@@ -93,12 +93,13 @@ Column {
         id: contextMenu
         proxy: root.proxy
         onRemoveTrackerRequested: (host) => {
-            if (typeof TransferController.removeTrackerFromAll === "function") {
-                Log.info("ui", "Removing tracker '" + host + "' from all torrents");
-                TransferController.removeTrackerFromAll(host);
-            } else {
-                Log.warning("ui", "Remove tracker: TransferController.removeTrackerFromAll is not available");
-            }
+            Log.info("ui", "Removing tracker '" + host + "' from all torrents");
+            const changed = TransferController.removeTrackerFromAll(host);
+            NotificationCenter.notify(
+                changed > 0
+                    ? qsTr("Removed %1 from %2 torrent(s).").arg(host).arg(changed)
+                    : qsTr("No torrent was using %1.").arg(host),
+                changed > 0 ? "success" : "info");
         }
     }
 

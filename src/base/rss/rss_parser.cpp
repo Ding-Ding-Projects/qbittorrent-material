@@ -34,6 +34,7 @@
 #include <QRegularExpression>
 #include <QStringList>
 #include <QTimeZone>
+#include <QUrl>
 #include <QVariant>
 #include <QXmlStreamEntityResolver>
 #include <QXmlStreamReader>
@@ -535,11 +536,41 @@ namespace
 
         return result;
     }
+
+    bool isTorrentMimeType(const QString &value)
+    {
+        const QString mimeType = value.section(u';', 0, 0).trimmed().toLower();
+        return (mimeType == u"application/x-bittorrent")
+            || (mimeType == u"application/x-torrent")
+            || (mimeType == u"application/octet-stream");
+    }
+
+    bool looksLikeTorrentUrl(const QString &value)
+    {
+        const QUrl url {value.trimmed()};
+        return url.scheme().compare(u"magnet", Qt::CaseInsensitive) == 0
+            || url.path().endsWith(u".torrent", Qt::CaseInsensitive);
+    }
+
+    QString resolveFeedUrl(const QString &baseUrl, const QString &value)
+    {
+        const QString trimmed = value.trimmed();
+        if (trimmed.isEmpty())
+            return {};
+
+        const QUrl url {trimmed};
+        if (baseUrl.isEmpty() || !url.isRelative())
+            return trimmed;
+
+        const QUrl base {baseUrl};
+        return base.isValid() ? base.resolved(url).toString() : trimmed;
+    }
 }
 
 const int PARSINGRESULT_TYPEID = qRegisterMetaType<RSS::Private::ParsingResult>();
 
-RSS::Private::Parser::Parser(const QString &lastBuildDate)
+RSS::Private::Parser::Parser(const QString &lastBuildDate, const QString &feedUrl)
+    : m_feedUrl {feedUrl}
 {
     m_result.lastBuildDate = lastBuildDate;
 }
@@ -549,6 +580,7 @@ void RSS::Private::Parser::parse(const QByteArray &feedData)
 {
     QXmlStreamReader xml {feedData};
     m_fallbackDate = QDateTime::currentDateTime();
+    m_baseUrl = m_feedUrl;
     XmlStreamEntityResolver resolver;
     xml.setEntityResolver(&resolver);
     bool foundChannel = false;
@@ -603,7 +635,6 @@ void RSS::Private::Parser::parse(const QByteArray &feedData)
 void RSS::Private::Parser::parseRssArticle(QXmlStreamReader &xml)
 {
     QVariantHash article;
-    QString altTorrentUrl;
 
     while (!xml.atEnd())
     {
@@ -621,10 +652,13 @@ void RSS::Private::Parser::parseRssArticle(QXmlStreamReader &xml)
             }
             else if (name == u"enclosure")
             {
-                if (xml.attributes().value(u"type"_s) == u"application/x-bittorrent")
-                    article[Article::KeyTorrentURL] = xml.attributes().value(u"url"_s).toString();
-                else if (xml.attributes().value(u"type"_s).isEmpty())
-                    altTorrentUrl = xml.attributes().value(u"url"_s).toString();
+                const QString enclosureUrl = xml.attributes().value(u"url"_s).toString();
+                const QString enclosureType = xml.attributes().value(u"type"_s).toString();
+                if (isTorrentMimeType(enclosureType)
+                        || (enclosureType.trimmed().isEmpty() && looksLikeTorrentUrl(enclosureUrl)))
+                {
+                    article[Article::KeyTorrentURL] = resolveFeedUrl(m_baseUrl, enclosureUrl);
+                }
             }
             else if (name == u"link")
             {
@@ -632,7 +666,7 @@ void RSS::Private::Parser::parseRssArticle(QXmlStreamReader &xml)
                 if (text.startsWith(u"magnet:", Qt::CaseInsensitive))
                     article[Article::KeyTorrentURL] = text; // magnet link instead of a news URL
                 else
-                    article[Article::KeyLink] = text;
+                    article[Article::KeyLink] = resolveFeedUrl(m_baseUrl, text);
             }
             else if (name == u"description")
             {
@@ -656,9 +690,6 @@ void RSS::Private::Parser::parseRssArticle(QXmlStreamReader &xml)
             }
         }
     }
-
-    if (article[Article::KeyTorrentURL].toString().isEmpty())
-        article[Article::KeyTorrentURL] = altTorrentUrl;
 
     addArticle(article);
 }
@@ -720,17 +751,22 @@ void RSS::Private::Parser::parseAtomArticle(QXmlStreamReader &xml)
                 const QString link = (xml.attributes().isEmpty()
                                 ? xml.readElementText().trimmed()
                                 : xml.attributes().value(u"href"_s).toString());
+                const QString type = xml.attributes().value(u"type"_s).toString();
+                const QString rel = xml.attributes().value(u"rel"_s).toString();
 
                 if (link.startsWith(u"magnet:", Qt::CaseInsensitive))
                 {
                     article[Article::KeyTorrentURL] = link; // magnet link instead of a news URL
                 }
+                else if (isTorrentMimeType(type)
+                        || ((rel.compare(u"enclosure", Qt::CaseInsensitive) == 0)
+                            && looksLikeTorrentUrl(link)))
+                {
+                    article[Article::KeyTorrentURL] = resolveFeedUrl(m_baseUrl, link);
+                }
                 else
                 {
-                    // Atom feeds can have relative links, work around this and
-                    // take the stress of figuring article full URI from UI
-                    // Assemble full URI
-                    article[Article::KeyLink] = (m_baseUrl.isEmpty() ? link : m_baseUrl + link);
+                    article[Article::KeyLink] = resolveFeedUrl(m_baseUrl, link);
                 }
             }
             else if ((name == u"summary") || (name == u"content"))
@@ -782,7 +818,9 @@ void RSS::Private::Parser::parseAtomArticle(QXmlStreamReader &xml)
 
 void RSS::Private::Parser::parseAtomChannel(QXmlStreamReader &xml)
 {
-    m_baseUrl = xml.attributes().value(u"xml:base"_s).toString();
+    const QString xmlBase = xml.attributes().value(u"xml:base"_s).toString();
+    if (!xmlBase.isEmpty())
+        m_baseUrl = resolveFeedUrl(m_baseUrl, xmlBase);
 
     while (!xml.atEnd())
     {
@@ -817,10 +855,6 @@ void RSS::Private::Parser::parseAtomChannel(QXmlStreamReader &xml)
 
 void RSS::Private::Parser::addArticle(QVariantHash article)
 {
-    QVariant &torrentURL = article[Article::KeyTorrentURL];
-    if (torrentURL.toString().isEmpty())
-        torrentURL = article.value(Article::KeyLink);
-
     // If item does not have an ID, fall back to some other identifier.
     QVariant &localId = article[Article::KeyId];
     if (localId.toString().isEmpty())

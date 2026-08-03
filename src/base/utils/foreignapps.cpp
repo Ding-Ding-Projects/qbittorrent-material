@@ -194,8 +194,15 @@ PythonInfo Utils::ForeignApps::pythonInfo()
     static PythonInfo pyInfo;
 
     const Path preferredPythonPath = Preferences::instance()->getPythonExecutablePath();
-    if (pyInfo.isValid() && (preferredPythonPath == pyInfo.executablePath))
+    if (pyInfo.isValid() && (preferredPythonPath == pyInfo.executablePath)
+            && (preferredPythonPath.isEmpty() || pyInfo.executablePath.exists()))
         return pyInfo;
+
+    // An automatic detection result is not a durable preference. Clear a
+    // cached preferred result when the setting is switched back to automatic,
+    // otherwise the old interpreter suppresses a fresh PATH/registry scan.
+    if (preferredPythonPath.isEmpty())
+        pyInfo = {};
 
     const QString invalidVersionMessage = QCoreApplication::translate("Utils::ForeignApps"
         , "Python failed to meet minimum version requirement. Path: \"%1\". Found version: \"%2\". Minimum supported version: \"%3\".");

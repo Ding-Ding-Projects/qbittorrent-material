@@ -28,10 +28,46 @@ Sheet {
         repo: root.repo
         filterText: searchField.text
         filterRegex: histRegex
+        filterRegexFlags: searchField.regexFlags
+        fromDate: fromDateField.text
+        toDate: toDateField.text
     }
     // Owned by the search field's own regex toggle, so the panel and the field
     // can never disagree about which mode is active.
     readonly property bool histRegex: searchField.regexEnabled
+
+    function toggleAction(actionId) {
+        var next = historyModel.actionFilter.slice()
+        var index = next.indexOf(actionId)
+        if (index >= 0)
+            next.splice(index, 1)
+        else
+            next.push(actionId)
+        historyModel.actionFilter = next
+    }
+
+    function clearFilters() {
+        fromDateField.clear()
+        toDateField.clear()
+        historyModel.actionFilter = []
+    }
+
+    function isoDate(date) {
+        return Qt.formatDate(date, "yyyy-MM-dd")
+    }
+
+    function setLastDays(days) {
+        var to = new Date()
+        var from = new Date(to.getFullYear(), to.getMonth(), to.getDate() - days + 1)
+        fromDateField.text = isoDate(from)
+        toDateField.text = isoDate(to)
+    }
+
+    function setThisMonth() {
+        var now = new Date()
+        fromDateField.text = isoDate(new Date(now.getFullYear(), now.getMonth(), 1))
+        toDateField.text = isoDate(now)
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -192,6 +228,124 @@ Sheet {
             builderTitle: qsTr("Regex Builder")
             builderSampleText: "Fix the tracker list\nAdd search plugins\n蝦餃 1080p"
             Accessible.name: qsTr("Search local history commits")
+        }
+
+        // Date and action filters compose with the text/regex search. Dates
+        // remain editable so invalid or partial input is reported without
+        // throwing away what the user typed.
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.leftMargin: 16
+            Layout.rightMargin: 16
+            Layout.bottomMargin: 4
+            spacing: 6
+
+            TextField {
+                id: fromDateField
+                Layout.fillWidth: true
+                placeholderText: qsTr("From date")
+                Accessible.name: qsTr("History start date")
+                selectByMouse: true
+                maximumLength: 32
+            }
+            ToolButton {
+                Layout.preferredWidth: 34
+                Layout.preferredHeight: 34
+                text: qsTr("Choose history start date")
+                display: AbstractButton.IconOnly
+                contentItem: MDIcon {
+                    name: "calendar_month"
+                    size: 18
+                    color: Theme.color("primary")
+                }
+                Accessible.name: qsTr("Choose history start date")
+                ToolTip.visible: hovered
+                ToolTip.text: Accessible.name
+                onClicked: {
+                    calendarPopup.selectingStart = true
+                    calendarPopup.open()
+                }
+            }
+            TextField {
+                id: toDateField
+                Layout.fillWidth: true
+                placeholderText: qsTr("To date")
+                Accessible.name: qsTr("History end date")
+                selectByMouse: true
+                maximumLength: 32
+            }
+            ToolButton {
+                Layout.preferredWidth: 34
+                Layout.preferredHeight: 34
+                text: qsTr("Choose history end date")
+                display: AbstractButton.IconOnly
+                contentItem: MDIcon {
+                    name: "calendar_month"
+                    size: 18
+                    color: Theme.color("primary")
+                }
+                Accessible.name: qsTr("Choose history end date")
+                ToolTip.visible: hovered
+                ToolTip.text: Accessible.name
+                onClicked: {
+                    calendarPopup.selectingStart = false
+                    calendarPopup.open()
+                }
+            }
+        }
+
+        Flow {
+            Layout.fillWidth: true
+            Layout.leftMargin: 16
+            Layout.rightMargin: 16
+            spacing: 4
+
+            Button {
+                text: qsTr("All time")
+                flat: true
+                onClicked: root.clearFilters()
+            }
+            Button {
+                text: qsTr("Last 30 days")
+                flat: true
+                onClicked: root.setLastDays(30)
+            }
+            Button {
+                text: qsTr("Last year")
+                flat: true
+                onClicked: root.setLastDays(365)
+            }
+            Button {
+                text: qsTr("This month")
+                flat: true
+                onClicked: root.setThisMonth()
+            }
+            Button {
+                text: historyModel.actionFilter.length > 0
+                    ? qsTr("Actions · %1").arg(historyModel.actionFilter.length)
+                    : qsTr("Actions")
+                flat: true
+                Accessible.name: qsTr("Filter history by action")
+                onClicked: actionMenu.open()
+            }
+            Button {
+                text: qsTr("Clear filters")
+                flat: true
+                visible: fromDateField.text.length > 0 || toDateField.text.length > 0
+                    || historyModel.actionFilter.length > 0
+                onClicked: root.clearFilters()
+            }
+        }
+
+        Label {
+            Layout.fillWidth: true
+            Layout.leftMargin: 16
+            Layout.rightMargin: 16
+            visible: !historyModel.filterValid
+            text: historyModel.filterError
+            color: Theme.color("error")
+            wrapMode: Text.WordWrap
+            Accessible.role: Accessible.AlertMessage
         }
 
         // Commit timeline.
@@ -494,11 +648,123 @@ Sheet {
                 }
                 Text {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    text: (searchField.text.length > 0) ? qsTr("No commits match") : qsTr("No history yet")
+                    text: !historyModel.filterValid
+                        ? qsTr("History filter is invalid")
+                        : ((searchField.text.length > 0 || fromDateField.text.length > 0
+                            || toDateField.text.length > 0
+                            || historyModel.actionFilter.length > 0)
+                            ? qsTr("No commits match") : qsTr("No history yet"))
                     font.family: Typography.family
                     font.pixelSize: 13
                     color: Theme.color("onSurfaceVariant")
                 }
+            }
+        }
+    }
+
+    SearchableMenu {
+        id: actionMenu
+        searchPlaceholder: qsTr("Search history actions")
+        searchAccessibleName: qsTr("Search history actions")
+        minimumMenuWidth: 300
+
+        Repeater {
+            model: historyModel.actionFacets
+            delegate: MenuItem {
+                required property var modelData
+                readonly property string actionId: modelData.id || ""
+                text: qsTr("%1 (%2)").arg(modelData.label).arg(modelData.count)
+                visible: actionMenu.matches(text)
+                height: visible ? implicitHeight : 0
+                checkable: true
+                checked: historyModel.actionFilter.indexOf(actionId) >= 0
+                onTriggered: root.toggleAction(actionId)
+            }
+        }
+
+        MenuSeparator { visible: historyModel.actionFacets.length > 0 }
+        MenuItem {
+            text: qsTr("Clear action filters")
+            visible: actionMenu.matches(text)
+            height: visible ? implicitHeight : 0
+            enabled: historyModel.actionFilter.length > 0
+            onTriggered: historyModel.actionFilter = []
+        }
+    }
+
+    Popup {
+        id: calendarPopup
+        parent: root
+        anchors.centerIn: parent
+        width: Math.min(390, root.width - Spacing.lg * 2)
+        height: 430
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        property bool selectingStart: true
+        property int shownMonth: new Date().getMonth()
+        property int shownYear: new Date().getFullYear()
+        Material.elevation: 12
+
+        background: Rectangle {
+            radius: Spacing.radiusDialog
+            color: Theme.color("surface")
+            border.width: 1
+            border.color: Theme.color("outlineVariant")
+        }
+
+        contentItem: ColumnLayout {
+            spacing: Spacing.sm
+            Label {
+                Layout.fillWidth: true
+                text: calendarPopup.selectingStart
+                    ? qsTr("Choose history start date")
+                    : qsTr("Choose history end date")
+                font: Typography.titleLarge
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                ComboBox {
+                    id: monthPicker
+                    Layout.fillWidth: true
+                    model: [qsTr("January"), qsTr("February"), qsTr("March"), qsTr("April"),
+                        qsTr("May"), qsTr("June"), qsTr("July"), qsTr("August"),
+                        qsTr("September"), qsTr("October"), qsTr("November"), qsTr("December")]
+                    currentIndex: calendarPopup.shownMonth
+                    onActivated: (index) => calendarPopup.shownMonth = index
+                }
+                SpinBox {
+                    from: 2000
+                    to: new Date().getFullYear() + 2
+                    value: calendarPopup.shownYear
+                    editable: true
+                    onValueModified: calendarPopup.shownYear = value
+                }
+            }
+            DayOfWeekRow {
+                Layout.fillWidth: true
+                locale: monthGrid.locale
+            }
+            MonthGrid {
+                id: monthGrid
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                month: calendarPopup.shownMonth
+                year: calendarPopup.shownYear
+                onClicked: (date) => {
+                    if (calendarPopup.selectingStart)
+                        fromDateField.text = root.isoDate(date)
+                    else
+                        toDateField.text = root.isoDate(date)
+                    calendarPopup.close()
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("Typed dates accept your locale format or YYYY-MM-DD.")
+                font: Typography.bodySmall
+                color: Theme.color("onSurfaceVariant")
+                wrapMode: Text.WordWrap
             }
         }
     }

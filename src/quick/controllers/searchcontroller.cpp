@@ -18,6 +18,7 @@
 #include <QDesktopServices>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QRegularExpression>
 #include <QUrl>
 #include <QVariantMap>
 
@@ -37,6 +38,21 @@ namespace
 {
     const QString kHistoryKey = u"Search/History"_s;
     const QString kFilteringModeKey = u"Search/FilteringMode"_s;
+    const QString kFilteringFlagsKey = u"Search/FilteringFlags"_s;
+
+    QRegularExpression::PatternOptions regexOptions(const QString &flags)
+    {
+        QRegularExpression::PatternOptions options;
+        if (flags.contains(u"i"_s))
+            options |= QRegularExpression::CaseInsensitiveOption;
+        if (flags.contains(u"m"_s))
+            options |= QRegularExpression::MultilineOption;
+        if (flags.contains(u"s"_s))
+            options |= QRegularExpression::DotMatchesEverythingOption;
+        if (flags.contains(u"u"_s))
+            options |= QRegularExpression::UseUnicodePropertiesOption;
+        return options;
+    }
 }
 
 SearchController *SearchController::s_instance = nullptr;
@@ -224,7 +240,8 @@ QStringList SearchController::pluginsForScope(const QString &scope) const
     return {scope};
 }
 
-int SearchController::startSearch(const QString &pattern, const QString &category, const QString &scope)
+int SearchController::startSearch(const QString &pattern, const QString &category, const QString &scope
+        , const bool regexEnabled, const QString &regexFlags)
 {
     const QString trimmed = pattern.trimmed();
     qCInfo(lcSearch) << "startSearch requested; pattern=" << trimmed
@@ -243,6 +260,19 @@ int SearchController::startSearch(const QString &pattern, const QString &categor
         return -1;
     }
 
+    if (regexEnabled)
+    {
+        const QRegularExpression expression {trimmed, regexOptions(regexFlags)};
+        if (!expression.isValid())
+        {
+            const QString message = tr("Invalid regular expression at offset %1: %2")
+                    .arg(expression.patternErrorOffset()).arg(expression.errorString());
+            qCWarning(lcSearch) << "startSearch blocked: invalid regex" << expression.errorString();
+            emit notify(message);
+            return -1;
+        }
+    }
+
     auto *mgr = SearchPluginManager::instance();
     const QStringList plugins = pluginsForScope(scope);
     if (!mgr || plugins.isEmpty())
@@ -258,12 +288,15 @@ int SearchController::startSearch(const QString &pattern, const QString &categor
     tab->category = category;
     tab->plugins = plugins;
     tab->scope = scope;
+    tab->regexEnabled = regexEnabled;
+    tab->regexFlags = regexFlags;
     tab->model = new SearchResultsModel(this);
     tab->proxy = new SearchResultsProxyModel(this);
     tab->proxy->setSourceModel(tab->model);
-    tab->proxy->setQueryPattern(trimmed);
+    tab->proxy->setQueryPattern(trimmed, regexEnabled, regexFlags);
     tab->proxy->setNameFilteringMode(nameFilteringMode());
     tab->proxy->setRegexEnabled(resultsFilterUsesRegex());
+    tab->proxy->setRegexFlags(resultsFilterRegexFlags());
     tab->handler = mgr->startSearch(trimmed, category, plugins);
     tab->status = Ongoing;
 
@@ -298,6 +331,7 @@ void SearchController::refreshTab(int tabId)
         return;
 
     tab->model->clearResults();
+    tab->proxy->setQueryPattern(tab->pattern, tab->regexEnabled, tab->regexFlags);
     if (tab->handler)
         tab->handler->deleteLater();
     tab->handler = mgr->startSearch(tab->pattern, tab->category, tab->plugins);
@@ -689,6 +723,22 @@ void SearchController::setResultsFilterUsesRegex(bool enabled)
             tab->proxy->setRegexEnabled(enabled);
     }
     qCDebug(lcSearch) << "Results-filter regex ->" << enabled;
+}
+
+QString SearchController::resultsFilterRegexFlags() const
+{
+    return SettingsStorage::instance()->loadValue<QString>(kFilteringFlagsKey, u"iu"_s);
+}
+
+void SearchController::setResultsFilterRegexFlags(const QString &flags)
+{
+    SettingsStorage::instance()->storeValue(kFilteringFlagsKey, flags);
+    for (SearchTab *tab : std::as_const(m_tabs))
+    {
+        if (tab->proxy)
+            tab->proxy->setRegexFlags(flags);
+    }
+    qCDebug(lcSearch) << "Results-filter regex flags ->" << flags;
 }
 
 // ---- Internals -------------------------------------------------------------

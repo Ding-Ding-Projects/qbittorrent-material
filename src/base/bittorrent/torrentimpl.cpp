@@ -132,6 +132,8 @@ TorrentImpl::TorrentImpl(SessionImpl *session, const lt::torrent_handle &nativeH
     , m_downloadPath {params.downloadPath}
     , m_category {params.category}
     , m_tags {params.tags}
+    , m_comment {params.comment}
+    , m_commentIsCustom {params.commentIsCustom}
     , m_shareLimits {params.shareLimits}
     , m_operatingMode {params.operatingMode}
     , m_contentLayout {params.contentLayout}
@@ -149,9 +151,11 @@ TorrentImpl::TorrentImpl(SessionImpl *session, const lt::torrent_handle &nativeH
     {
         // Torrent was added with metadata
         m_torrentInfo = TorrentInfo(*m_ltAddTorrentParams.ti);
+        rebuildFileStateFromNative();
         m_creationDate = QDateTime::fromSecsSinceEpoch(m_ltAddTorrentParams.ti->creation_date());
         m_creator = QString::fromStdString(m_ltAddTorrentParams.ti->creator());
-        m_comment = QString::fromStdString(m_ltAddTorrentParams.ti->comment());
+        if (!m_commentIsCustom)
+            m_comment = QString::fromStdString(m_ltAddTorrentParams.ti->comment());
     }
 
     const auto now = QDateTime::currentDateTime();
@@ -232,8 +236,11 @@ QString TorrentImpl::comment() const
 
 void TorrentImpl::setComment(const QString &comment)
 {
-    // TODO(engine): persist the user-edited comment into the resume data.
+    if ((m_comment == comment) && m_commentIsCustom)
+        return;
+
     m_comment = comment;
+    m_commentIsCustom = true;
     deferredRequestResumeData();
 }
 
@@ -582,7 +589,8 @@ ShareLimits TorrentImpl::effectiveShareLimits() const
 
 Path TorrentImpl::filePath(const int index) const
 {
-    return m_torrentInfo.filePath(index);
+    return ((index >= 0) && (index < m_filePaths.size()))
+        ? m_filePaths.at(index) : Path();
 }
 
 Path TorrentImpl::actualFilePath(const int index) const
@@ -590,7 +598,7 @@ Path TorrentImpl::actualFilePath(const int index) const
     if ((index < 0) || (index >= m_filePaths.size()))
         return {};
 
-    return m_filePaths.at(index);
+    return makeActualPath(index, m_filePaths.at(index));
 }
 
 qlonglong TorrentImpl::fileSize(const int index) const
@@ -600,12 +608,16 @@ qlonglong TorrentImpl::fileSize(const int index) const
 
 PathList TorrentImpl::filePaths() const
 {
-    return m_torrentInfo.filePaths();
+    return m_filePaths;
 }
 
 PathList TorrentImpl::actualFilePaths() const
 {
-    return m_filePaths;
+    PathList result;
+    result.reserve(m_filePaths.size());
+    for (int i = 0; i < m_filePaths.size(); ++i)
+        result.append(actualFilePath(i));
+    return result;
 }
 
 QList<DownloadPriority> TorrentImpl::filePriorities() const
@@ -1136,17 +1148,16 @@ void TorrentImpl::doRenameFile(const int index, const Path &path, const int fold
     if ((index < 0) || (index >= filesCount()))
         return;
 
-    m_renamingFiles.enqueue({index, folderRenameJobID});
+    const lt::file_index_t nativeIndex = m_torrentInfo.nativeIndexes().at(index);
+    m_renamingFiles[nativeIndex].enqueue({index, folderRenameJobID});
     const Path actualPath = makeActualPath(index, path);
-    m_nativeHandle.rename_file(m_torrentInfo.nativeIndexes().at(index)
-            , actualPath.toString().toStdString());
+    m_nativeHandle.rename_file(nativeIndex, actualPath.toString().toStdString());
 }
 
 void TorrentImpl::doRenameFolder(const Path &oldFolderPath, const Path &newFolderPath)
 {
-    // TODO(engine): rename every file under `oldFolderPath` to sit under
-    // `newFolderPath`, tracking a folder-rename job so the completion signal fires
-    // once every child file rename has been acknowledged by libtorrent.
+    // Rename every child through libtorrent and keep one acknowledgement job so
+    // the completion signal fires only after all child requests have settled.
     const int jobID = m_nextFolderRenameJobID++;
     FolderRenameInfo jobInfo;
     jobInfo.folderRenameJobID = jobID;
@@ -1162,7 +1173,8 @@ void TorrentImpl::doRenameFolder(const Path &oldFolderPath, const Path &newFolde
 
         const Path newFilePath = newFolderPath / oldFolderPath.relativePathOf(filePath);
 
-        jobInfo.renamedFiles.insert(i, newFilePath);
+        jobInfo.renamedFiles.insert(i, filePath);
+        jobInfo.pendingFileIndexes.insert(i);
         doRenameFile(i, newFilePath, jobID);
         anyRenamed = true;
     }
@@ -1826,33 +1838,37 @@ void TorrentImpl::handleFileError(const FileErrorInfo fileError)
 
 void TorrentImpl::handleFileRenamed(const lt::file_index_t nativeFileIndex, const Path &newActualFilePath, const Path &oldActualFilePath)
 {
-    if (m_renamingFiles.isEmpty())
+    auto pending = m_renamingFiles.find(nativeFileIndex);
+    if (pending == m_renamingFiles.end() || pending->isEmpty())
         return;
 
-    const FileRenameInfo renameInfo = m_renamingFiles.dequeue();
+    const FileRenameInfo renameInfo = pending->dequeue();
+    if (pending->isEmpty())
+        m_renamingFiles.erase(pending);
     const int index = renameInfo.index;
     if ((index >= 0) && (index < m_filePaths.size()))
+    {
         m_filePaths[index] = makeUserPath(newActualFilePath);
+        m_ltAddTorrentParams.renamed_files[nativeFileIndex] = newActualFilePath.data().toStdString();
+    }
 
     if (renameInfo.folderRenameJobID < 0)
     {
-        m_session->handleTorrentContentFileRenamed(this, index, oldActualFilePath);
+        m_session->handleTorrentContentFileRenamed(this, index, makeUserPath(oldActualFilePath));
     }
     else
     {
-        // TODO(engine): coalesce per-file completions into the folder-rename job and
-        // emit folderRenamed once the job is fully processed.
         for (int i = 0; i < m_renamingFolders.size(); ++i)
         {
             FolderRenameInfo &folder = m_renamingFolders[i];
             if (folder.folderRenameJobID != renameInfo.folderRenameJobID)
                 continue;
 
-            folder.renamedFiles.remove(index);
-            if (folder.renamedFiles.isEmpty())
+            folder.pendingFileIndexes.remove(index);
+            if (folder.pendingFileIndexes.isEmpty())
             {
                 m_session->handleTorrentContentFolderRenamed(this, folder.newFolderPath
-                        , folder.oldFolderPath, {});
+                        , folder.oldFolderPath, folder.renamedFiles);
                 m_renamingFolders.removeAt(i);
             }
             break;
@@ -1864,10 +1880,13 @@ void TorrentImpl::handleFileRenamed(const lt::file_index_t nativeFileIndex, cons
 
 void TorrentImpl::handleFileRenameFailed(const lt::file_index_t nativeFileIndex)
 {
-    if (m_renamingFiles.isEmpty())
+    auto pending = m_renamingFiles.find(nativeFileIndex);
+    if (pending == m_renamingFiles.end() || pending->isEmpty())
         return;
 
-    const FileRenameInfo renameInfo = m_renamingFiles.dequeue();
+    const FileRenameInfo renameInfo = pending->dequeue();
+    if (pending->isEmpty())
+        m_renamingFiles.erase(pending);
     qCWarning(lcTorrent) << "File rename failed for" << name() << "index" << renameInfo.index;
 
     if (renameInfo.folderRenameJobID >= 0)
@@ -1879,11 +1898,11 @@ void TorrentImpl::handleFileRenameFailed(const lt::file_index_t nativeFileIndex)
                 continue;
 
             folder.failedFileIndexes.append(renameInfo.index);
-            folder.renamedFiles.remove(renameInfo.index);
-            if (folder.renamedFiles.isEmpty())
+            folder.pendingFileIndexes.remove(renameInfo.index);
+            if (folder.pendingFileIndexes.isEmpty())
             {
                 m_session->handleTorrentContentFolderRenamingFailed(this, folder.newFolderPath
-                        , folder.oldFolderPath, {}, folder.failedFileIndexes);
+                        , folder.oldFolderPath, folder.renamedFiles, folder.failedFileIndexes);
                 m_renamingFolders.removeAt(i);
             }
             break;
@@ -1904,19 +1923,7 @@ void TorrentImpl::handleMetadataReceived()
         m_torrentInfo = TorrentInfo(*nativeInfo);
         m_infoHash = InfoHash {m_nativeHandle.info_hashes()};
         m_ltAddTorrentParams.ti = std::const_pointer_cast<lt::torrent_info>(nativeInfo);
-
-        // Rebuild the payload index map (native indexes -> public indexes)
-        m_indexMap.clear();
-        const QList<lt::file_index_t> nativeIndexes = m_torrentInfo.nativeIndexes();
-        m_filePaths.clear();
-        m_filePaths.reserve(nativeIndexes.size());
-        for (int i = 0; i < nativeIndexes.size(); ++i)
-        {
-            m_indexMap.insert(nativeIndexes[i], i);
-            m_filePaths.append(m_torrentInfo.filePath(i));
-        }
-        m_completedFiles.fill(false, filesCount());
-        m_filePriorities.clear();
+        rebuildFileStateFromNative();
 
         endReceivedMetadataHandling(savePath(), m_torrentInfo.filePaths());
         m_maintenanceJob = MaintenanceJob::None;
@@ -1965,6 +1972,8 @@ void TorrentImpl::prepareResumeData(lt::add_torrent_params resumeData)
     data.tags = m_tags;
     data.savePath = m_savePath;
     data.downloadPath = m_downloadPath;
+    data.comment = m_comment;
+    data.commentIsCustom = m_commentIsCustom;
     data.contentLayout = m_contentLayout;
     data.operatingMode = m_operatingMode;
     data.firstLastPiecePriority = m_hasFirstLastPiecePriority;
@@ -2077,6 +2086,42 @@ void TorrentImpl::resetTrackerEntryStatuses()
 
 // --- Private helpers ---
 
+void TorrentImpl::rebuildFileStateFromNative()
+{
+    if (!hasMetadata())
+        return;
+
+    m_indexMap.clear();
+    m_filePaths.clear();
+    m_filePriorities.clear();
+
+    const QList<lt::file_index_t> nativeIndexes = m_torrentInfo.nativeIndexes();
+    const std::vector<lt::download_priority_t> nativePriorities = m_nativeHandle.get_file_priorities();
+    m_filePaths.reserve(nativeIndexes.size());
+    m_filePriorities.reserve(nativeIndexes.size());
+
+    for (int index = 0; index < nativeIndexes.size(); ++index)
+    {
+        const lt::file_index_t nativeIndex = nativeIndexes.at(index);
+        m_indexMap.insert(nativeIndex, index);
+        m_filePaths.append(m_torrentInfo.filePath(index));
+        m_filePriorities.append((LT::toUnderlyingType(nativeIndex) < nativePriorities.size())
+                ? LT::fromNative(nativePriorities[LT::toUnderlyingType(nativeIndex)])
+                : DownloadPriority::Normal);
+    }
+
+    for (const auto &[nativeIndex, nativePath] : m_ltAddTorrentParams.renamed_files)
+    {
+        const auto index = m_indexMap.constFind(nativeIndex);
+        if (index == m_indexMap.cend())
+            continue;
+
+        m_filePaths[*index] = makeUserPath(Path(QString::fromStdString(nativePath)));
+    }
+
+    m_completedFiles.fill(false, m_filePaths.size());
+}
+
 bool TorrentImpl::isMoveInProgress() const
 {
     return m_storageIsMoving;
@@ -2092,16 +2137,34 @@ void TorrentImpl::setAutoManaged(const bool enable)
 
 Path TorrentImpl::makeActualPath(const int index, const Path &path) const
 {
-    // TODO(engine): apply the ".!qB" incomplete extension and the ".unwanted"
-    // folder redirection according to session options. Base mapping wired here.
-    Q_UNUSED(index);
-    return path;
+    Path result = path;
+
+    if (m_session->isUnwantedFolderEnabled()
+            && (m_filePriorities.value(index, DownloadPriority::Normal) == DownloadPriority::Ignored))
+    {
+        result = Path(u".unwanted"_s) / result;
+    }
+
+    const bool fileComplete = m_hasFinishedStatus || ((index >= 0)
+            && (index < m_filesProgress.size())
+            && (m_filesProgress.at(index) >= fileSize(index)));
+    if (m_session->isAppendExtensionEnabled() && !fileComplete
+            && !result.hasExtension(u".!qB"_s))
+    {
+        result = Path(result.data() + u".!qB"_s);
+    }
+
+    return result;
 }
 
 Path TorrentImpl::makeUserPath(const Path &path) const
 {
-    // Strip the ".!qB" append extension if present.
+    // Strip the reserved unwanted root and ".!qB" append extension so the
+    // content model and user actions continue to address logical paths.
     Path result = path;
+    const Path unwantedRoot {u".unwanted"_s};
+    if (result.hasAncestor(unwantedRoot))
+        result = unwantedRoot.relativePathOf(result);
     if (result.hasExtension(u".!qB"_s))
         result = result.removedExtension();
     return result;
@@ -2131,8 +2194,28 @@ void TorrentImpl::moveStorage(const Path &newPath, const MoveStorageContext cont
 
 void TorrentImpl::manageActualFilePaths()
 {
-    // TODO(engine): recompute actual on-disk paths for incomplete files (append
-    // extension) and unwanted files (".unwanted" folder), issuing renames as needed.
     if (!hasMetadata())
         return;
+
+    const QList<lt::file_index_t> nativeIndexes = m_torrentInfo.nativeIndexes();
+    for (int index = 0; index < m_filePaths.size(); ++index)
+    {
+        if (index >= nativeIndexes.size())
+            break;
+        const lt::file_index_t nativeIndex = nativeIndexes.at(index);
+
+        Path currentPath = m_torrentInfo.filePath(index);
+        if (const auto it = m_ltAddTorrentParams.renamed_files.find(nativeIndex);
+                it != m_ltAddTorrentParams.renamed_files.end())
+        {
+            currentPath = Path(QString::fromStdString(it->second));
+        }
+
+        // doRenameFile() accepts the logical user path and applies the
+        // storage transform exactly once. Passing the already-transformed
+        // desired path here would duplicate .unwanted/ or .!qB.
+        const Path logicalPath = m_filePaths.at(index);
+        if (currentPath != makeActualPath(index, logicalPath))
+            doRenameFile(index, logicalPath);
+    }
 }

@@ -79,10 +79,15 @@ Item {
                 width: 260
                 placeholder: qsTr("Filter search results…")
                 regexEnabled: root.proxyModel ? root.proxyModel.regexEnabled : false
+                regexFlags: root.proxyModel ? root.proxyModel.regexFlags : "iu"
                 onTextChanged: if (root.proxyModel) root.proxyModel.setResultsFilter(text)
                 onRegexEnabledChanged: {
                     if (root.proxyModel) root.proxyModel.setRegexEnabled(regexEnabled)
                     SearchController.setResultsFilterUsesRegex(regexEnabled)
+                }
+                onRegexFlagsChanged: {
+                    if (root.proxyModel) root.proxyModel.setRegexFlags(regexFlags)
+                    SearchController.setResultsFilterRegexFlags(regexFlags)
                 }
             }
 

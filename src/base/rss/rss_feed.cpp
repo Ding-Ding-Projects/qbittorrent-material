@@ -73,7 +73,7 @@ Feed::Feed(Session *session, const QUuid &uid, const QString &url, const QString
     connect(this, &Feed::destroyed, m_serializer, &Private::FeedSerializer::deleteLater);
     connect(m_serializer, &Private::FeedSerializer::loadingFinished, this, &Feed::handleArticleLoadFinished);
 
-    m_parser = new Private::Parser(m_lastBuildDate);
+    m_parser = new Private::Parser(m_lastBuildDate, m_url);
     m_parser->moveToThread(m_session->workingThread());
     connect(this, &Feed::destroyed, m_parser, &Private::Parser::deleteLater);
     connect(m_parser, &Private::Parser::finished, this, &Feed::handleParsingFinished);

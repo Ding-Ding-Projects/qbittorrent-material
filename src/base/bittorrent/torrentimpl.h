@@ -28,6 +28,7 @@
 #include <QMap>
 #include <QObject>
 #include <QQueue>
+#include <QSet>
 #include <QString>
 
 #include "base/tagset.h"
@@ -279,7 +280,10 @@ namespace BitTorrent
             int folderRenameJobID = -1;
             Path oldFolderPath {};
             Path newFolderPath {};
+            // Original user paths are retained for partial-failure recovery;
+            // pendingFileIndexes tracks only acknowledgements still outstanding.
             QHash<int, Path> renamedFiles {};
+            QSet<int> pendingFileIndexes {};
             QList<int> failedFileIndexes {};
         };
 
@@ -298,6 +302,7 @@ namespace BitTorrent
 
         Path makeActualPath(int index, const Path &path) const;
         Path makeUserPath(const Path &path) const;
+        void rebuildFileStateFromNative();
         void adjustStorageLocation();
         void moveStorage(const Path &newPath, MoveStorageContext context);
         void manageActualFilePaths();
@@ -329,6 +334,7 @@ namespace BitTorrent
         QDateTime m_creationDate;
         QString m_creator;
         QString m_comment;
+        bool m_commentIsCustom = false;
 
         QDateTime m_addedTime;
         QDateTime m_completedTime;
@@ -339,7 +345,10 @@ namespace BitTorrent
         QQueue<EventTrigger> m_moveFinishedTriggers;
         bool m_storageIsMoving = false;
 
-        QQueue<FileRenameInfo> m_renamingFiles;
+        // libtorrent can acknowledge file renames in a different order from
+        // the requests. Keep a FIFO per native index so an alert can never
+        // consume another file's rename context.
+        QHash<lt::file_index_t, QQueue<FileRenameInfo>> m_renamingFiles;
         QQueue<FolderRenameInfo> m_renamingFolders;
         int m_nextFolderRenameJobID = 0;
 

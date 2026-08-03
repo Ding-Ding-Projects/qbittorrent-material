@@ -134,7 +134,8 @@ public:
     /// Start a new search. Returns the new tab id, or -1 if it could not start
     /// (no Python, empty pattern, no plugins). @p scope is a plugin-scope token.
     Q_INVOKABLE int startSearch(const QString &pattern, const QString &category,
-                                const QString &scope);
+                                const QString &scope, bool regexEnabled = false,
+                                const QString &regexFlags = QStringLiteral("iu"));
 
     /// Re-run the query owned by @p tabId in place (context-menu "Refresh tab").
     Q_INVOKABLE void refreshTab(int tabId);
@@ -203,6 +204,8 @@ public:
     Q_INVOKABLE void setNameFilteringMode(int mode);
     [[nodiscard]] Q_INVOKABLE bool resultsFilterUsesRegex() const;
     Q_INVOKABLE void setResultsFilterUsesRegex(bool enabled);
+    [[nodiscard]] Q_INVOKABLE QString resultsFilterRegexFlags() const;
+    Q_INVOKABLE void setResultsFilterRegexFlags(const QString &flags);
 
 signals:
     void pythonAvailableChanged();
@@ -250,6 +253,8 @@ private:
         QString category;
         QStringList plugins;
         QString scope;
+        bool regexEnabled = false;
+        QString regexFlags = QStringLiteral("iu");
         Status status = Ready;
         SearchHandler *handler = nullptr;
         SearchResultsModel *model = nullptr;

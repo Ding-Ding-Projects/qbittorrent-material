@@ -182,7 +182,8 @@ private:
     // Handler signal reactions.
     void onMetadataReceived();
     void onFileRenamed(int fileIndex, const Path &oldFilePath);
-    void onFolderRenamed(const Path &newFolderPath, const Path &oldFolderPath);
+    void onFolderRenamed(const Path &newFolderPath, const Path &oldFolderPath
+            , const QHash<int, Path> &renamedFiles);
     void onFolderRenamingFailed(const Path &newFolderPath, const Path &oldFolderPath
             , const QHash<int, Path> &renamedFiles, const QList<int> &failedFileIndexes);
 

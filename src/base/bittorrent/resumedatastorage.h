@@ -66,6 +66,12 @@ namespace BitTorrent
         // Every currently-stored torrent id, oldest-added first.
         [[nodiscard]] QList<TorrentID> torrentIds() const;
 
+        // Persists the queue from top to bottom independently of the
+        // lexicographic torrent-file enumeration used by torrentIds().
+        bool storeQueue(const QList<TorrentID> &ids);
+        [[nodiscard]] QList<TorrentID> loadQueue() const;
+        bool removeQueue();
+
         // Reconstructs one torrent's full resume state. False if missing/corrupt.
         [[nodiscard]] bool load(const TorrentID &id, LoadTorrentParams *params) const;
 

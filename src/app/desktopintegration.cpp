@@ -276,14 +276,20 @@ QString DesktopIntegration::findWellKnownEditor(const QString &id)
 {
 #ifdef Q_OS_WIN
     // A PATH lookup misses every VS Code installed without the "add to PATH"
-    // option, which is the default for the user-scope installer, and misses
-    // Insiders and portable builds entirely. Check where they actually land.
+    // option, which is the default for the user-scope installer. Check the
+    // documented user-local and machine-wide install roots as well.
     static const QHash<QString, QStringList> relativePaths {
         {u"vscode"_qs, {
             uR"(Programs\Microsoft VS Code\Code.exe)"_qs,
-            uR"(Programs\Microsoft VS Code Insiders\Code - Insiders.exe)"_qs}},
-        {u"vscodium"_qs, {uR"(Programs\VSCodium\VSCodium.exe)"_qs}},
-        {u"cursor"_qs, {uR"(Programs\cursor\Cursor.exe)"_qs}}
+            uR"(Microsoft VS Code\Code.exe)"_qs,
+            uR"(Programs\Microsoft VS Code Insiders\Code - Insiders.exe)"_qs,
+            uR"(Microsoft VS Code Insiders\Code - Insiders.exe)"_qs}},
+        {u"vscodium"_qs, {
+            uR"(Programs\VSCodium\VSCodium.exe)"_qs,
+            uR"(VSCodium\VSCodium.exe)"_qs}},
+        {u"cursor"_qs, {
+            uR"(Programs\cursor\Cursor.exe)"_qs,
+            uR"(cursor\Cursor.exe)"_qs}}
     };
 
     const auto it = relativePaths.constFind(id);
@@ -291,10 +297,10 @@ QString DesktopIntegration::findWellKnownEditor(const QString &id)
         return {};
 
     const QStringList roots {
-        QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation),
         qEnvironmentVariable("LOCALAPPDATA"),
         qEnvironmentVariable("ProgramFiles"),
-        qEnvironmentVariable("ProgramFiles(x86)")
+        qEnvironmentVariable("ProgramFiles(x86)"),
+        qEnvironmentVariable("ProgramW6432")
     };
 
     for (const QString &root : roots)

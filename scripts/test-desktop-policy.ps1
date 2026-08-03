@@ -473,8 +473,76 @@ $desktopIntegration = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/app/desktopintegration.cpp")
 Test-Policy ($desktopIntegration.Contains('QString DesktopIntegration::findWellKnownEditor') `
         -and $desktopIntegration.Contains('Programs\Microsoft VS Code\Code.exe') `
-        -and $desktopIntegration.Contains('Code - Insiders.exe')) `
+        -and $desktopIntegration.Contains('Microsoft VS Code\Code.exe') `
+        -and $desktopIntegration.Contains('Code - Insiders.exe') `
+        -and $desktopIntegration.Contains('qEnvironmentVariable("ProgramFiles")') `
+        -and $desktopIntegration.Contains('qEnvironmentVariable("ProgramFiles(x86)")') `
+        -and $desktopIntegration.Contains('qEnvironmentVariable("ProgramW6432")') `
+        -and -not $desktopIntegration.Contains('writableLocation(QStandardPaths::AppLocalDataLocation),')) `
     "editor detection looks where VS Code actually installs, not only on PATH"
+$associationUninstall = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "installer/file_associations_uninstall.nsh")
+$associationInstall = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "installer/file_associations_install.nsh")
+Test-Policy ($associationInstall.Contains('ReadRegDWORD $1 HKCU "Software\qBittorrentMaterial\AssociationBackup\torrent" "Saved"') `
+        -and $associationInstall.Contains('ReadRegDWORD $1 HKCU "Software\qBittorrentMaterial\AssociationBackup\magnet" "Saved"') `
+        -and $associationInstall.Contains('WriteRegDWORD HKCU "Software\qBittorrentMaterial\AssociationBackup\torrent" "Saved" 1') `
+        -and $associationInstall.Contains('WriteRegDWORD HKCU "Software\qBittorrentMaterial\AssociationBackup\magnet" "Saved" 1') `
+        -and $associationInstall.Contains('WriteRegStr HKCR ".torrent" "" "qBittorrentMaterial.torrent"') `
+        -and $associationInstall.Contains('WriteRegStr HKCR "magnet" "URL Protocol" ""')) `
+    "association installation snapshots previous handlers before taking ownership"
+Test-Policy ($associationUninstall.Contains('ReadRegStr $0 HKCR "qBittorrentMaterial.torrent\shell\open\command" ""') `
+        -and $associationUninstall.Contains('ReadRegStr $0 HKCR "magnet\shell\open\command" ""') `
+        -and $associationUninstall.Contains('ReadRegStr $1 HKCR "magnet" "URL Protocol"') `
+        -and $associationUninstall.Contains('ReadRegDWORD $1 HKCU "Software\qBittorrentMaterial\AssociationBackup\torrent" "Saved"') `
+        -and $associationUninstall.Contains('ReadRegDWORD $1 HKCU "Software\qBittorrentMaterial\AssociationBackup\magnet" "Saved"') `
+        -and $associationUninstall.Contains('WriteRegStr HKCR ".torrent" "" "$2"') `
+        -and $associationUninstall.Contains('WriteRegStr HKCR "magnet" "URL Protocol" "$2"') `
+        -and $associationUninstall.Contains('DeleteRegKey HKCU "Software\qBittorrentMaterial\AssociationBackup\torrent"') `
+        -and $associationUninstall.Contains('DeleteRegKey HKCU "Software\qBittorrentMaterial\AssociationBackup\magnet"') `
+        -and $associationUninstall.Contains('DeleteRegKey /ifempty HKCR "magnet\shell"') `
+        -and -not $associationUninstall.Contains('DeleteRegKey HKCR "magnet\shell\open\command"') `
+        -and -not $associationUninstall.Contains('DeleteRegKey HKCR "magnet\shell"')) `
+    "uninstall restores a snapshotted handler and preserves changed associations unless their command still belongs to this app"
+$torrentImplSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/base/bittorrent/torrentimpl.cpp")
+Test-Policy ($torrentImplSource.Contains('Path logicalPath = m_filePaths.at(index)') `
+        -and $torrentImplSource.Contains('doRenameFile(index, logicalPath)') `
+        -and $torrentImplSource.Contains('applies the') `
+        -and $torrentImplSource -notmatch 'doRenameFile\(index, desiredPath\)') `
+    "incomplete-file maintenance applies the on-disk path transform exactly once"
+$sessionSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/base/bittorrent/sessionimpl.cpp")
+$resumeStorageSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/base/bittorrent/resumedatastorage.cpp")
+Test-Policy ($sessionSource.Contains('m_startupQueueOrder = m_resumeDataStorage') `
+        -and $sessionSource.Contains('applyStartupQueue()') `
+        -and $sessionSource.Contains('nativeHandle().queue_position()') `
+        -and $sessionSource -match '\+\+m_pendingStartupRestores;\s*\r?\n\s*m_nativeSession->async_add_torrent\(p\);' `
+        -and $resumeStorageSource.Contains('bool ResumeDataStorage::storeQueue') `
+        -and $resumeStorageSource.Contains('QList<TorrentID> ResumeDataStorage::loadQueue')) `
+    "torrent queue order is stored explicitly and reapplied after asynchronous restore"
+Test-Policy ($torrentImplSource.Contains('m_commentIsCustom {params.commentIsCustom}') `
+        -and $torrentImplSource.Contains('data.commentIsCustom = m_commentIsCustom') `
+        -and $resumeStorageSource.Contains('commentIsCustom')) `
+    "a user-cleared torrent comment remains distinct from immutable metadata"
+Test-Policy ($torrentImplSource.Contains('m_renamingFiles[nativeIndex]') `
+        -and $torrentImplSource.Contains('m_renamingFiles.find(nativeFileIndex)') `
+        -and $torrentImplSource.Contains('folder.pendingFileIndexes')) `
+    "rename acknowledgements correlate by native file index and complete folder jobs atomically"
+$rssParserSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/base/rss/rss_parser.cpp")
+Test-Policy ($rssParserSource.Contains('bool isTorrentMimeType') `
+        -and $rssParserSource.Contains('resolveFeedUrl(m_baseUrl') `
+        -and $rssParserSource.Contains('article[Article::KeyTorrentURL] = resolveFeedUrl') `
+        -and $rssParserSource -notmatch 'KeyTorrentURL\].*= article\.value\(Article::KeyLink\)' `
+        -and $rssParserSource.Contains('m_baseUrl = m_feedUrl')) `
+    "RSS parsing distinguishes article links from torrent enclosures and resolves relative URLs"
+$foreignAppsSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/base/utils/foreignapps.cpp")
+Test-Policy ($foreignAppsSource.Contains('preferredPythonPath.isEmpty() || pyInfo.executablePath.exists()') `
+        -and $foreignAppsSource.Contains('pyInfo = {};')) `
+    "Python auto-detection invalidates stale cached executables"
 # An export the user cannot open is an export they have to hunt for on disk.
 $workspaceViewSource = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/workspace/WorkspaceView.qml")
@@ -485,18 +553,33 @@ Test-Policy ($mainQml.Contains('actionId.startsWith("open-export:")') `
 
 # Local search surfaces reach the anchored regex builder rather than owning a
 # hand-rolled ".*" toggle that cannot build a pattern.
+$historyModelSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/models/journalhistorymodel.cpp")
 $historySheet = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/shell/HistorySheet.qml")
 Test-Policy ($historySheet.Contains('FilterTextField {') `
         -and $historySheet.Contains('readonly property bool histRegex: searchField.regexEnabled') `
+        -and $historyModelSource.Contains('m_filterValid = false;') `
+        -and $historyModelSource.Contains('Invalid regular expression at offset') `
         -and -not ($historySheet -match 'text:\s*"\.\*"')) `
     "the history panel searches through the shared field and its anchored builder"
-# The Search tab's site query genuinely cannot take a local pattern; the rule
-# requires that exemption to be written down rather than left as a silent gap.
-Test-Policy ((Get-Content -Raw -LiteralPath `
-        (Get-RepositoryPath "docs/features/transfers/search-runtime.md")) `
-        -match 'Documented exemption: the site-query field has no regex builder') `
-    "the one search field without a builder documents why the rule cannot apply"
+$searchTab = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/search/SearchTab.qml")
+Test-Policy ($searchTab.Contains('builderTitle: qsTr("Site search Regex Builder")') `
+        -and $searchTab.Contains('Plain-text site query by default; the adjacent Regex Builder') `
+        -and $searchTab.Contains('onRegexApplied:') `
+        -and $searchTab.Contains('searchField.patternValid') `
+        -and $searchTab.Contains('searchField.regexFlags')) `
+    "the Search tab keeps plain text as the default and wires validated regex flags into the search"
+$searchResultsModel = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/models/searchresultsmodel.h")
+$searchResultsTab = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/search/SearchResultsTab.qml")
+Test-Policy ($searchResultsModel.Contains('Q_PROPERTY(QString regexFlags') `
+        -and $searchResultsModel.Contains('patternOptions(regexFlags)') `
+        -and $searchResultsModel.Contains('if (!m_textRegex.isValid())') `
+        -and $searchResultsTab.Contains('regexFlags: root.proxyModel')) `
+    "search-result regex filters honor their flags and reject invalid patterns"
 
 # Irreversible actions sit behind a deliberate gate: two independently operated
 # keys, then a full-range slider, with an always-available emergency exit. A

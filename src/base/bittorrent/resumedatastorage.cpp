@@ -19,6 +19,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 
 #include "base/git/gitrepositorystore.h"
 #include "base/logging.h"
@@ -50,6 +51,11 @@ namespace
         return u"torrents/%1.metadata.dat"_s.arg(id.toString());
     }
 
+    QString queuePath()
+    {
+        return u"torrents/queue.json"_s;
+    }
+
     QJsonObject serializeMeta(const TorrentID &id, const LoadTorrentParams &params)
     {
         QJsonObject obj;
@@ -69,6 +75,7 @@ namespace
         obj[u"savePath"_s] = params.savePath.toString();
         obj[u"downloadPath"_s] = params.downloadPath.toString();
         obj[u"comment"_s] = params.comment;
+        obj[u"commentIsCustom"_s] = params.commentIsCustom;
         obj[u"contentLayout"_s] = static_cast<int>(params.contentLayout);
         obj[u"operatingMode"_s] = static_cast<int>(params.operatingMode);
         obj[u"useAutoTMM"_s] = params.useAutoTMM;
@@ -100,6 +107,9 @@ namespace
         params->savePath = Path(obj[u"savePath"_s].toString());
         params->downloadPath = Path(obj[u"downloadPath"_s].toString());
         params->comment = obj[u"comment"_s].toString();
+        // The flag is intentionally optional for compatibility with resume
+        // metadata written before user-edited comments were persisted.
+        params->commentIsCustom = obj[u"commentIsCustom"_s].toBool();
         params->contentLayout = static_cast<TorrentContentLayout>(obj[u"contentLayout"_s].toInt());
         params->operatingMode = static_cast<TorrentOperatingMode>(obj[u"operatingMode"_s].toInt());
         params->useAutoTMM = obj[u"useAutoTMM"_s].toBool();
@@ -277,6 +287,103 @@ bool ResumeDataStorage::remove(const TorrentID &id)
         return false;
     }
     return allRemoved;
+}
+
+bool ResumeDataStorage::storeQueue(const QList<TorrentID> &ids)
+{
+    if (!m_available)
+        return false;
+
+    QJsonArray order;
+    QSet<TorrentID> seen;
+    for (const TorrentID &id : ids)
+    {
+        if (id.isValid() && !seen.contains(id))
+        {
+            order.append(id.toString());
+            seen.insert(id);
+        }
+    }
+
+    QJsonObject object;
+    object[u"version"_s] = 1;
+    object[u"order"_s] = order;
+    const QByteArray bytes = QJsonDocument(object).toJson(QJsonDocument::Compact);
+
+    const QDir root {m_rootPath.data()};
+    const QString path = root.filePath(queuePath());
+    QString error;
+    if (!Git::GitRepositoryStore::writeFileAtomically(path, bytes, &error))
+    {
+        qCWarning(lcSession) << "Failed to write torrent queue:" << error;
+        return false;
+    }
+
+    QString commitId;
+    bool committed = false;
+    if (!m_store->commitAll(u"queue: save torrent order"_s, &commitId, &committed, &error))
+    {
+        qCWarning(lcSession) << "Failed to commit torrent queue:" << error;
+        return false;
+    }
+    return true;
+}
+
+QList<TorrentID> ResumeDataStorage::loadQueue() const
+{
+    QList<TorrentID> result;
+    if (!m_available)
+        return result;
+
+    QString error;
+    const QString head = m_store->headCommitId(&error);
+    if (head.isEmpty())
+        return result;
+
+    QByteArray bytes;
+    bool found = false;
+    if (!m_store->readFileAtCommit(head, queuePath(), &bytes, &found, &error) || !found)
+        return result;
+
+    const QJsonDocument document = QJsonDocument::fromJson(bytes);
+    if (!document.isObject())
+        return result;
+
+    QSet<TorrentID> seen;
+    for (const QJsonValue &value : document.object().value(u"order"_s).toArray())
+    {
+        const TorrentID id = TorrentID::fromString(value.toString());
+        if (id.isValid() && !seen.contains(id))
+        {
+            result.append(id);
+            seen.insert(id);
+        }
+    }
+    return result;
+}
+
+bool ResumeDataStorage::removeQueue()
+{
+    if (!m_available)
+        return false;
+
+    const QDir root {m_rootPath.data()};
+    const QString path = root.filePath(queuePath());
+    if (QFileInfo::exists(path) && !QFile::remove(path))
+    {
+        qCWarning(lcSession) << "Failed to delete torrent queue";
+        return false;
+    }
+
+    QString error;
+    QString commitId;
+    bool committed = false;
+    if (!m_store->commitAll(u"queue: clear torrent order"_s, &commitId, &committed, &error))
+    {
+        qCWarning(lcSession) << "Failed to commit torrent queue removal:" << error;
+        return false;
+    }
+    return true;
 }
 
 QList<TorrentID> ResumeDataStorage::torrentIds() const

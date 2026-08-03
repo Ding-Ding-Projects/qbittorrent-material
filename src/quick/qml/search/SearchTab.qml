@@ -54,9 +54,14 @@ Item {
             NotificationCenter.notify(qsTr("Please type a search pattern first"), "warning")
             return
         }
+        if (!searchField.patternValid) {
+            NotificationCenter.notify(qsTr("The regular expression is invalid; fix it before searching."), "warning")
+            return
+        }
         Log.info("search", "Search clicked: '" + pattern + "' scope=" + root.currentScope +
                  " category=" + categoryCombo.currentValue)
-        var id = SearchController.startSearch(pattern, categoryCombo.currentValue, root.currentScope)
+        var id = SearchController.startSearch(pattern, categoryCombo.currentValue, root.currentScope,
+            searchField.regexEnabled, searchField.regexFlags)
         if (id >= 0) {
             root.currentTabId = id
             root.currentTabPattern = pattern
@@ -169,52 +174,64 @@ Item {
             Layout.fillWidth: true
             spacing: Spacing.sm
 
-            TextField {
+            FilterTextField {
                 id: searchField
                 Layout.fillWidth: true
                 Layout.preferredHeight: Spacing.controlHeight
                 enabled: SearchController.pluginsInstalled && SearchController.pythonAvailable
-                placeholderText: qsTr("Search…")
-                selectByMouse: true
-                ToolTip.text: qsTr("A file name to search for. Multiple words act as AND; wrap an exact phrase in double quotes.")
-                ToolTip.visible: hovered && text.length === 0
-                ToolTip.delay: 800
+                placeholder: qsTr("Search…")
+                builderTitle: qsTr("Site search Regex Builder")
+                builderSampleText: "ubuntu-24.04.2-desktop-amd64.iso\nS02E08 · 蝦餃\nnotes.txt"
+                Accessible.name: qsTr("Search site releases")
+                Accessible.description: qsTr("Plain-text site query by default; the adjacent Regex Builder can compose and validate a PCRE2 pattern.")
                 onAccepted: root._doSearch()
                 onTextEdited: Log.trace("search", "Query edited")
+                onRegexApplied: (pattern, flags) => Log.debug(
+                    "search", "Site query pattern composed with flags " + flags)
+            }
 
-                IconButton {
-                    symbol: Icons.arrow_drop_down
-                    size: 18
-                    visible: SearchController.history.length > 0
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    tooltip: qsTr("Search history")
-                    onClicked: historyMenu.open()
-                }
+            IconButton {
+                id: historyButton
+                Layout.preferredWidth: Spacing.controlHeight
+                Layout.preferredHeight: Spacing.controlHeight
+                symbol: Icons.arrow_drop_down
+                visible: SearchController.history.length > 0
+                tooltip: qsTr("Search history")
+                Accessible.name: qsTr("Open search history")
+                onClicked: historyMenu.open()
+            }
 
-                Menu {
-                    id: historyMenu
-                    y: searchField.height
-                    Material.elevation: Spacing.elevationMenu
-                    Repeater {
-                        model: SearchController.history
-                        delegate: MenuItem {
-                            required property string modelData
-                            text: modelData
-                            onTriggered: {
-                                Log.debug("search", "History picked: " + modelData)
-                                searchField.text = modelData
-                            }
+            SearchableMenu {
+                id: historyMenu
+                parent: historyButton
+                x: historyButton.width - width
+                y: historyButton.height
+                searchPlaceholder: qsTr("Search saved queries")
+                searchAccessibleName: qsTr("Search saved queries")
+                minimumMenuWidth: 360
+
+                Repeater {
+                    model: SearchController.history
+                    delegate: MenuItem {
+                        required property string modelData
+                        text: modelData
+                        visible: historyMenu.matches(text)
+                        height: visible ? implicitHeight : 0
+                        onTriggered: {
+                            Log.debug("search", "History picked: " + modelData)
+                            searchField.text = modelData
                         }
                     }
-                    MenuSeparator { visible: SearchController.history.length > 0 }
-                    MenuItem {
-                        text: qsTr("Clear history")
-                        enabled: SearchController.history.length > 0
-                        onTriggered: {
-                            Log.info("search", "Clear history")
-                            SearchController.clearHistory()
-                        }
+                }
+                MenuSeparator { visible: SearchController.history.length > 0 }
+                MenuItem {
+                    text: qsTr("Clear history")
+                    visible: historyMenu.matches(text)
+                    height: visible ? implicitHeight : 0
+                    enabled: SearchController.history.length > 0
+                    onTriggered: {
+                        Log.info("search", "Clear history")
+                        SearchController.clearHistory()
                     }
                 }
             }

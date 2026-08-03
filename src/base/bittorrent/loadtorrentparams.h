@@ -54,6 +54,9 @@ namespace BitTorrent
         Path savePath;
         Path downloadPath;
         QString comment;
+        // Distinguishes an intentional empty override from a torrent whose
+        // immutable metadata comment should still be displayed.
+        bool commentIsCustom = false;
         TorrentContentLayout contentLayout = TorrentContentLayout::Original;
         TorrentOperatingMode operatingMode = TorrentOperatingMode::AutoManaged;
         bool useAutoTMM = false;

@@ -216,6 +216,7 @@ class SearchResultsProxyModel : public QSortFilterProxyModel
     Q_PROPERTY(int visibleCount READ visibleCount NOTIFY countsChanged)
     Q_PROPERTY(int totalCount READ totalCount NOTIFY countsChanged)
     Q_PROPERTY(bool regexEnabled READ regexEnabled WRITE setRegexEnabled NOTIFY filtersChanged)
+    Q_PROPERTY(QString regexFlags READ regexFlags WRITE setRegexFlags NOTIFY filtersChanged)
     Q_PROPERTY(int nameFilteringMode READ nameFilteringMode WRITE setNameFilteringMode NOTIFY filtersChanged)
 
 public:
@@ -247,12 +248,18 @@ public:
     }
 
     [[nodiscard]] bool regexEnabled() const { return m_regexEnabled; }
+    [[nodiscard]] QString regexFlags() const { return m_regexFlags; }
     [[nodiscard]] int nameFilteringMode() const { return m_nameFilteringMode; }
 
     /// The original search query — needed for the "Torrent names only" filter.
-    void setQueryPattern(const QString &pattern)
+    void setQueryPattern(const QString &pattern, const bool regexEnabled = false
+            , const QString &regexFlags = u"iu"_s)
     {
         m_queryTokens = tokenizeQuery(pattern);
+        m_queryRegexEnabled = regexEnabled;
+        m_queryRegexFlags = regexFlags;
+        m_queryRegex = regexEnabled
+                ? QRegularExpression(pattern, patternOptions(regexFlags)) : QRegularExpression();
         invalidateFilter();
         emit countsChanged();
     }
@@ -281,6 +288,18 @@ public:
         emit filtersChanged();
         emit countsChanged();
         qCDebug(lcSearch) << "Results filter regex ->" << enabled;
+    }
+
+    Q_INVOKABLE void setRegexFlags(const QString &flags)
+    {
+        if (m_regexFlags == flags)
+            return;
+        m_regexFlags = flags;
+        rebuildTextRegex();
+        invalidateFilter();
+        emit filtersChanged();
+        emit countsChanged();
+        qCDebug(lcSearch) << "Results filter regex flags ->" << flags;
     }
 
     Q_INVOKABLE void setNameFilteringMode(int mode)
@@ -381,8 +400,24 @@ protected:
 
         const SearchResult &r = src->resultAt(sourceRow);
 
-        // (a) "Torrent names only" — every query token must appear in the name.
-        if ((m_nameFilteringMode == OnlyNames) && !m_queryTokens.isEmpty())
+        // (a) The top-level query may be a locally evaluated regular
+        // expression. The external search engine still receives the same
+        // query string, while this proxy applies the selected dialect and
+        // flags to the rows that actually arrived.
+        if (m_queryRegexEnabled)
+        {
+            if (!m_queryRegex.isValid() || m_queryRegex.pattern().isEmpty())
+                return false;
+
+            QString haystack = r.fileName;
+            if (m_nameFilteringMode == Everywhere)
+                haystack += u' ' + r.fileUrl + u' ' + r.engineName + u' '
+                    + r.siteUrl + u' ' + r.descrLink;
+            if (!m_queryRegex.match(haystack).hasMatch())
+                return false;
+        }
+        // Plain mode preserves the existing token-based query semantics.
+        else if ((m_nameFilteringMode == OnlyNames) && !m_queryTokens.isEmpty())
         {
             for (const QString &token : m_queryTokens)
             {
@@ -404,8 +439,10 @@ protected:
             return false;
 
         // (d) free-text results filter, applied to the name.
-        if (m_textRegex.isValid() && !m_textRegex.pattern().isEmpty())
+        if (!m_filterText.isEmpty())
         {
+            if (!m_textRegex.isValid())
+                return false;
             if (!m_textRegex.match(r.fileName).hasMatch())
                 return false;
         }
@@ -425,6 +462,20 @@ private:
         return trimmed.split(QRegularExpression(u"\\s+"_s), Qt::SkipEmptyParts);
     }
 
+    static QRegularExpression::PatternOptions patternOptions(const QString &flags)
+    {
+        QRegularExpression::PatternOptions options;
+        if (flags.contains(u"i"_s))
+            options |= QRegularExpression::CaseInsensitiveOption;
+        if (flags.contains(u"m"_s))
+            options |= QRegularExpression::MultilineOption;
+        if (flags.contains(u"s"_s))
+            options |= QRegularExpression::DotMatchesEverythingOption;
+        if (flags.contains(u"u"_s))
+            options |= QRegularExpression::UseUnicodePropertiesOption;
+        return options;
+    }
+
     void rebuildTextRegex()
     {
         if (m_filterText.isEmpty())
@@ -435,7 +486,8 @@ private:
         const QString pattern = m_regexEnabled
                                     ? m_filterText
                                     : Utils::String::wildcardToRegexPattern(m_filterText);
-        m_textRegex = QRegularExpression(pattern, QRegularExpression::CaseInsensitiveOption);
+        m_textRegex = QRegularExpression(pattern, m_regexEnabled
+                ? patternOptions(m_regexFlags) : QRegularExpression::CaseInsensitiveOption);
     }
 
     mutable QCollator m_collator;
@@ -443,7 +495,11 @@ private:
     QString m_filterText;
     QRegularExpression m_textRegex;
     QStringList m_queryTokens;
+    QRegularExpression m_queryRegex;
+    QString m_queryRegexFlags = u"iu"_s;
+    bool m_queryRegexEnabled = false;
     bool m_regexEnabled = false;
+    QString m_regexFlags = u"iu"_s;
     int m_nameFilteringMode = OnlyNames;
     int m_minSeeds = 0;
     int m_maxSeeds = -1;

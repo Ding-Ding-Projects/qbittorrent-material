@@ -88,7 +88,7 @@ QString Article::description() const
 
 QString Article::torrentUrl() const
 {
-    return (m_torrentURL.isEmpty() ? m_link : m_torrentURL);
+    return m_torrentURL;
 }
 
 QString Article::link() const

@@ -29,6 +29,7 @@
 #include "base/rss/rss_folder.h"
 #include "base/rss/rss_item.h"
 #include "base/rss/rss_session.h"
+#include "quick/controllers/guiaddtorrentmanager.h"
 
 using namespace Qt::StringLiterals;
 
@@ -331,10 +332,15 @@ void RSSController::downloadTorrent(const QString &torrentUrl)
     }
     else
     {
-        // TODO(engine): route HTTP .torrent URLs through GuiAddTorrentManager so
-        // the fetch + duplicate-merge + add-dialog flow (owned by the add-torrent
-        // team) is applied. Direct parse handles magnet / info-hash URLs.
-        qCWarning(lcRss) << "Could not parse torrent descriptor, deferring:" << descr.error();
+        // Torrent URLs need the shared manager: it owns the asynchronous fetch,
+        // size limits, duplicate/tracker handling, and the user's add dialog.
+        // Direct descriptor parsing above remains the fast path for magnets and
+        // inline info-hash descriptors.
+        if (GuiAddTorrentManager::instance()->addTorrent(torrentUrl))
+            return;
+
+        qCWarning(lcRss) << "Could not start torrent add request:" << torrentUrl
+                          << descr.error();
         emit errorOccurred(descr.error());
     }
 }

@@ -961,42 +961,30 @@ void TorrentContentModel::onFileRenamed(const int fileIndex, const Path &oldFile
     endInsertRows();
 }
 
-void TorrentContentModel::onFolderRenamed(const Path &newFolderPath, const Path &oldFolderPath)
+void TorrentContentModel::onFolderRenamed(const Path &newFolderPath, const Path &oldFolderPath
+        , const QHash<int, Path> &renamedFiles)
 {
-    auto *folderNode = m_nodeByPath.value(oldFolderPath);
-    if (!folderNode)
+    Q_UNUSED(newFolderPath)
+    Q_UNUSED(oldFolderPath)
+    Q_UNUSED(renamedFiles)
+
+    if (!m_contentHandler || !m_contentHandler->hasMetadata())
         return;
 
-    folderNode->setName(newFolderPath.filename());
-
-    if (newFolderPath.parentPath() == oldFolderPath.parentPath())
-    {
-        m_nodeByPath.insert(newFolderPath, m_nodeByPath.take(oldFolderPath));
-        const QModelIndex itemIndex = indexForNode(folderNode);
-        emit dataChanged(itemIndex, itemIndex);
-        return;
-    }
-
-    const Path oldParentPath = oldFolderPath.parentPath();
-    auto *oldParentFolder = m_nodeByPath.value(oldParentPath);
-    const int row = folderNode->row();
-    beginRemoveRows(indexForNode(oldParentFolder), row, row);
-    oldParentFolder->removeChild(folderNode);
-    m_nodeByPath.remove(oldFolderPath);
-    endRemoveRows();
-
-    removeEmptyBranch(oldParentPath);
-
-    const Path newParentPath = newFolderPath.parentPath();
-    auto *newParentFolder = m_nodeByPath.value(newParentPath);
-    if (!newParentFolder)
-        newParentFolder = populateFolder(newParentPath, false);
-
-    const int newRow = newParentFolder->childCount();
-    beginInsertRows(indexForNode(newParentFolder), newRow, newRow);
-    newParentFolder->appendChild(folderNode);
-    m_nodeByPath.insert(newFolderPath, folderNode);
-    endInsertRows();
+    // The handler has already applied every native file rename. Rebuild from
+    // its paths so nested descendants and cross-parent moves cannot retain
+    // stale keys in m_nodeByPath. The mapping remains available on the signal
+    // for failure recovery and journal consumers.
+    beginResetModel();
+    delete m_rootNode;
+    m_rootNode = new ContentNode(true);
+    m_filesIndex.clear();
+    m_nodeByPath.clear();
+    m_nodeByPath.insert(Path(), m_rootNode);
+    m_metadataReady = false;
+    populate();
+    endResetModel();
+    emit metadataReadyChanged();
 }
 
 void TorrentContentModel::onFolderRenamingFailed(const Path &newFolderPath, const Path &oldFolderPath

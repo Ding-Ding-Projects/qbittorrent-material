@@ -436,6 +436,8 @@ SessionImpl::~SessionImpl()
                                  << "torrent add(s) to complete";
         }
 
+        if (m_isQueueingEnabled)
+            saveTorrentsQueue();
         saveResumeData();
 
         // Give outstanding save_resume_data_alert(s) a bounded chance to arrive
@@ -689,9 +691,12 @@ void SessionImpl::prepareStartup()
 {
     qCInfo(lcSession) << "Preparing session startup";
 
-    // NOTE(engine): torrents are restored in whatever order the resume store
-    // enumerates them (currently not the original queue order -- queue order
-    // itself isn't persisted yet either; see the TODO on saveTorrentsQueue()).
+    // The resume store enumerates files lexicographically, so queue order is
+    // loaded from its dedicated ordered list and applied after all restores.
+    m_startupQueueOrder = m_resumeDataStorage ? m_resumeDataStorage->loadQueue()
+                                               : QList<TorrentID>();
+    m_pendingStartupRestores = 0;
+    m_startupQueueApplied = false;
     const QList<TorrentID> storedIds = m_resumeDataStorage
             ? m_resumeDataStorage->torrentIds() : QList<TorrentID>();
 
@@ -750,6 +755,7 @@ void SessionImpl::prepareStartup()
             {
                 qCWarning(lcSession) << "Failed to restore torrent:"
                                      << QString::fromStdString(alert->error.message());
+                finishStartupRestore();
                 return;
             }
 
@@ -757,14 +763,19 @@ void SessionImpl::prepareStartup()
             m_loadedTorrents.append(torrent);
             emit torrentAdded(torrent);
             qCInfo(lcSession) << "Torrent restored:" << torrent->name();
+            finishStartupRestore();
         });
 
+        ++m_pendingStartupRestores;
         m_nativeSession->async_add_torrent(p);
         ++restoredCount;
     }
 
     if (restoredCount > 0)
         qCInfo(lcSession) << "Restoring" << restoredCount << "torrent(s) from the resume data store";
+
+    if (m_pendingStartupRestores == 0)
+        applyStartupQueue();
 
     m_isRestored = true;
     emit startupProgressUpdated(100);
@@ -1704,6 +1715,8 @@ bool SessionImpl::removeTorrent(const TorrentID &id, const TorrentRemoveOption d
 
     delete torrent;
     emit torrentRemoved(id);
+    if (m_isQueueingEnabled)
+        saveTorrentsQueue();
     return true;
 }
 
@@ -1833,13 +1846,94 @@ void SessionImpl::bottomTorrentsQueuePos(const QList<TorrentID> &ids)
 
 void SessionImpl::saveTorrentsQueue()
 {
+    m_torrentsQueueChanged = true;
     m_needSaveTorrentsQueue = true;
-    // TODO(engine): persist the queue order via ResumeDataStorage.
+
+    if (!m_isQueueingEnabled || !m_resumeDataStorage || !m_resumeDataStorage->isAvailable())
+        return;
+
+    QList<QPair<int, TorrentID>> positions;
+    positions.reserve(m_torrents.size());
+    for (TorrentImpl *torrent : asConst(m_torrents))
+    {
+        if (!torrent || torrent->isStopped())
+            continue;
+
+        const int position = static_cast<int>(torrent->nativeHandle().queue_position());
+        if (position >= 0)
+            positions.append({position, torrent->id()});
+    }
+
+    std::stable_sort(positions.begin(), positions.end(), [](const auto &left, const auto &right)
+    {
+        if (left.first != right.first)
+            return left.first < right.first;
+        return left.second.toString() < right.second.toString();
+    });
+
+    QList<TorrentID> ids;
+    ids.reserve(positions.size());
+    for (const auto &[position, id] : positions)
+    {
+        Q_UNUSED(position)
+        ids.append(id);
+    }
+
+    if (m_resumeDataStorage->storeQueue(ids))
+    {
+        m_torrentsQueueChanged = false;
+        m_needSaveTorrentsQueue = false;
+    }
 }
 
 void SessionImpl::removeTorrentsQueue()
 {
-    // TODO(engine): clear the persisted queue order.
+    m_torrentsQueueChanged = false;
+    m_needSaveTorrentsQueue = false;
+    if (m_resumeDataStorage && !m_resumeDataStorage->removeQueue())
+        qCWarning(lcSession) << "Failed to clear persisted torrent queue order";
+}
+
+void SessionImpl::applyStartupQueue()
+{
+    if (m_startupQueueApplied)
+        return;
+
+    m_startupQueueApplied = true;
+    if (!m_isQueueingEnabled)
+        return;
+
+    QSet<TorrentID> seen;
+    QList<TorrentImpl *> ordered;
+    ordered.reserve(m_startupQueueOrder.size());
+    for (const TorrentID &id : asConst(m_startupQueueOrder))
+    {
+        TorrentImpl *torrent = m_torrents.value(id);
+        if (torrent && !torrent->isStopped() && !seen.contains(id))
+        {
+            ordered.append(torrent);
+            seen.insert(id);
+        }
+    }
+
+    // queue_position_top() is intentionally applied bottom-to-top: every
+    // operation moves one saved entry ahead of the current queue, producing
+    // the exact persisted top-to-bottom order regardless of restore order.
+    for (auto it = ordered.crbegin(); it != ordered.crend(); ++it)
+        (*it)->nativeHandle().queue_position_top();
+
+    m_torrentsQueueChanged = false;
+    m_needSaveTorrentsQueue = false;
+}
+
+void SessionImpl::finishStartupRestore()
+{
+    if (m_pendingStartupRestores <= 0)
+        return;
+
+    --m_pendingStartupRestores;
+    if (m_pendingStartupRestores == 0)
+        applyStartupQueue();
 }
 
 // --- Move storage ------------------------------------------------------------

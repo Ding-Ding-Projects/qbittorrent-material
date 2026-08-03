@@ -611,6 +611,8 @@ namespace BitTorrent
         void saveResumeData();
         void saveTorrentsQueue();
         void removeTorrentsQueue();
+        void applyStartupQueue();
+        void finishStartupRestore();
 
         void populateAdditionalTrackersFromURL();
 
@@ -796,6 +798,9 @@ namespace BitTorrent
         // Torrents whose restore add is queued in libtorrent but whose
         // add_torrent_alert hasn't landed yet (see prepareStartup()).
         QSet<TorrentID> m_restoringTorrents;
+        QList<TorrentID> m_startupQueueOrder;
+        int m_pendingStartupRestores = 0;
+        bool m_startupQueueApplied = false;
         QList<TrackerEntry> m_additionalTrackerEntries;
         QList<TrackerEntry> m_additionalTrackerEntriesFromURL;
         QList<QRegularExpression> m_excludedFileNamesRegExpList;

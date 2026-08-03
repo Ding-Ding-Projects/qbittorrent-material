@@ -13,12 +13,15 @@
 #include "transfercontroller.h"
 
 #include <QClipboard>
+#include <QDateTime>
 #include <QDesktopServices>
 #include <QGuiApplication>
 #include <QMap>
 #include <QSet>
 #include <QStringView>
 #include <QUrl>
+#include <QVariant>
+#include <QVariantMap>
 
 #include "base/bittorrent/infohash.h"
 #include "base/bittorrent/session.h"
@@ -27,6 +30,8 @@
 #include "base/bittorrent/trackerentrystatus.h"
 #include "base/bittorrent/torrent.h"
 #include "base/logging.h"
+#include "base/utils/io.h"
+#include "base/utils/tabularexport.h"
 #include "base/tag.h"
 #include "base/utils/fs.h"
 #include "base/utils/fs/path.h"
@@ -242,6 +247,120 @@ void TransferController::removeAllTags()
 }
 
 // --- trackers / torrent files ---
+
+QVariantList TransferController::exportFormats() const
+{
+    QVariantList formats;
+    for (const auto format : Utils::TabularExport::allFormats())
+    {
+        formats.append(QVariantMap {
+            {u"token"_s, Utils::TabularExport::token(format)},
+            {u"name"_s, Utils::TabularExport::displayName(format)},
+            {u"extension"_s, Utils::TabularExport::extension(format)},
+            // Stated before the export runs, not discovered afterwards.
+            {u"lossNote"_s, Utils::TabularExport::lossNote(format)}
+        });
+    }
+    return formats;
+}
+
+QString TransferController::exportTransfers(const QString &formatToken,
+    const QString &filePath, const bool selectedOnly) const
+{
+    const auto format = Utils::TabularExport::fromToken(formatToken);
+    if (!format)
+        return tr("Unknown export format: %1").arg(formatToken);
+
+    Session *const session = Session::instance();
+    if (!session)
+        return tr("The torrent session is not available.");
+
+    const QList<Torrent *> torrents = selectedOnly
+        ? selectedTorrents() : session->torrents();
+    if (torrents.isEmpty())
+        return tr("There is nothing to export.");
+
+    const QString destination = filePath.trimmed();
+    if (destination.isEmpty())
+        return tr("Choose a destination file before exporting.");
+
+    const auto stateText = [this](const TorrentState state)
+    {
+        switch (state)
+        {
+        case TorrentState::Downloading:               return tr("Downloading");
+        case TorrentState::ForcedDownloading:         return tr("[F] Downloading");
+        case TorrentState::DownloadingMetadata:       return tr("Downloading metadata");
+        case TorrentState::ForcedDownloadingMetadata: return tr("[F] Downloading metadata");
+        case TorrentState::StalledDownloading:        return tr("Stalled");
+        case TorrentState::Uploading:
+        case TorrentState::StalledUploading:          return tr("Seeding");
+        case TorrentState::ForcedUploading:           return tr("[F] Seeding");
+        case TorrentState::QueuedDownloading:
+        case TorrentState::QueuedUploading:           return tr("Queued");
+        case TorrentState::CheckingDownloading:
+        case TorrentState::CheckingUploading:         return tr("Checking");
+        case TorrentState::CheckingResumeData:        return tr("Checking resume data");
+        case TorrentState::StoppedDownloading:        return tr("Stopped");
+        case TorrentState::StoppedUploading:          return tr("Completed");
+        case TorrentState::Moving:                    return tr("Moving");
+        case TorrentState::MissingFiles:              return tr("Missing Files");
+        case TorrentState::Error:                     return tr("Errored");
+        default:                                      return tr("Unknown");
+        }
+    };
+
+    Utils::TabularExport::Table table;
+    table.name = u"torrents"_s;
+    table.headers = {tr("Name"), tr("Info hash v1"), tr("Info hash v2"), tr("Size"),
+        tr("Progress (%)"), tr("State"), tr("Save path"), tr("Category"), tr("Tags"),
+        tr("Downloaded"), tr("Uploaded"), tr("Ratio"), tr("Added on"), tr("Completed on")};
+
+    for (const Torrent *const torrent : torrents)
+    {
+        QStringList tags;
+        for (const Tag &tag : torrent->tags())
+            tags.append(tag.toString());
+        tags.sort(Qt::CaseInsensitive);
+
+        const QDateTime completedTime = torrent->completedTime();
+        const QVariant completedValue = (completedTime.isValid()
+                && completedTime.toSecsSinceEpoch() > 0)
+            ? QVariant(completedTime) : QVariant {};
+        QString status = stateText(torrent->state());
+        if (torrent->state() == TorrentState::Error)
+            status += u": "_s + torrent->error();
+
+        table.rows.append(QVariantList {
+            torrent->name(),
+            torrent->infoHash().v1().toString(),
+            torrent->infoHash().v2().toString(),
+            torrent->wantedSize(),
+            static_cast<double>(torrent->progress() * 100),
+            status,
+            torrent->savePath().toString(),
+            torrent->category(),
+            tags.join(u", "_s),
+            torrent->totalDownload(),
+            torrent->totalUpload(),
+            torrent->realRatio(),
+            torrent->addedTime(),
+            completedValue
+        });
+    }
+
+    const QByteArray payload = Utils::TabularExport::serialize(table, *format);
+    const auto result = Utils::IO::saveToFile(Path(destination), payload);
+    if (!result)
+    {
+        qCWarning(lcUi) << "Transfer export failed:" << result.error();
+        return tr("Could not write the export. %1").arg(result.error());
+    }
+
+    qCInfo(lcUi) << "Exported" << torrents.size() << "torrent(s) as"
+                 << formatToken << "to" << destination;
+    return {};
+}
 
 int TransferController::removeTrackerFromAll(const QString &host)
 {

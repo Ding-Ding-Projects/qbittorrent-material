@@ -10,3 +10,5 @@ desktop client.
 - [Search runtime](search-runtime.md): the bundled `nova3` Python runtime the
   Search tab drives, how its interpreter is resolved, and how each prerequisite
   failure is reported.
+- [Transfer-list export](tabular-export.md): scoped multi-format export, loss
+  disclosures, escaping, sensitive fields, and verification.

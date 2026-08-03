@@ -1032,6 +1032,50 @@ Test-Policy (Test-Path -LiteralPath `
         (Get-RepositoryPath "docs/features/experience/context-menu-search.md") -PathType Leaf) `
     "searchable context actions and shortcut truthfulness are documented"
 
+# Transfer-list export is deliberately checked at both edges: the serializer
+# must escape hostile cell content and the QML surface must state its scope and
+# any format loss before the native SaveFile dialog runs.
+$tabularExportHeader = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/base/utils/tabularexport.h")
+$tabularExportSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/base/utils/tabularexport.cpp")
+$tabularExportDialog = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/dialogs/TabularExportDialog.qml")
+$tabularContextMenu = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/transferlist/TransferRowContextMenu.qml")
+$legacyTransferListView = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/transferlist/TransferListView.qml")
+Test-Policy ($tabularExportHeader.Contains("enum class Format") `
+        -and $tabularExportSource.Contains("Format::JsonLines") `
+        -and $tabularExportSource.Contains("escapeXml") `
+        -and $tabularExportSource.Contains("escapeDelimited") `
+        -and $tabularExportSource.Contains("escapeQuotedScalar") `
+        -and $tabularExportSource.Contains("isFiniteNumeric") `
+        -and $tabularExportSource.Contains("quoteSqlIdentifier")) `
+    "the transfer exporter covers the ten formats and escapes structured output"
+Test-Policy ($tabularExportSource.Contains("key.front().isDigit()") `
+        -and $tabularExportSource.Contains("Qt::CaseInsensitive") `
+        -and $tabularExportSource.Contains("field_")) `
+    "export identifiers remain valid when localized or numeric headers are supplied"
+Test-Policy ($tabularExportDialog.Contains("function openFor(onlySelected)") `
+        -and $tabularExportDialog.Contains("selectedOnly") `
+        -and $tabularExportDialog.Contains("14-column summary") `
+        -and $tabularExportDialog.Contains("Before export:") `
+        -and $tabularExportDialog.Contains("UTF-8 with LF line endings") `
+        -and $tabularExportDialog.Contains("Platform.FileDialog.SaveFile") `
+        -and $tabularExportDialog.Contains("toLocalFile")) `
+    "the export dialog states scope, encoding, line endings, and format loss before saving"
+Test-Policy ($tabularContextMenu.Contains("signal exportListRequested()") `
+        -and $tabularContextMenu.Contains("Export transfer list…") `
+        -and $transfersPage.Contains("tabularExportDialog.openFor(false)") `
+        -and $transfersPage.Contains("tabularExportDialog.openFor(true)") `
+        -and $legacyTransferListView.Contains("onExportListRequested") `
+        -and $legacyTransferListView.Contains("tabularExportDialog.openFor(true)")) `
+    "the transfer list offers export from both the page and its searchable row menu"
+Test-Policy (Test-Path -LiteralPath `
+        (Get-RepositoryPath "docs/features/transfers/tabular-export.md") -PathType Leaf) `
+    "transfer-list export behaviour and verification are documented"
+
 $workflowPath = Get-RepositoryPath ".github/workflows/release-every-push.yml"
 Test-Policy (Test-Path -LiteralPath $workflowPath -PathType Leaf) "the push release workflow exists"
 if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {

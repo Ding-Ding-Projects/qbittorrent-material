@@ -63,6 +63,12 @@ handoff, so optional Search/RSS/Log workspaces are enabled before selection and
 the application-menu plugin action opens the same Search plugins dialog as the
 visible Search workspace button.
 
+The Transfers surface exports all or selected torrent rows as UTF-8 JSON,
+JSONL, YAML, TOML, XML, CSV, TSV, Markdown, HTML, or SQL. The picker states
+scope, encoding, line endings, and any format loss before saving, escapes cell
+content for its target syntax, and records the result in notification history.
+See [Transfer-list export](docs/features/transfers/tabular-export.md).
+
 ## Desktop experience
 
 English, playful Hong Kong-style Cantonese, and compact bilingual modes switch

@@ -14,6 +14,7 @@
 
 #include <QList>
 #include <QObject>
+#include <QVariantList>
 #include <QString>
 #include <QStringList>
 
@@ -87,6 +88,19 @@ public:
     /// Remove every tracker served by @p host from every torrent in the session.
     /// Returns the number of torrents actually changed.
     Q_INVOKABLE int removeTrackerFromAll(const QString &host);
+
+    // --- export --------------------------------------------------------------
+
+    /// Every format the transfer list can be exported to, as
+    /// `{ token, name, extension, lossNote }` maps for a format picker.
+    [[nodiscard]] Q_INVOKABLE QVariantList exportFormats() const;
+
+    /// Writes the transfer list to @p filePath in the format named by
+    /// @p formatToken ("json", "csv", …). Exports the current selection when
+    /// @p selectedOnly, otherwise every torrent in the session. Returns an
+    /// empty string on success, or a translated failure message.
+    Q_INVOKABLE QString exportTransfers(const QString &formatToken,
+        const QString &filePath, bool selectedOnly) const;
     /// Export every selected torrent to @p directory. Returns false on any failure.
     Q_INVOKABLE bool exportTorrent(const QString &directory);
 

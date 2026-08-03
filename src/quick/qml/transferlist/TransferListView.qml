@@ -568,6 +568,10 @@ Item {
         }
         onPreviewRequested: TransferController.preview()
         onExportRequested: exportDialog.open()
+        onExportListRequested: {
+            if (TransferController.selectionCount > 0)
+                tabularExportDialog.openFor(true)
+        }
         onDeleteRequested: view.requestDelete()
         onNewCategoryRequested: newCategoryDialog.open()
         onAddTagRequested: addTagDialog.open()
@@ -777,6 +781,10 @@ Item {
                 Log.warning("ui", "Export .torrent chosen but TransferController.exportTorrent is not available");
             }
         }
+    }
+
+    TabularExportDialog {
+        id: tabularExportDialog
     }
 
     Component.onCompleted: Log.debug("ui", "TransferListView ready")

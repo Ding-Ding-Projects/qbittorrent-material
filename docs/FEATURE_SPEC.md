@@ -445,6 +445,12 @@ Actions are built once and shown conditionally based on a single pass computing 
 27. **Queue ►** submenu (icon `queued`) — shown only if `Session::isQueueingSystemEnabled()` AND `oneNotFinished`. See §5d.
 28. **Copy ►** submenu (icon `edit-copy`) — see §5e.
 29. **Export .torrent…** (icon `edit-copy`) — tooltip "Exported torrent is not necessarily the same as the imported". Folder chooser; writes `<validName>.torrent` (dedup `(n)`), via `torrent->exportToFile()`; warns on errors.
+30. **Export transfer list…** — the page action opens the scoped transfer-list
+    export dialog for all session torrents; this context-menu action opens it
+    for the current selection. The dialog offers JSON, JSONL, YAML, TOML, XML,
+    CSV, TSV, Markdown, HTML, and SQL, discloses UTF-8/LF output and format
+    coercion, and writes the 14-column summary through the QML
+    `TransferController` bridge. This is export-only; no importer is implied.
 
 #### 5a. Deletion-confirmation dialog
 If pref `confirmTorrentDeletion()` on, open `DeletionConfirmationDialog(count, firstName, deleteLocalFiles)` (modal); on accept re-fetch selection and `removeTorrent(id, RemoveContent|KeepContent)` per `isRemoveContentSelected()`. Otherwise remove immediately. `TorrentRemoveOption::RemoveContent` vs `KeepContent`.

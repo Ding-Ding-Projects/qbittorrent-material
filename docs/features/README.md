@@ -14,8 +14,8 @@ native Qt 6/QML Windows app.
 - [Appearance](appearance/README.md): persisted global appearance and the
   per-tab, per-group, and global workspace appearance editor.
 - [Delivery](delivery/README.md): tested immutable Windows installer releases.
-- [Transfers](transfers/README.md): transfer-list field selection and local
-  name, path, and info-hash filtering.
+- [Transfers](transfers/README.md): transfer-list filtering, bulk selection,
+  and scoped multi-format export.
 
 The embedded documentation site indexes these articles through
 `docs/content.generated.js`. Run `scripts/generate-pages-content.ps1` after an

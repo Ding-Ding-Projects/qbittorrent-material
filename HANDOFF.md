@@ -1,5 +1,37 @@
 # Handoff
 
+## 2026-08-02 — transfer-list export handoff
+
+The Windows desktop transfer surface now offers a UTF-8/LF transfer-list
+summary for all torrents or the current selection. It is available from the
+page action and both searchable transfer-row menu hosts, and supports JSON,
+JSON Lines, YAML, TOML, XML, CSV, TSV, Markdown, HTML, and SQL. The 14 exported
+columns are documented as a summary; wanted size, percentage progress,
+localized state/error text, sorted tags, UTC timestamps, and an empty value for
+unfinished completion time now match the visible row semantics.
+
+The serializer normalizes keyed headers, escapes structured output, omits
+invalid XML 1.0 controls, quotes YAML/TOML controls, keeps Markdown cells
+literal, prefixes spreadsheet-formula-looking CSV/TSV strings, and preserves
+standard SQL backslashes as data while doubling apostrophes. Writes use the
+existing atomic `QSaveFile` path. The dialog states scope, encoding, line
+endings, summary limits, and format loss before the native Save-file picker.
+
+Verified locally before commit:
+
+- `run.ps1 -NoRun -Jobs 8`: Release build passed and deployed the Qt runtime;
+  the existing Visual Studio redistributable warning remains.
+- `scripts/test-desktop-policy.ps1`: all 351 desktop policy and
+  content-integrity checks passed.
+- `scripts/test-qml-startup.ps1`: the real built binary loaded its QML root
+  offscreen with no runtime faults.
+- `scripts/generate-pages-content.ps1`: generated 52 documentation pages.
+
+CI and the exact published installer remain external-state checks after the
+default-branch push. The divergent `handoff/shutdown-20260802-1328` branch
+remains preserved and is not an ancestor of `master`; do not delete it during
+cleanup. No task stash or additional worktree exists.
+
 ## 2026-08-02 — the build could not start, and nothing noticed
 
 Read this first if you are adding QML to this repository.

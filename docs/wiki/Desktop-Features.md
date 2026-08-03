@@ -34,6 +34,16 @@ personal Workspace without introducing a remote service.
 - Settings can detect common Windows editors or use a custom executable to open
   the managed Workspace without a command shell.
 
+## Transfers
+
+The Transfers surface exports all or selected torrent rows as UTF-8 JSON,
+JSONL, YAML, TOML, XML, CSV, TSV, Markdown, HTML, or SQL. The dialog states
+scope, line endings, and any value-coercion warning before the Save-file picker;
+the searchable row menu provides the selected-only path. Hashes and local save
+paths are included, output is escaped for its target syntax, and success or
+failure remains reviewable in notification history. See
+[Transfer-list export](https://ding-ding-projects.github.io/qbittorrent-material/wiki.html#wiki/features-transfers-tabular-export).
+
 ## Delivery
 
 Every branch push and manual dispatch runs desktop policy checks before building
@@ -57,6 +67,7 @@ modes, security/privacy considerations, and verification evidence.
 - [External editor integration](https://ding-ding-projects.github.io/qbittorrent-material/wiki.html#wiki/features-workspace-external-editor)
 - [Runtime appearance](https://ding-ding-projects.github.io/qbittorrent-material/wiki.html#wiki/features-appearance-runtime-appearance)
 - [Immutable Windows releases](https://ding-ding-projects.github.io/qbittorrent-material/wiki.html#wiki/features-delivery-windows-releases)
+- [Transfer-list export](https://ding-ding-projects.github.io/qbittorrent-material/wiki.html#wiki/features-transfers-tabular-export)
 
 ## Verification state
 

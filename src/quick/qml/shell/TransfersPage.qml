@@ -459,6 +459,29 @@ Item {
             Layout.bottomMargin: 16
             spacing: 12
 
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.leftMargin: 4
+                spacing: Spacing.sm
+
+                Label {
+                    text: qsTr("Transfers")
+                    font: Typography.titleLarge
+                    color: Theme.color("onSurface")
+                    Accessible.name: text
+                }
+
+                Item { Layout.fillWidth: true }
+
+                Button {
+                    text: qsTr("Export list…")
+                    enabled: root.totalRowCount() > 0
+                    Accessible.name: qsTr("Export the transfer list")
+                    Accessible.description: qsTr("Choose a format and save all torrents in the session.")
+                    onClicked: tabularExportDialog.openFor(false)
+                }
+            }
+
             // A/C: status chips.
             FilterChips {
                 visible: !Theme.isSplitDock
@@ -1158,6 +1181,10 @@ Item {
             if (TransferController.selectionCount > 0)
                 exportDialog.open()
         }
+        onExportListRequested: {
+            if (TransferController.selectionCount > 0)
+                tabularExportDialog.openFor(true)
+        }
         onDeleteRequested: root.deleteRequested()
         onNewCategoryRequested: newCategoryDialog.open()
         onAddTagRequested: addTagDialog.open()
@@ -1250,6 +1277,9 @@ Item {
             else
                 actionSnackbar.show(qsTr("Could not export the selected torrent file(s)."))
         }
+    }
+    TabularExportDialog {
+        id: tabularExportDialog
     }
     Snackbar {
         id: actionSnackbar

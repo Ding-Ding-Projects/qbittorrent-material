@@ -838,6 +838,13 @@ present-tense: `start()`, `stop()`, `forceStart()`, `forceRecheck()`,
 `Q_PROPERTY` with `NOTIFY`. Selection is passed in or held as a `Q_PROPERTY`
 (`selectedIds`), not rediscovered per call.
 
+The transfer-list export bridge follows the same rule: `exportFormats()` returns
+format metadata (`token`, display name, extension, and pre-save loss note), and
+`exportTransfers(formatToken, filePath, selectedOnly)` writes the current
+selection or the full session. It returns an empty string on success and a
+translated failure message otherwise; the controller owns escaping and atomic
+file commit, while QML owns scope disclosure and the native Save-file picker.
+
 ### 7.3 `QFuture` → property bridging
 
 Engine async reads (`QFuture<T>`) are bridged into notifiable properties with

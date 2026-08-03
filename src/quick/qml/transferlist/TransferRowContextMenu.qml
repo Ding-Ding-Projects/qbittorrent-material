@@ -44,6 +44,7 @@ SearchableMenu {
     signal torrentOptionsRequested()
     signal previewRequested()
     signal exportRequested()
+    signal exportListRequested()
     signal deleteRequested()
     signal newCategoryRequested()
     signal addTagRequested()
@@ -420,5 +421,22 @@ SearchableMenu {
             color: Theme.color("onSurfaceVariant")
         }
         onTriggered: { Log.info("ui", "Context → Export .torrent"); root.exportRequested() }
+    }
+
+    // 30 — Export transfer list… ---------------------------------------------
+    MenuItem {
+        text: qsTr("Export transfer list…")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
+        leftPadding: 44
+        MDIcon {
+            icon: Icons.save_alt; size: 18; x: Spacing.md
+            anchors.verticalCenter: parent.verticalCenter
+            color: Theme.color("onSurfaceVariant")
+        }
+        onTriggered: {
+            Log.info("ui", "Context → Export transfer list")
+            root.exportListRequested()
+        }
     }
 }

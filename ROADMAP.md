@@ -20,6 +20,9 @@
   menu's plugin-management dead end, and made the Split Dock details tabs
   focusable buttons. Verified with a clean build and the complete 17-state
   native capture sweep.
+- 2026-08-02: added scoped transfer-list export for all or selected torrents in
+  ten text formats, with pre-save loss disclosures, escaped output, searchable
+  row-menu and page entry points, and an offscreen startup gate.
 
 ## Follow-up
 

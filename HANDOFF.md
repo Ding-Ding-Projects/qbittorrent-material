@@ -1,5 +1,58 @@
 # Handoff
 
+## 2026-08-02 — the spoken narrator, on Edge TTS
+
+Requested: use Edge TTS. New `NarratorController` speaks application events
+aloud through Microsoft Edge's online neural voices via the `edge-tts` Python
+package, which is what makes a real Hong Kong Cantonese track possible
+(`zh-HK-HiuMaan`/`HiuGaai`/`WanLung`) rather than a robotic voice or a Mandarin
+one reading Cantonese copy.
+
+It narrates whatever reaches the notification centre, so it covers the events the
+user already sees without a second event bus to keep in sync; the notification's
+severity becomes the narration category.
+
+Design points that matter:
+
+- **Off by default**, enabled only by the user. Verified in the real application:
+  a fresh profile logged zero synthesis attempts. The controller is a lazily
+  constructed QML singleton, so an unused narrator costs nothing at all.
+- **One player, one utterance, never overlapping.** A queued line superseded by a
+  newer line of the same category and voice is *replaced* rather than stacked, so
+  a burst of completions does not become a backlog the user sits through.
+- **Rate limited** by a 15 s per-category cooldown and a 1.2 s global debounce —
+  but **errors are exempt and preempt the queue**, because a failure the user
+  must act on is exactly the line that must not be dropped for arriving too soon.
+- **Yields to a screen reader** (`SPI_GETSCREENREADER`), which is already
+  speaking the interface.
+- **Bounded**: lines truncate at 300 characters and synthesis times out at 20 s,
+  so a hung network request cannot wedge the queue.
+- **Discloses the network round trip** next to the switch. Enabling a voice is
+  not consent to sending text to a third-party service unannounced.
+
+Dependencies added, per the build-dependency rule: `qtmultimedia` joins the Qt
+module list in both `run.ps1` and the CI workflow (QMediaPlayer plays the
+synthesized audio), `Qt6::Multimedia` is a required component, and `edge-tts` is
+installed user-scoped with `python -m pip install --user edge-tts`. A missing
+package is reported in the settings surface rather than failing silently.
+
+Verification:
+
+- All 343 desktop policy and content-integrity checks passed (337 before). Six
+  new ones cover default-off, the three language modes with a Hong Kong voice,
+  serialization plus supersession plus both rate limits, the error exemption,
+  the screen-reader yield, and the disclosure.
+- `run.ps1 -NoRun -Jobs 8` completed a clean Release compile after the Qt module
+  addition.
+- Edge TTS itself was exercised directly before wiring: `zh-HK-HiuMaanNeural`
+  synthesized a real Cantonese line to a 19 KB MP3, and all three Hong Kong
+  voices are present in the service's voice list.
+
+Not verified by execution: audio playback itself. The offscreen harness has no
+audio device, so `QMediaPlayer` output, the queue draining across several
+utterances, and the screen-reader yield are covered by compilation and policy
+assertions rather than by listening to them.
+
 ## 2026-08-02 — a real gate in front of erasing files
 
 There was no destructive-action gate at all: deleting a torrent's content files

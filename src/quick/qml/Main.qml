@@ -1080,6 +1080,18 @@ ApplicationWindow {
 
     Connections {
         target: NotificationCenter
+        // Every user-facing event already passes through the notification
+        // centre, so narrating that gives the narrator full coverage without a
+        // second event bus to keep in sync. The severity becomes the category,
+        // which is what drives the per-category cooldown — and "error" is the
+        // one category the rate limits never silence.
+        function onNotificationRaised(id, title, body, severity, actionLabel, actionId) {
+            if (!NarratorController.enabled)
+                return
+            const spoken = (title && title.length > 0) ? (title + ". " + body) : body
+            NarratorController.narrate(severity, spoken, I18n.t(spoken))
+        }
+
         function onActionRequested(actionId, notificationId) {
             if (actionId.startsWith("journal-undo:")) {
                 JournalController.undoEntry(actionId.slice("journal-undo:".length))

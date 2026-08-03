@@ -317,6 +317,38 @@ $guiAddManager = Get-Content -Raw -LiteralPath `
 $addTorrentDialog = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/addtorrent/AddNewTorrentDialog.qml")
 
+# The spoken narrator is optional, off until the user turns it on, serialized so
+# utterances never overlap, and honest about sending text to a speech service.
+$narratorHeader = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/controllers/narratorcontroller.h")
+$narratorSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/controllers/narratorcontroller.cpp")
+$settingsSheetSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/shell/SettingsSheet.qml")
+Test-Policy ($narratorSource.Contains('pref->value(kEnabledKey, false).toBool()') `
+        -and $narratorSource.Contains('bool m_enabled = false') -eq $false) `
+    "the narrator is disabled until the user enables it"
+Test-Policy ($narratorHeader.Contains('English = 0') `
+        -and $narratorHeader.Contains('Cantonese = 1') `
+        -and $narratorHeader.Contains('Both = 2') `
+        -and $narratorSource.Contains('zh-HK-HiuMaanNeural')) `
+    "the narrator speaks English, Cantonese or both, with a Hong Kong voice"
+# One player, one utterance: a burst of events must not stack into a backlog.
+Test-Policy ($narratorSource.Contains('if (m_speaking || m_queue.isEmpty())') `
+        -and $narratorSource.Contains('m_queue[i] = utterance;') `
+        -and $narratorSource.Contains('CategoryCooldownMs') `
+        -and $narratorSource.Contains('GlobalDebounceMs')) `
+    "narration is serialized, superseded rather than stacked, and rate limited"
+# Rate limits shape routine chatter; they never silence a failure.
+Test-Policy ($narratorSource.Contains('if (!isError && cooldownBlocks(category))') `
+        -and $narratorSource.Contains('m_queue.prepend(utterance)')) `
+    "an error is never dropped by the narrator's rate limits"
+Test-Policy ($narratorSource.Contains('SPI_GETSCREENREADER')) `
+    "the narrator yields to a running screen reader"
+Test-Policy ($settingsSheetSource.Contains('NarratorController.enabled') `
+        -and $settingsSheetSource -match 'sent to that service') `
+    "the narrator setting discloses that speech is synthesized by an online service"
+
 # A settings tab that configures nothing is a fake placeholder. All five Search
 # settings were already staged and committed by OptionsController; the page just
 # never rendered them.

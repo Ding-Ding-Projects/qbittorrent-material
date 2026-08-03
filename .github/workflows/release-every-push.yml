@@ -138,7 +138,7 @@ jobs:
           host: windows
           target: desktop
           arch: win64_msvc2022_64
-          modules: "qt5compat qtimageformats qtshadertools"
+          modules: "qt5compat qtimageformats qtshadertools qtmultimedia"
           cache: true
 
       - name: Set up vcpkg and binary caching

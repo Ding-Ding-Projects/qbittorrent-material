@@ -230,7 +230,7 @@ function Ensure-Qt {
     if ($LASTEXITCODE -ne 0) { Die 'Could not install aqtinstall.' }
     Info "Downloading Qt $QtVersion $QtArch into $QtRoot (a few minutes)..."
     & $py -m aqt install-qt windows desktop $QtVersion $QtArch `
-        -m qt5compat qtimageformats qtshadertools --outputdir $QtRoot
+        -m qt5compat qtimageformats qtshadertools qtmultimedia --outputdir $QtRoot
     if ($LASTEXITCODE -ne 0) { Die 'Qt download failed.' }
     if (-not (Test-Path (Join-Path $QtPrefix 'bin\qmake.exe'))) { Die "Qt install failed." }
 }

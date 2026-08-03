@@ -427,6 +427,145 @@ Sheet {
                     }
                 }
 
+                // --- Spoken narrator ----------------------------------------
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 20
+                    Layout.rightMargin: 20
+                    spacing: 8
+                    visible: root.settingsMatch(qsTr("Narrator speech voice spoken text to speech English Cantonese Hong Kong volume quiet edge tts"))
+
+                    Text {
+                        text: qsTr("SPOKEN NARRATOR")
+                        font.family: Typography.family
+                        font.pixelSize: 12
+                        font.weight: Font.Bold
+                        font.letterSpacing: 1
+                        color: Theme.color("primary")
+                    }
+
+                    Switch {
+                        text: qsTr("Speak app events aloud")
+                        checked: NarratorController.enabled
+                        onToggled: NarratorController.enabled = checked
+                        Accessible.name: qsTr("Spoken narrator, %1")
+                            .arg(checked ? qsTr("on") : qsTr("off"))
+                    }
+
+                    // Enabling a voice is not consent to a network round trip
+                    // nobody mentioned, so say where the audio comes from.
+                    Label {
+                        Layout.fillWidth: true
+                        text: qsTr("Off by default. Voices are synthesized by Microsoft Edge's online speech service, so while the narrator is on, the text it speaks is sent to that service. Nothing is sent while it is off.")
+                        font: Typography.bodySmall
+                        color: Theme.color("onSurfaceVariant")
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        visible: NarratorController.unavailableReason.length > 0
+                        text: NarratorController.unavailableReason
+                        font: Typography.bodySmall
+                        color: Theme.color("error")
+                        wrapMode: Text.WordWrap
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        enabled: NarratorController.enabled
+
+                        LabeledField {
+                            label: qsTr("Speak in:")
+                            Layout.fillWidth: true
+                            ComboBox {
+                                Layout.fillWidth: true
+                                model: [qsTr("English"), qsTr("Cantonese"), qsTr("Both")]
+                                currentIndex: NarratorController.languageMode
+                                onActivated: NarratorController.languageMode = currentIndex
+                                Accessible.name: qsTr("Narration language")
+                            }
+                        }
+
+                        LabeledField {
+                            label: qsTr("English voice:")
+                            Layout.fillWidth: true
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+                                ComboBox {
+                                    id: englishVoiceBox
+                                    Layout.fillWidth: true
+                                    textRole: "name"
+                                    valueRole: "id"
+                                    model: NarratorController.englishVoices()
+                                    currentIndex: indexOfValue(NarratorController.englishVoice)
+                                    onActivated: NarratorController.englishVoice = currentValue
+                                }
+                                Button {
+                                    text: qsTr("Preview")
+                                    flat: true
+                                    onClicked: NarratorController.previewVoice(
+                                        englishVoiceBox.currentValue,
+                                        qsTr("Download finished. One basket of shrimp dumplings."))
+                                }
+                            }
+                        }
+
+                        LabeledField {
+                            label: qsTr("Cantonese voice:")
+                            Layout.fillWidth: true
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+                                ComboBox {
+                                    id: cantoneseVoiceBox
+                                    Layout.fillWidth: true
+                                    textRole: "name"
+                                    valueRole: "id"
+                                    model: NarratorController.cantoneseVoices()
+                                    currentIndex: indexOfValue(NarratorController.cantoneseVoice)
+                                    onActivated: NarratorController.cantoneseVoice = currentValue
+                                }
+                                Button {
+                                    text: qsTr("Preview")
+                                    flat: true
+                                    onClicked: NarratorController.previewVoice(
+                                        cantoneseVoiceBox.currentValue, "下載完成，蝦餃一籠。")
+                                }
+                            }
+                        }
+
+                        LabeledField {
+                            label: qsTr("Volume:")
+                            Layout.fillWidth: true
+                            Slider {
+                                Layout.fillWidth: true
+                                from: 0
+                                to: 1
+                                value: NarratorController.volume
+                                onMoved: NarratorController.volume = value
+                                Accessible.name: qsTr("Narration volume")
+                            }
+                        }
+
+                        Switch {
+                            text: qsTr("Quiet — keep the settings but stay silent")
+                            checked: NarratorController.quietHours
+                            onToggled: NarratorController.quietHours = checked
+                        }
+
+                        Label {
+                            Layout.fillWidth: true
+                            text: qsTr("The narrator speaks one line at a time, never overlapping, and stays quiet while a screen reader is running.")
+                            font: Typography.bodySmall
+                            color: Theme.color("onSurfaceVariant")
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+                }
+
                 // --- External editor ----------------------------------------
                 ColumnLayout {
                     Layout.fillWidth: true

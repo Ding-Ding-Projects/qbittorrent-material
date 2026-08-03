@@ -69,6 +69,11 @@ target_link_libraries(qbt_base
 find_package(Qt6 REQUIRED COMPONENTS Xml)
 target_link_libraries(qbt_base PUBLIC Qt6::Xml)
 
+# Qt6::Multimedia plays the narrator's synthesized audio. Required rather than
+# optional: the narrator is a shipped feature, and a silently omitted module
+# would leave its controls present and mute.
+find_package(Qt6 REQUIRED COMPONENTS Multimedia)
+
 # Windows system libraries used by Utils::OS (SetSuspendState/ExitWindowsEx/
 # AdjustTokenPrivileges for the shutdown/suspend/hibernate actions).
 if (WIN32)
@@ -178,6 +183,7 @@ target_link_libraries(qbittorrent
         Qt6::Quick
         Qt6::QuickControls2
         Qt6::Network
+        Qt6::Multimedia
         Qt6::Svg
         Qt6::Sql
         Qt6::Widgets

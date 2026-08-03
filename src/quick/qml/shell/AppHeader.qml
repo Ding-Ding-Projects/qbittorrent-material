@@ -26,6 +26,14 @@ Rectangle {
     property int unreadNotifications: 0
     property string activePanel: ""
 
+    // Split Dock puts five labelled destinations in the header.  At the
+    // supported minimum window width those labels compete with the search
+    // field and the always-available session controls, so the header must
+    // collapse the destination strip before any control is squeezed off the
+    // right edge.  The compact menu keeps every destination keyboard and
+    // screen-reader reachable without changing the desktop-wide layout.
+    readonly property bool compactSplitDock: Theme.isSplitDock && root.width < 1200
+
     signal navRequested(int index)
     signal panelRequested(string panel)
     signal regexBuilderRequested()
@@ -41,7 +49,7 @@ Rectangle {
 
         // --- Split Dock (B): nav segments live in the header -----------------
         Rectangle {
-            visible: Theme.isSplitDock
+            visible: Theme.isSplitDock && !root.compactSplitDock
             Layout.preferredHeight: 40
             Layout.preferredWidth: segmentsRow.implicitWidth + 8
             radius: 20
@@ -122,6 +130,15 @@ Rectangle {
                     }
                 }
             }
+        }
+
+        HeaderIconButton {
+            visible: root.compactSplitDock
+            Layout.preferredWidth: 40
+            Layout.preferredHeight: 40
+            iconName: "menu"
+            tooltip: qsTr("Open destinations")
+            onClicked: compactNavigationMenu.popup()
         }
 
         // --- Transfers filter pill (Transfers tab only) -----------------------
@@ -351,6 +368,28 @@ Rectangle {
         // --- Overflow: the full legacy menu tree stays reachable --------------
         AppMenuBar {
             shell: root.shell
+        }
+    }
+
+    // The full five-destination strip is intentionally replaced, rather than
+    // merely clipped, at compact widths.  SearchableMenu gives this navigation
+    // surface the same local keyboard search as the other menus.
+    SearchableMenu {
+        id: compactNavigationMenu
+        minimumMenuWidth: 260
+        searchPlaceholder: qsTr("Search destinations")
+        searchAccessibleName: qsTr("Search destinations")
+
+        Repeater {
+            model: root.navModel
+            delegate: MenuItem {
+                required property var modelData
+                text: modelData.label
+                visible: compactNavigationMenu.matches(text)
+                height: visible ? implicitHeight : 0
+                Accessible.name: text
+                onTriggered: root.navRequested(modelData.page)
+            }
         }
     }
 

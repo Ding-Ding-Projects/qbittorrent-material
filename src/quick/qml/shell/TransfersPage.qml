@@ -380,6 +380,18 @@ Item {
         return cols
     }
 
+    // The header and each row share this minimum canvas width.  Previously a
+    // RowLayout was allowed to grow past the clipped table rectangle, which
+    // made ETA, Category, and the right-hand speed columns disappear at the
+    // supported minimum window size with no way to reach them.
+    readonly property int tableContentWidth: {
+        var width = root.tbl.q ? 40 : 0
+        width += root.tbl.nameMin
+        for (var i = 0; i < root.fixedColumns.length; ++i)
+            width += root.fixedColumns[i].width
+        return width
+    }
+
     property int sortColumn: 1
     property bool sortAscending: true
 
@@ -610,20 +622,43 @@ Item {
                 border.color: Theme.color("outlineVariant")
                 clip: true
 
-                ColumnLayout {
+                Flickable {
+                    id: tableHorizontal
                     anchors.fill: parent
                     anchors.margins: 1
-                    spacing: 0
+                    clip: true
+                    contentWidth: Math.max(width, root.tableContentWidth)
+                    contentHeight: height
+                    flickableDirection: Flickable.HorizontalFlick
+                    boundsBehavior: Flickable.StopAtBounds
+                    interactive: contentWidth > width
+                    Accessible.name: qsTr("Transfers table; horizontally scrollable when more columns are available")
+                    Accessible.description: contentWidth > width
+                        ? qsTr("Use the horizontal scrollbar or drag the table surface to reach additional columns")
+                        : qsTr("All visible columns fit in the table")
+                    ScrollBar.horizontal: ScrollBar {
+                        policy: tableHorizontal.contentWidth > tableHorizontal.width
+                            ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+                    }
 
-                    // Header row.
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: root.tbl.headH
-                        color: Theme.color("surfaceVariant")
+                    Item {
+                        id: tableCanvas
+                        width: tableHorizontal.contentWidth
+                        height: tableHorizontal.height
 
-                        RowLayout {
+                        ColumnLayout {
                             anchors.fill: parent
                             spacing: 0
+
+                            // Header row.
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: root.tbl.headH
+                                color: Theme.color("surfaceVariant")
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    spacing: 0
 
                             // Queue # (B only).
                             Item {
@@ -710,25 +745,31 @@ Item {
                                     }
                                 }
                             }
-                        }
+                                }
 
-                        Rectangle {
-                            anchors.bottom: parent.bottom
-                            width: parent.width; height: 1
-                            color: Theme.color("outlineVariant")
-                        }
-                    }
+                                Rectangle {
+                                    anchors.bottom: parent.bottom
+                                    width: parent.width; height: 1
+                                    color: Theme.color("outlineVariant")
+                                }
+                            }
 
-                    // Rows.
-                    ListView {
-                        id: tableView
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        clip: true
-                        model: root.filterProxy
-                        reuseItems: true
-                        boundsBehavior: Flickable.StopAtBounds
-                        ScrollBar.vertical: ScrollBar { }
+                            // Rows.
+                            ListView {
+                                id: tableView
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                clip: true
+                                model: root.filterProxy
+                                reuseItems: true
+                                boundsBehavior: Flickable.StopAtBounds
+                                ScrollBar.vertical: ScrollBar {
+                                    // Keep the vertical scrollbar on the
+                                    // viewport edge while the table canvas
+                                    // moves horizontally.
+                                    x: Math.max(0, tableHorizontal.width
+                                        - width - tableHorizontal.contentX)
+                                }
 
                         delegate: Rectangle {
                             id: rowDelegate
@@ -971,23 +1012,30 @@ Item {
                             }
                         }
 
-                        // Empty state.
-                        Column {
-                            visible: tableView.count === 0
-                            anchors.centerIn: parent
-                            spacing: 8
-                            MDIcon {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                name: "search_off"; size: 40; color: Theme.color("outline")
-                            }
-                            Text {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                text: qsTr("No torrents match the current filter")
-                                font.family: Typography.family
-                                font.pixelSize: 13
-                                color: Theme.color("onSurfaceVariant")
-                            }
                         }
+                        }
+
+                        }
+
+                }
+
+                // Keep the empty-state message centred in the visible table
+                // viewport instead of moving it with the off-screen columns.
+                Column {
+                    visible: tableView.count === 0
+                    anchors.centerIn: parent
+                    z: 2
+                    spacing: 8
+                    MDIcon {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        name: "search_off"; size: 40; color: Theme.color("outline")
+                    }
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: qsTr("No torrents match the current filter")
+                        font.family: Typography.family
+                        font.pixelSize: 13
+                        color: Theme.color("onSurfaceVariant")
                     }
                 }
             }

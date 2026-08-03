@@ -453,6 +453,8 @@ Test-Policy ($searchOptionsPage.Contains('SearchController.unavailableReason') `
 # rows on screen or every torrent in the session.
 $transfersPageSource = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/shell/TransfersPage.qml")
+$appHeaderSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/shell/AppHeader.qml")
 $centralTabsSource = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/mainwindow/CentralTabs.qml")
 Test-Policy ($transfersPageSource.Contains('function selectAllVisible()') `
@@ -466,6 +468,17 @@ Test-Policy (($mainQml -match 'sequences: \[StandardKey\.SelectAll\]') `
 Test-Policy ($transfersPageSource.Contains('readonly property bool filterNarrowsView') `
         -and $transfersPageSource.Contains('qsTr("%1 selected, of %2 shown by the current filter (%3 in total)")')) `
     "the selection summary states whether a filter is narrowing what all means"
+Test-Policy ($transfersPageSource.Contains('readonly property int tableContentWidth') `
+        -and $transfersPageSource.Contains('flickableDirection: Flickable.HorizontalFlick') `
+        -and $transfersPageSource.Contains('ScrollBar.horizontal: ScrollBar') `
+        -and $transfersPageSource.Contains('anchors.centerIn: parent') `
+        -and $transfersPageSource.Contains('No torrents match the current filter')) `
+    "the transfer table exposes every fixed column through an explicit horizontal surface and keeps its empty state centred"
+Test-Policy ($appHeaderSource.Contains('readonly property bool compactSplitDock') `
+        -and $appHeaderSource.Contains('visible: Theme.isSplitDock && !root.compactSplitDock') `
+        -and $appHeaderSource.Contains('SearchableMenu {') `
+        -and $appHeaderSource.Contains('searchPlaceholder: qsTr("Search destinations")')) `
+    "Split Dock collapses its destination strip before compact header controls can clip"
 
 # A PATH lookup misses every VS Code installed without "add to PATH" — the
 # default for the user-scope installer — and misses Insiders entirely.

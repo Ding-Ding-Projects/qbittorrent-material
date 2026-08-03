@@ -16,6 +16,7 @@
 #include <QDir>
 #include <QIcon>
 #include <QFileInfo>
+#include <QHash>
 #include <QProcess>
 #include <QStandardPaths>
 #include <QSystemTrayIcon>
@@ -271,6 +272,48 @@ bool DesktopIntegration::externalEditorAvailable() const
     return !m_availableEditors.isEmpty();
 }
 
+QString DesktopIntegration::findWellKnownEditor(const QString &id)
+{
+#ifdef Q_OS_WIN
+    // A PATH lookup misses every VS Code installed without the "add to PATH"
+    // option, which is the default for the user-scope installer, and misses
+    // Insiders and portable builds entirely. Check where they actually land.
+    static const QHash<QString, QStringList> relativePaths {
+        {u"vscode"_qs, {
+            uR"(Programs\Microsoft VS Code\Code.exe)"_qs,
+            uR"(Programs\Microsoft VS Code Insiders\Code - Insiders.exe)"_qs}},
+        {u"vscodium"_qs, {uR"(Programs\VSCodium\VSCodium.exe)"_qs}},
+        {u"cursor"_qs, {uR"(Programs\cursor\Cursor.exe)"_qs}}
+    };
+
+    const auto it = relativePaths.constFind(id);
+    if (it == relativePaths.cend())
+        return {};
+
+    const QStringList roots {
+        QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation),
+        qEnvironmentVariable("LOCALAPPDATA"),
+        qEnvironmentVariable("ProgramFiles"),
+        qEnvironmentVariable("ProgramFiles(x86)")
+    };
+
+    for (const QString &root : roots)
+    {
+        if (root.isEmpty())
+            continue;
+        for (const QString &relative : it.value())
+        {
+            const QString candidate = QDir(root).absoluteFilePath(relative);
+            if (QFileInfo(candidate).isExecutable())
+                return QDir::toNativeSeparators(candidate);
+        }
+    }
+#else
+    Q_UNUSED(id)
+#endif
+    return {};
+}
+
 void DesktopIntegration::refreshEditors()
 {
     struct Candidate { const char *id; const char *name; const char *binary; };
@@ -286,7 +329,9 @@ void DesktopIntegration::refreshEditors()
     QVariantList editors;
     for (const Candidate &candidate : candidates)
     {
-        const QString executable = QStandardPaths::findExecutable(QString::fromLatin1(candidate.binary));
+        QString executable = QStandardPaths::findExecutable(QString::fromLatin1(candidate.binary));
+        if (executable.isEmpty())
+            executable = findWellKnownEditor(QString::fromLatin1(candidate.id));
         if (executable.isEmpty())
             continue;
         editors.append(QVariantMap {{u"id"_qs, QString::fromLatin1(candidate.id)},

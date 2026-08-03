@@ -57,10 +57,20 @@ Item {
                 modernTabStrip.positionTabInView(WorkspaceManager.activeIndex)
         }
         function onOperationFinished(success, message, location) {
+            const target = (location && location.toString().length > 0)
+                ? location.toString() : ""
             workspaceSnackbar.show(message,
-                success && location && location.toString().length > 0 ? qsTr("Open") : "",
-                success && location && location.toString().length > 0
+                success && target.length > 0 ? qsTr("Open") : "",
+                success && target.length > 0
                     ? function() { Qt.openUrlExternally(location) } : null)
+
+            // Offer the editor route as well: "Open" hands the file to whatever
+            // the OS associates, which for an exported .json or .md is rarely
+            // the editor the user actually wants it in.
+            if (success && target.length > 0 && DesktopIntegration.externalEditorAvailable) {
+                NotificationCenter.notify(message, "success", "",
+                    qsTr("Open in editor"), "open-export:" + target)
+            }
         }
     }
 

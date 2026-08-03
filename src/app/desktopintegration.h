@@ -78,6 +78,10 @@ public:
     void setCustomEditorPath(const QString &path);
     [[nodiscard]] bool externalEditorAvailable() const;
     Q_INVOKABLE void refreshEditors();
+
+    /// Absolute path to a known editor installed without being added to PATH
+    /// (the default for VS Code's user-scope installer), or an empty string.
+    [[nodiscard]] static QString findWellKnownEditor(const QString &id);
     Q_INVOKABLE bool openInExternalEditor(const QString &path);
 
     /// Show a native desktop / tray notification (no-op if unavailable/disabled).

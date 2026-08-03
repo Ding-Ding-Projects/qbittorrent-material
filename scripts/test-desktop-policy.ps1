@@ -317,6 +317,22 @@ $guiAddManager = Get-Content -Raw -LiteralPath `
 $addTorrentDialog = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/addtorrent/AddNewTorrentDialog.qml")
 
+# A PATH lookup misses every VS Code installed without "add to PATH" — the
+# default for the user-scope installer — and misses Insiders entirely.
+$desktopIntegration = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/app/desktopintegration.cpp")
+Test-Policy ($desktopIntegration.Contains('QString DesktopIntegration::findWellKnownEditor') `
+        -and $desktopIntegration.Contains('Programs\Microsoft VS Code\Code.exe') `
+        -and $desktopIntegration.Contains('Code - Insiders.exe')) `
+    "editor detection looks where VS Code actually installs, not only on PATH"
+# An export the user cannot open is an export they have to hunt for on disk.
+$workspaceViewSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/workspace/WorkspaceView.qml")
+Test-Policy ($mainQml.Contains('actionId.startsWith("open-export:")') `
+        -and $mainQml.Contains('DesktopIntegration.openInExternalEditor(target)') `
+        -and $workspaceViewSource.Contains('"open-export:" + target')) `
+    "an export offers to open itself in the configured editor"
+
 # Local search surfaces reach the anchored regex builder rather than owning a
 # hand-rolled ".*" toggle that cannot build a pattern.
 $historySheet = Get-Content -Raw -LiteralPath `

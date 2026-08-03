@@ -1067,6 +1067,19 @@ ApplicationWindow {
                 JournalController.undoEntry(actionId.slice("journal-undo:".length))
                 NotificationCenter.dismiss(notificationId)
             }
+            // Anything the app exports can be opened in the configured editor
+            // straight from the notification that announced it, so the user is
+            // never left to find the file on disk themselves.
+            else if (actionId.startsWith("open-export:")) {
+                const target = actionId.slice("open-export:".length)
+                Log.info("ui", "Opening export in external editor: " + target)
+                if (!DesktopIntegration.openInExternalEditor(target)) {
+                    NotificationCenter.notify(
+                        qsTr("No external editor is configured. Choose one in Settings."),
+                        "warning")
+                }
+                NotificationCenter.dismiss(notificationId)
+            }
         }
     }
 

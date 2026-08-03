@@ -994,6 +994,24 @@ ApplicationWindow {
     Shortcut { sequences: ["Alt+5"]; onActivated: root.switchToTab(4) }
     Shortcut { sequences: ["Ctrl+Shift+P"]; onActivated: commandPalette.openPalette() }
     Shortcut { sequences: ["Escape"]; enabled: root.activePanel.length > 0; onActivated: root.closePanel() }
+    // Bulk selection on the transfer list. Both are gated on a focused text
+    // editor so Ctrl+A still selects text while typing in a filter field.
+    Shortcut {
+        sequences: [StandardKey.SelectAll]
+        enabled: root.currentTabIndex === 0 && !root.textEditorHasFocus
+        onActivated: {
+            Log.info("ui", "Select all filtered transfers")
+            centralTabs.selectAllTransfers()
+        }
+    }
+    Shortcut {
+        sequences: ["Ctrl+Shift+I"]
+        enabled: root.currentTabIndex === 0 && !root.textEditorHasFocus
+        onActivated: {
+            Log.info("ui", "Invert transfer selection")
+            centralTabs.invertTransferSelection()
+        }
+    }
     Shortcut {
         sequences: [StandardKey.Find, "Ctrl+E"]
         enabled: root.currentTabIndex === 0

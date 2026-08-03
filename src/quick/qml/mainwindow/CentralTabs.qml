@@ -60,6 +60,18 @@ Item {
             central.focusFilterRequested()
     }
 
+    /*! Selects every transfer the active filter shows. */
+    function selectAllTransfers() {
+        if (currentIndex === 0)
+            transfersPage.selectAllVisible()
+    }
+
+    /*! Selects exactly the visible transfers that are not selected. */
+    function invertTransferSelection() {
+        if (currentIndex === 0)
+            transfersPage.invertSelection()
+    }
+
     function workspaceItem() {
         central.currentIndex = 4
         return workspaceLoader.item

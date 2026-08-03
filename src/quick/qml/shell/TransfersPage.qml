@@ -108,6 +108,53 @@ Item {
         root.syncSelection()
     }
 
+    // Selecting one row and repeating an action forty times is the app failing
+    // to do its job. These operate on the filtered view, and the surfaces that
+    // use them say so, because "select all" is ambiguous otherwise.
+
+    /*! Rows currently visible under the active filter. */
+    function visibleRowCount() {
+        return root.filterProxy ? root.filterProxy.rowCount() : 0
+    }
+
+    /*! Selects every row the current filter shows. */
+    function selectAllVisible() {
+        var rows = []
+        const total = root.visibleRowCount()
+        for (var i = 0; i < total; ++i)
+            rows.push(i)
+        root.selectedRows = rows
+        if (root.currentRow < 0 && total > 0)
+            root.currentRow = 0
+        Log.info("ui", "Selected all " + total + " filtered row(s)")
+        root.syncSelection()
+    }
+
+    /*! Selects exactly the visible rows that are not selected right now. */
+    function invertSelection() {
+        var rows = []
+        const total = root.visibleRowCount()
+        for (var i = 0; i < total; ++i) {
+            if (root.selectedRows.indexOf(i) < 0)
+                rows.push(i)
+        }
+        root.selectedRows = rows
+        if (rows.indexOf(root.currentRow) < 0)
+            root.currentRow = rows.length > 0 ? rows[0] : -1
+        Log.info("ui", "Inverted selection -> " + rows.length + " row(s)")
+        root.syncSelection()
+    }
+
+    /*! Rows in the session before filtering, for honest "N of M" wording. */
+    function totalRowCount() {
+        return (root.filterProxy && root.filterProxy.sourceModel)
+            ? root.filterProxy.sourceModel.rowCount() : 0
+    }
+
+    /*! True when a filter is narrowing the view, so "all" needs qualifying. */
+    readonly property bool filterNarrowsView:
+        root.visibleRowCount() < root.totalRowCount()
+
     function syncSelection() {
         var ids = []
         for (var i = 0; i < root.selectedRows.length; ++i) {
@@ -418,6 +465,72 @@ Item {
                 Layout.fillWidth: true
                 Layout.leftMargin: 4
                 filterProxy: root.filterProxy
+            }
+
+            // Bulk-selection bar. It states the scope plainly, because
+            // "select all" is ambiguous the moment a filter is narrowing the
+            // view: a user who selects all and deletes should know whether that
+            // meant the 12 rows on screen or every torrent in the session.
+            Rectangle {
+                id: selectionBar
+                visible: root.selectedRows.length > 0
+                Layout.fillWidth: true
+                Layout.leftMargin: 4
+                Layout.preferredHeight: visible ? Spacing.controlHeight + Spacing.xs : 0
+                radius: Spacing.radiusChip
+                color: Theme.color("surfaceVariant")
+                border.width: Spacing.outlineWidth
+                border.color: Theme.color("outlineVariant")
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: Spacing.md
+                    anchors.rightMargin: Spacing.sm
+                    spacing: Spacing.sm
+
+                    Label {
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
+                        font: Typography.bodyMedium
+                        color: Theme.color("onSurface")
+                        text: root.filterNarrowsView
+                            ? qsTr("%1 selected, of %2 shown by the current filter (%3 in total)")
+                                .arg(root.selectedRows.length)
+                                .arg(root.visibleRowCount())
+                                .arg(root.totalRowCount())
+                            : qsTr("%1 of %2 selected")
+                                .arg(root.selectedRows.length)
+                                .arg(root.visibleRowCount())
+                        Accessible.name: text
+                    }
+
+                    Button {
+                        text: root.filterNarrowsView
+                            ? qsTr("Select all %1 shown").arg(root.visibleRowCount())
+                            : qsTr("Select all %1").arg(root.visibleRowCount())
+                        flat: true
+                        font: Typography.labelMedium
+                        enabled: root.selectedRows.length < root.visibleRowCount()
+                        Accessible.name: text
+                        onClicked: root.selectAllVisible()
+                    }
+
+                    Button {
+                        text: qsTr("Invert")
+                        flat: true
+                        font: Typography.labelMedium
+                        Accessible.name: qsTr("Invert the selection within the filtered view")
+                        onClicked: root.invertSelection()
+                    }
+
+                    Button {
+                        text: qsTr("Clear")
+                        flat: true
+                        font: Typography.labelMedium
+                        Accessible.name: qsTr("Clear the selection")
+                        onClicked: root.clearSelection()
+                    }
+                }
             }
 
             // A/B: the table.

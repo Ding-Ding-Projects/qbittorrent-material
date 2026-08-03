@@ -317,6 +317,26 @@ $guiAddManager = Get-Content -Raw -LiteralPath `
 $addTorrentDialog = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/addtorrent/AddNewTorrentDialog.qml")
 
+# Selecting one row and repeating an action forty times is the app failing to do
+# its job. "Select all" must also state its scope: with a filter narrowing the
+# view, a user who selects all and deletes needs to know whether that meant the
+# rows on screen or every torrent in the session.
+$transfersPageSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/shell/TransfersPage.qml")
+$centralTabsSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/mainwindow/CentralTabs.qml")
+Test-Policy ($transfersPageSource.Contains('function selectAllVisible()') `
+        -and $transfersPageSource.Contains('function invertSelection()') `
+        -and $centralTabsSource.Contains('function selectAllTransfers()') `
+        -and $centralTabsSource.Contains('function invertTransferSelection()')) `
+    "the transfer list supports select-all and inverse selection"
+Test-Policy (($mainQml -match 'sequences: \[StandardKey\.SelectAll\]') `
+        -and ($mainQml -match 'StandardKey\.SelectAll\][\s\S]{0,160}?!root\.textEditorHasFocus')) `
+    "select-all is keyboard reachable without stealing Ctrl+A from a text field"
+Test-Policy ($transfersPageSource.Contains('readonly property bool filterNarrowsView') `
+        -and $transfersPageSource.Contains('qsTr("%1 selected, of %2 shown by the current filter (%3 in total)")')) `
+    "the selection summary states whether a filter is narrowing what all means"
+
 # A PATH lookup misses every VS Code installed without "add to PATH" — the
 # default for the user-scope installer — and misses Insiders entirely.
 $desktopIntegration = Get-Content -Raw -LiteralPath `

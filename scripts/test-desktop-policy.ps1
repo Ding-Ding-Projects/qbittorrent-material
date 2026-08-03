@@ -473,8 +473,22 @@ $desktopIntegration = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/app/desktopintegration.cpp")
 Test-Policy ($desktopIntegration.Contains('QString DesktopIntegration::findWellKnownEditor') `
         -and $desktopIntegration.Contains('Programs\Microsoft VS Code\Code.exe') `
-        -and $desktopIntegration.Contains('Code - Insiders.exe')) `
+        -and $desktopIntegration.Contains('Microsoft VS Code\Code.exe') `
+        -and $desktopIntegration.Contains('Code - Insiders.exe') `
+        -and $desktopIntegration.Contains('qEnvironmentVariable("ProgramFiles")') `
+        -and $desktopIntegration.Contains('qEnvironmentVariable("ProgramFiles(x86)")') `
+        -and $desktopIntegration.Contains('qEnvironmentVariable("ProgramW6432")') `
+        -and -not $desktopIntegration.Contains('writableLocation(QStandardPaths::AppLocalDataLocation),')) `
     "editor detection looks where VS Code actually installs, not only on PATH"
+$associationUninstall = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "installer/file_associations_uninstall.nsh")
+Test-Policy ($associationUninstall.Contains('ReadRegStr $0 HKCR "qBittorrentMaterial.torrent\shell\open\command" ""') `
+        -and $associationUninstall.Contains('ReadRegStr $0 HKCR "magnet\shell\open\command" ""') `
+        -and $associationUninstall.Contains('ReadRegStr $1 HKCR "magnet" "URL Protocol"') `
+        -and $associationUninstall.Contains('DeleteRegKey /ifempty HKCR "magnet\shell"') `
+        -and -not $associationUninstall.Contains('DeleteRegKey HKCR "magnet\shell\open\command"') `
+        -and -not $associationUninstall.Contains('DeleteRegKey HKCR "magnet\shell"')) `
+    "uninstall preserves shared associations unless their command still belongs to this app"
 # An export the user cannot open is an export they have to hunt for on disk.
 $workspaceViewSource = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/workspace/WorkspaceView.qml")

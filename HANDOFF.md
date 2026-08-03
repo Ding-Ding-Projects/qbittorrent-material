@@ -6,9 +6,10 @@ The Windows desktop transfer surface now offers a UTF-8/LF transfer-list
 summary for all torrents or the current selection. It is available from the
 page action and both searchable transfer-row menu hosts, and supports JSON,
 JSON Lines, YAML, TOML, XML, CSV, TSV, Markdown, HTML, and SQL. The 14 exported
-columns are documented as a summary; wanted size, percentage progress,
-localized state/error text, sorted tags, UTC timestamps, and an empty value for
-unfinished completion time now match the visible row semantics.
+columns are documented as a summary; wanted size, percentage progress (0–100;
+the internal model remains a 0–1 fraction), localized state/error text, sorted
+tags, UTC timestamps, and an empty value for unfinished completion time now
+match the visible row semantics.
 
 The serializer normalizes keyed headers, escapes structured output, omits
 invalid XML 1.0 controls, quotes YAML/TOML controls, keeps Markdown cells

@@ -368,12 +368,19 @@ int TransferController::removeTrackerFromAll(const QString &host)
     if (trimmed.isEmpty())
         return 0;
 
+    BitTorrent::Session *const session = BitTorrent::Session::instance();
+    if (!session)
+    {
+        qCWarning(lcUi) << "Cannot remove tracker host without a torrent session" << trimmed;
+        return 0;
+    }
+
     // The filter list groups trackers by host, so match on the URL's host
     // rather than on the whole URL: one host commonly serves several announce
     // URLs, and removing only the exact string would leave the rest behind and
     // the filter row still populated.
     int changed = 0;
-    const QList<Torrent *> torrents = BitTorrent::Session::instance()->torrents();
+    const QList<Torrent *> torrents = session->torrents();
     for (Torrent *const torrent : torrents)
     {
         QStringList doomed;
@@ -595,6 +602,46 @@ void TransferController::setAutoTMM(bool enabled)
         torrent->setAutoTMMEnabled(enabled);
 }
 
+void TransferController::setDownloadPath(const QString &path, const bool enabled)
+{
+    const QList<Torrent *> torrents = selectedTorrents();
+    const Path downloadPath {path};
+    qCInfo(lcUi) << "Set incomplete-download path enabled=" << enabled
+                 << "on" << torrents.size() << "torrent(s)";
+    for (Torrent *const torrent : torrents)
+    {
+        // A torrent has no separate enabled flag: an empty per-torrent path is
+        // the engine's disabled sentinel. Auto-TMM owns the category path, so
+        // never call the per-torrent setter while it is still active.
+        if (!torrent->isAutoTMMEnabled())
+            torrent->setDownloadPath(enabled ? downloadPath : Path());
+    }
+}
+
+void TransferController::setDHTDisabled(const bool disabled)
+{
+    const QList<Torrent *> torrents = selectedTorrents();
+    qCInfo(lcUi) << "Set DHT disabled" << disabled << "on" << torrents.size() << "torrent(s)";
+    for (Torrent *const torrent : torrents)
+        torrent->setDHTDisabled(disabled);
+}
+
+void TransferController::setPEXDisabled(const bool disabled)
+{
+    const QList<Torrent *> torrents = selectedTorrents();
+    qCInfo(lcUi) << "Set PeX disabled" << disabled << "on" << torrents.size() << "torrent(s)";
+    for (Torrent *const torrent : torrents)
+        torrent->setPEXDisabled(disabled);
+}
+
+void TransferController::setLSDDisabled(const bool disabled)
+{
+    const QList<Torrent *> torrents = selectedTorrents();
+    qCInfo(lcUi) << "Set LSD disabled" << disabled << "on" << torrents.size() << "torrent(s)";
+    for (Torrent *const torrent : torrents)
+        torrent->setLSDDisabled(disabled);
+}
+
 // --- limits / share limits ---
 
 void TransferController::setDownloadLimit(int limitBytesPerSec)
@@ -624,6 +671,20 @@ void TransferController::setShareLimits(double ratioLimit, int seedingTimeMinute
         limits.ratioLimit = static_cast<qreal>(ratioLimit);
         limits.seedingTimeLimit = seedingTimeMinutes;
         limits.inactiveSeedingTimeLimit = inactiveSeedingTimeMinutes;
+        torrent->setShareLimits(limits);
+    }
+}
+
+void TransferController::setShareLimitPolicy(const int mode, const int action)
+{
+    const QList<Torrent *> torrents = selectedTorrents();
+    qCInfo(lcUi) << "Set share-limit policy mode=" << mode << "action=" << action
+                 << "on" << torrents.size() << "torrent(s)";
+    for (Torrent *const torrent : torrents)
+    {
+        ShareLimits limits = torrent->shareLimits();
+        limits.mode = static_cast<ShareLimitsMode>(mode);
+        limits.action = static_cast<ShareLimitAction>(action);
         torrent->setShareLimits(limits);
     }
 }

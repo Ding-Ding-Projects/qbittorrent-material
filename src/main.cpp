@@ -56,8 +56,7 @@ int main(int argc, char *argv[])
         if (!app.isPrimaryInstance())
         {
             qCInfo(lcApp) << "Another instance is already running; forwarding request and exiting";
-            app.notifyPrimaryInstance();
-            return 0;
+            return app.notifyPrimaryInstance() ? 0 : 1;
         }
 
         // --- 4. Boot the UI + event loop. ------------------------------------

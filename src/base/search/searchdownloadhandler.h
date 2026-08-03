@@ -36,10 +36,12 @@ signals:
     void downloadFinished(const QString &path, const QString &errorMessage);
 
 private:
+    void finishDownload(const QString &path, const QString &errorMessage);
     void downloadProcessFinished(int exitcode);
 
     QString m_pluginName;
     QString m_url;
     SearchPluginManager *m_manager = nullptr;
     QProcess *m_downloadProcess = nullptr;
+    bool m_finished = false;
 };

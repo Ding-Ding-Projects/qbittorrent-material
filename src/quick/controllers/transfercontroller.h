@@ -119,11 +119,16 @@ public:
     Q_INVOKABLE void setSequential(bool enabled);
     Q_INVOKABLE void setFirstLastPiece(bool enabled);
     Q_INVOKABLE void setAutoTMM(bool enabled);
+    Q_INVOKABLE void setDownloadPath(const QString &path, bool enabled);
+    Q_INVOKABLE void setDHTDisabled(bool disabled);
+    Q_INVOKABLE void setPEXDisabled(bool disabled);
+    Q_INVOKABLE void setLSDDisabled(bool disabled);
 
     // --- limits / share limits ---
     Q_INVOKABLE void setDownloadLimit(int limitBytesPerSec);
     Q_INVOKABLE void setUploadLimit(int limitBytesPerSec);
     Q_INVOKABLE void setShareLimits(double ratioLimit, int seedingTimeMinutes, int inactiveSeedingTimeMinutes);
+    Q_INVOKABLE void setShareLimitPolicy(int mode, int action);
 
     // --- clipboard ---
     Q_INVOKABLE void copyName();

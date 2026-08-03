@@ -16,6 +16,7 @@
 
 #include <QClipboard>
 #include <QDesktopServices>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QUrl>
 #include <QVariantMap>
@@ -430,7 +431,7 @@ void SearchController::doDownload(SearchTab *tab, int sourceRow, bool showDialog
     SearchDownloadHandler *dl = mgr->downloadTorrent(result.engineName, result.fileUrl);
     connect(dl, &SearchDownloadHandler::downloadFinished, this,
             [this, showDialog, dl](const QString &path, const QString &errorMessage) {
-        if (errorMessage.isEmpty())
+        if (errorMessage.isEmpty() && !path.isEmpty() && QFileInfo(path).isFile())
         {
             qCInfo(lcSearch) << "Fetched .torrent to" << path;
             emit addTorrentRequested(path, showDialog);

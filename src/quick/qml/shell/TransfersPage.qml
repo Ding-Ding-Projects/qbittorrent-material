@@ -73,6 +73,49 @@ Item {
         return seeding ? Theme.color("primary") : Theme.color("success")
     }
 
+    // Keep the redesigned card/table surface on the same engine path as the
+    // legacy transfer list. The dialog is intentionally presentational; this
+    // adapter makes every accepted field take effect on the current selection.
+    function applyTorrentOptions(result) {
+        if (!result)
+            return
+        if ((result.autoTMM !== undefined) && (result.autoTMM !== Qt.PartiallyChecked))
+            TransferController.setAutoTMM(result.autoTMM === Qt.Checked)
+        if ((result.useDownloadPath !== undefined) || (result.downloadPath !== undefined))
+            TransferController.setDownloadPath(result.downloadPath || "", result.useDownloadPath === true)
+        if (result.category !== undefined)
+            TransferController.setCategory(result.category)
+        if (result.savePath !== undefined && String(result.savePath).length > 0)
+            TransferController.setLocation(result.savePath)
+        if (result.upLimit !== undefined)
+            TransferController.setUploadLimit(result.upLimit * 1024)
+        if (result.downLimit !== undefined)
+            TransferController.setDownloadLimit(result.downLimit * 1024)
+        if ((result.sequential !== undefined) && (result.sequential !== Qt.PartiallyChecked))
+            TransferController.setSequential(result.sequential === Qt.Checked)
+        if ((result.firstLastPieces !== undefined) && (result.firstLastPieces !== Qt.PartiallyChecked))
+            TransferController.setFirstLastPiece(result.firstLastPieces === Qt.Checked)
+        if ((result.superSeeding !== undefined) && (result.superSeeding !== Qt.PartiallyChecked))
+            TransferController.setSuperSeeding(result.superSeeding === Qt.Checked)
+        if ((result.disableDHT !== undefined) && (result.disableDHT !== Qt.PartiallyChecked))
+            TransferController.setDHTDisabled(result.disableDHT === Qt.Checked)
+        if ((result.disablePEX !== undefined) && (result.disablePEX !== Qt.PartiallyChecked))
+            TransferController.setPEXDisabled(result.disablePEX === Qt.Checked)
+        if ((result.disableLSD !== undefined) && (result.disableLSD !== Qt.PartiallyChecked))
+            TransferController.setLSDDisabled(result.disableLSD === Qt.Checked)
+        if ((result.ratioLimit !== undefined) || (result.seedingTimeLimit !== undefined)
+                || (result.inactiveSeedingTimeLimit !== undefined))
+            TransferController.setShareLimits(
+                result.ratioLimit !== undefined ? result.ratioLimit : -2,
+                result.seedingTimeLimit !== undefined ? result.seedingTimeLimit : -2,
+                result.inactiveSeedingTimeLimit !== undefined ? result.inactiveSeedingTimeLimit : -2)
+        if ((result.shareLimitMode !== undefined) || (result.shareLimitAction !== undefined))
+            TransferController.setShareLimitPolicy(
+                result.shareLimitMode !== undefined ? result.shareLimitMode : -1,
+                result.shareLimitAction !== undefined ? result.shareLimitAction : -1)
+        Log.info("ui", "Applied torrent options to redesigned transfer selection")
+    }
+
     function localPath(url) {
         return decodeURIComponent(("" + url).replace(/^file:\/\/\/?/, ""))
     }
@@ -1288,5 +1331,6 @@ Item {
     TorrentOptionsDialog {
         id: torrentOptionsDialog
         parent: Overlay.overlay
+        onOptionsAccepted: (result) => root.applyTorrentOptions(result)
     }
 }

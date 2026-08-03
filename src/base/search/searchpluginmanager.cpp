@@ -772,7 +772,14 @@ void SearchPluginManager::update()
         u"--capabilities"_s
     };
     nova.start(pythonPath.data(), params, QIODevice::ReadOnly);
-    nova.waitForFinished();
+    if (!nova.waitForFinished(10000))
+    {
+        qCWarning(lcSearch) << "Timed out while fetching search engine capabilities";
+        nova.kill();
+        nova.waitForFinished(1000);
+        setRuntimeError(tr("The search runtime did not respond within 10 seconds."));
+        return;
+    }
 
     const auto stdErrMsg = QString::fromUtf8(nova.readAllStandardError()).trimmed();
     if (!stdErrMsg.isEmpty())

@@ -62,6 +62,9 @@ ApplicationWindow {
     minimumWidth: 960
     minimumHeight: 600
     visible: true
+    // Windows desktop chrome is painted by the app so the title bar follows
+    // the same Material theme and remains keyboard/screen-reader accessible.
+    flags: Qt.FramelessWindowHint | Qt.Window
     color: Theme.color("background")
 
     // Size the first normal window to 80% of the screen's usable area.  This is
@@ -703,18 +706,28 @@ ApplicationWindow {
     // The redesigned 64px header (Material Redesign). The legacy AppToolBar
     // still ships but is superseded by AppHeader; its verbs live on in the
     // header's overflow AppMenuBar.
-    header: AppHeader {
-        id: appHeader
-        shell: root
-        visible: root.toolbarVisible
-        currentTab: root.currentTabIndex
-        filterProxy: centralTabs.proxy
-        rssUnread: centralTabs.rssUnread
-        unreadNotifications: NotificationCenter.unreadCount
-        activePanel: root.activePanel
-        onNavRequested: (index) => root.switchToTab(index)
-        onPanelRequested: (panel) => root.togglePanel(panel)
-        onRegexBuilderRequested: root.togglePanel("regex")
+    header: Column {
+        width: parent ? parent.width : 0
+
+        MaterialTitleBar {
+            width: parent.width
+            window: root
+        }
+
+        AppHeader {
+            id: appHeader
+            width: parent.width
+            shell: root
+            visible: root.toolbarVisible
+            currentTab: root.currentTabIndex
+            filterProxy: centralTabs.proxy
+            rssUnread: centralTabs.rssUnread
+            unreadNotifications: NotificationCenter.unreadCount
+            activePanel: root.activePanel
+            onNavRequested: (index) => root.switchToTab(index)
+            onPanelRequested: (panel) => root.togglePanel(panel)
+            onRegexBuilderRequested: root.togglePanel("regex")
+        }
     }
 
     footer: AppStatusBar {

@@ -202,9 +202,10 @@ function Find-VcVars {
     return $null
 }
 
-function Import-VcVars($vcvars) {
-    Info "Importing MSVC environment ($vcvars)"
-    cmd /c "`"$vcvars`" && set" | ForEach-Object {
+function Import-VcVars($vcvars, $vcToolsVersion) {
+    $toolsetArgument = if ($vcToolsVersion) { " -vcvars_ver=$vcToolsVersion" } else { '' }
+    Info "Importing MSVC environment ($vcvars$toolsetArgument)"
+    cmd /c "`"$vcvars`"$toolsetArgument && set" | ForEach-Object {
         if ($_ -match '^([^=]+)=(.*)$') { Set-Item -Path "env:$($matches[1])" -Value $matches[2] }
     }
 }
@@ -306,13 +307,23 @@ $VcVarsAuxiliaryDir = $VcVarsBuildDir.Parent
 if ($null -eq $VcVarsAuxiliaryDir -or $VcVarsAuxiliaryDir.Name -ine 'Auxiliary') {
     Die "Unexpected Visual Studio vcvars path: $($VcVarsFile.FullName)."
 }
-$VcDir = $VcVarsAuxiliaryDir.Parent
+$VcDir = Get-Item -LiteralPath $VcVarsAuxiliaryDir.Parent.FullName -ErrorAction Stop
 if ($null -eq $VcDir -or $VcDir.Name -ine 'VC' -or $null -eq $VcDir.Parent) {
     Die "Unexpected Visual Studio vcvars path: $($VcVarsFile.FullName)."
 }
+$VcToolsRoot = Join-Path $VcDir 'Tools\MSVC'
+$VcToolsDirectory = Get-ChildItem -LiteralPath $VcToolsRoot -Directory |
+    Where-Object { $_.Name -match '^\d+\.\d+\.\d+$' } |
+    Sort-Object { [version]$_.Name } -Descending |
+    Select-Object -First 1
+if (-not $VcToolsDirectory) {
+    Die "No installed MSVC toolset was found under $VcToolsRoot."
+}
+$VcToolsVersion = ($VcToolsDirectory.Name -split '\.')[0..1] -join '.'
+$env:VCPKG_VISUAL_STUDIO_TOOLSET = $VcToolsDirectory.Name
 $env:VCPKG_VISUAL_STUDIO_PATH = $VcDir.Parent.FullName
-Info "Pinning vcpkg to the selected Visual Studio: $env:VCPKG_VISUAL_STUDIO_PATH"
-Import-VcVars $vcvars
+Info "Pinning vcpkg to the selected Visual Studio: $env:VCPKG_VISUAL_STUDIO_PATH ($($VcToolsDirectory.Name))"
+Import-VcVars $vcvars $VcToolsVersion
 $env:VCPKG_ROOT = $VcpkgRoot
 
 Ensure-Tool 'git' 'Git.Git' 'Git'

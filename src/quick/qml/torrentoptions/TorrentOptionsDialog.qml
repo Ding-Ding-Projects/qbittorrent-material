@@ -115,8 +115,9 @@ Dialog {
             result.autoTMM = (autoTMMCheck.checkState === Qt.Checked);
             if (!result.autoTMM) {
                 result.savePath = savePathField.path;
-                result.useDownloadPath = (useDownloadPathCheck.checkState === Qt.Checked);
-                if (result.useDownloadPath)
+                if (useDownloadPathCheck.checkState !== Qt.PartiallyChecked)
+                    result.useDownloadPath = (useDownloadPathCheck.checkState === Qt.Checked);
+                if (result.useDownloadPath === true)
                     result.downloadPath = downloadPathField.path;
             }
         }

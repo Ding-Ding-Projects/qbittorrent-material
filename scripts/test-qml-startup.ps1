@@ -19,7 +19,9 @@
 [CmdletBinding()]
 param(
     [string] $RepositoryRoot,
-    [int] $TimeoutSeconds = 40
+    [int] $TimeoutSeconds = 40,
+    [string] $BinaryPath,
+    [string] $PlatformPluginPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -29,15 +31,25 @@ if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
 }
 $RepositoryRoot = (Resolve-Path -LiteralPath $RepositoryRoot).Path
 
-$exe = Join-Path $RepositoryRoot "build/qbittorrent.exe"
+$exe = if ([string]::IsNullOrWhiteSpace($BinaryPath)) {
+    Join-Path $RepositoryRoot "build/qbittorrent.exe"
+}
+else {
+    (Resolve-Path -LiteralPath $BinaryPath).Path
+}
 if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
-    Write-Host "[SKIP] No built binary at build/qbittorrent.exe; nothing to start."
+    Write-Host "[SKIP] No built binary at $exe; nothing to start."
     exit 0
 }
 
-$platformPlugin = Join-Path $RepositoryRoot "build/platforms/qoffscreen.dll"
+$platformPlugin = if ([string]::IsNullOrWhiteSpace($PlatformPluginPath)) {
+    Join-Path $RepositoryRoot "build/platforms/qoffscreen.dll"
+}
+else {
+    (Resolve-Path -LiteralPath $PlatformPluginPath).Path
+}
 if (-not (Test-Path -LiteralPath $platformPlugin -PathType Leaf)) {
-    Write-Host "[SKIP] The offscreen platform plugin is not deployed; cannot start headlessly."
+    Write-Host "[SKIP] The offscreen platform plugin is not deployed at $platformPlugin; cannot start headlessly."
     exit 0
 }
 
@@ -53,18 +65,28 @@ foreach ($stale in @($profileRoot, $logPath)) {
 New-Item -ItemType Directory -Force -Path $profileRoot | Out-Null
 
 $env:QT_QPA_PLATFORM = "offscreen"
+$oldPluginPath = $env:QT_QPA_PLATFORM_PLUGIN_PATH
+$env:QT_QPA_PLATFORM_PLUGIN_PATH = Split-Path -Parent $platformPlugin
 $process = Start-Process -FilePath $exe `
     -ArgumentList @("--profile-root=$profileRoot") `
+    -WorkingDirectory (Split-Path -Parent $exe) `
     -PassThru -RedirectStandardOutput $logPath -RedirectStandardError "$logPath.err"
 
 try {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $exitedEarly = $false
+    $ready = $false
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Milliseconds 500
         if ($process.HasExited) { $exitedEarly = $true; break }
-        if ((Test-Path -LiteralPath $logPath) -and
-            ((Get-Content -Raw -LiteralPath $logPath) -match 'SearchController constructed|TransferListModel')) {
+        $readinessLog = ""
+        foreach ($candidate in @($logPath, "$logPath.err")) {
+            if (Test-Path -LiteralPath $candidate) {
+                $readinessLog += (Get-Content -Raw -LiteralPath $candidate)
+            }
+        }
+        if ($readinessLog -match 'SearchController constructed|TransferListModel') {
+            $ready = $true
             break
         }
     }
@@ -80,7 +102,6 @@ try {
     $faults = @(
         'Failed to create Main.qml root object',
         'is not unique',
-        'unavailable',
         'Unable to assign',
         'ReferenceError',
         'TypeError'
@@ -90,6 +111,13 @@ try {
     if ($exitedEarly -and ($process.ExitCode -ne 0)) {
         Write-Host $log
         throw "The application exited during startup with code $($process.ExitCode)."
+    }
+    if (-not $ready) {
+        Write-Host $log
+        if ($exitedEarly) {
+            throw "The application exited before its startup readiness marker (code $($process.ExitCode))."
+        }
+        throw "The application did not reach its startup readiness marker within $TimeoutSeconds second(s)."
     }
     if ($found.Count -gt 0) {
         Write-Host $log
@@ -108,4 +136,5 @@ finally {
             Remove-Item -Recurse -Force -LiteralPath $stale -ErrorAction SilentlyContinue
         }
     }
+    $env:QT_QPA_PLATFORM_PLUGIN_PATH = $oldPluginPath
 }

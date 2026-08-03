@@ -98,10 +98,12 @@ void NarratorController::loadSettings()
     auto *pref = Preferences::instance();
     // Off by default. The narrator is opt-in, so a fresh profile is silent.
     m_enabled = pref->value(kEnabledKey, false).toBool();
-    m_languageMode = pref->value(kLanguageKey, static_cast<int>(English)).toInt();
+    m_languageMode = qBound(static_cast<int>(English),
+        pref->value(kLanguageKey, static_cast<int>(English)).toInt(),
+        static_cast<int>(Both));
     m_englishVoice = pref->value(kEnglishVoiceKey, kDefaultEnglishVoice).toString();
     m_cantoneseVoice = pref->value(kCantoneseVoiceKey, kDefaultCantoneseVoice).toString();
-    m_volume = pref->value(kVolumeKey, 0.7).toDouble();
+    m_volume = qBound<qreal>(0.0, pref->value(kVolumeKey, 0.7).toDouble(), 1.0);
     m_quietHours = pref->value(kQuietKey, false).toBool();
 }
 
@@ -336,6 +338,18 @@ void NarratorController::synthesize(const Utterance &utterance)
         m_synth = new QProcess(this);
         connect(m_synth, &QProcess::finished, this,
             [this](const int exitCode, QProcess::ExitStatus) { onSynthesisFinished(exitCode); });
+        connect(m_synth, &QProcess::errorOccurred, this,
+            [this](const QProcess::ProcessError error)
+        {
+            if (error != QProcess::FailedToStart)
+                return;
+            const QString detail = m_synth ? m_synth->errorString() : QString();
+            qCWarning(lcUi) << "Narrator synthesis process could not start:" << detail;
+            setUnavailableReason(tr("Narration could not start. %1")
+                .arg(detail.isEmpty() ? tr("The configured Python interpreter was unavailable.") : detail));
+            setSpeaking(false);
+            pumpQueue();
+        });
     }
 
     const QStringList args {
@@ -380,6 +394,16 @@ void NarratorController::onSynthesisFinished(const int exitCode)
         m_player = new QMediaPlayer(this);
         m_audioOutput = new QAudioOutput(this);
         m_player->setAudioOutput(m_audioOutput);
+        connect(m_player, &QMediaPlayer::errorOccurred, this,
+            [this](const QMediaPlayer::Error error, const QString &errorString)
+        {
+            qCWarning(lcUi) << "Narrator playback failed:" << error << errorString;
+            setUnavailableReason(tr("Narration audio could not be played. %1")
+                .arg(errorString.isEmpty() ? tr("The audio device rejected the utterance.")
+                                            : errorString));
+            setSpeaking(false);
+            pumpQueue();
+        });
         connect(m_player, &QMediaPlayer::mediaStatusChanged, this,
             [this](const QMediaPlayer::MediaStatus status)
         {

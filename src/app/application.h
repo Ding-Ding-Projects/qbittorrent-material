@@ -62,7 +62,7 @@ public:
 
     /// Forward this process' request (command-line/activation) to the primary
     /// instance, then this process is expected to exit.
-    void notifyPrimaryInstance();
+    [[nodiscard]] bool notifyPrimaryInstance();
 
     /// Shared, app-owned QML singleton instances.
     [[nodiscard]] AppController *appController() const;

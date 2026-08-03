@@ -106,14 +106,47 @@ namespace
         // Isolated profiles are independent instances. This keeps deterministic
         // documentation capture and test profiles from activating a user's
         // normal qBittorrent Material session.
-        for (const QString &arg : QCoreApplication::arguments())
+        const QStringList args = QCoreApplication::arguments();
+        for (qsizetype i = 1; i < args.size(); ++i)
         {
-            if (arg.startsWith(u"--profile-root="_s))
+            const QString &arg = args.at(i);
+            if (arg.startsWith(u"--profile-root="_s)
+                || arg.startsWith(u"--configuration="_s))
+            {
                 seed += u'|' + arg;
+            }
+            else if ((arg == u"--profile-root"_s || arg == u"--configuration"_s)
+                && (i + 1 < args.size()))
+            {
+                seed += u'|' + arg + u'=' + args.at(++i);
+            }
         }
         const QByteArray digest =
             QCryptographicHash::hash(seed.toUtf8(), QCryptographicHash::Sha1).toHex().left(16);
         return u"qbittorrent-material-"_qs + QString::fromLatin1(digest);
+    }
+
+    QString firstActivationArgument(const QStringList &args)
+    {
+        for (qsizetype i = 1; i < args.size(); ++i)
+        {
+            const QString &arg = args.at(i);
+            if (arg == u"--profile-root"_s || arg == u"--configuration"_s
+                || arg == u"--capture-ui"_s)
+            {
+                ++i;  // consume the value of a supported separated option
+                continue;
+            }
+            if (arg.startsWith(u"--profile-root="_s)
+                || arg.startsWith(u"--configuration="_s)
+                || arg.startsWith(u"--capture-ui="_s)
+                || arg.startsWith(u"--"_s))
+            {
+                continue;
+            }
+            return arg;
+        }
+        return u"activate"_s;
     }
 
     QString bundledLicenseNotice()
@@ -189,14 +222,35 @@ void Application::setupSingleInstance()
         return;
     }
 
-    // Become the primary: (re)create the local server.
+    // Become the primary. Never report primary ownership if the socket cannot
+    // be acquired: otherwise two processes can both accept writes while the
+    // caller has no reliable activation path.
     m_instanceServer = new QLocalServer(this);
-    QLocalServer::removeServer(m_instanceId);  // clear a stale socket from a crash
     if (!m_instanceServer->listen(m_instanceId))
     {
-        qCWarning(lcApp) << "Failed to listen on single-instance socket:"
-                         << m_instanceServer->errorString()
-                         << "— continuing as primary anyway";
+        QLocalSocket retryProbe;
+        retryProbe.connectToServer(m_instanceId);
+        if (retryProbe.waitForConnected(1000))
+        {
+            qCInfo(lcApp) << "Another instance accepted the single-instance socket during startup";
+            delete m_instanceServer;
+            m_instanceServer = nullptr;
+            m_isPrimaryInstance = false;
+            return;
+        }
+
+        // No live server answered, so the endpoint is stale (usually left by
+        // a crash). Remove only after the second probe and retry once.
+        QLocalServer::removeServer(m_instanceId);
+        if (!m_instanceServer->listen(m_instanceId))
+        {
+            qCCritical(lcApp) << "Failed to listen on single-instance socket:"
+                              << m_instanceServer->errorString();
+            delete m_instanceServer;
+            m_instanceServer = nullptr;
+            m_isPrimaryInstance = false;
+            return;
+        }
     }
 
     connect(m_instanceServer, &QLocalServer::newConnection, this, [this]
@@ -221,24 +275,25 @@ bool Application::isPrimaryInstance() const
     return m_isPrimaryInstance;
 }
 
-void Application::notifyPrimaryInstance()
+bool Application::notifyPrimaryInstance()
 {
     qCDebug(lcApp) << "Notifying primary instance of our launch";
     QLocalSocket socket;
     socket.connectToServer(m_instanceId);
     if (socket.waitForConnected(500))
     {
-        const QStringList args = QCoreApplication::arguments();
-        const QByteArray payload = (args.size() > 1) ? args.at(1).toUtf8() : QByteArray("activate");
+        const QByteArray payload = firstActivationArgument(QCoreApplication::arguments()).toUtf8();
         socket.write(payload);
         socket.flush();
-        socket.waitForBytesWritten(500);
+        const bool delivered = socket.waitForBytesWritten(500);
         socket.disconnectFromServer();
-        qCInfo(lcApp) << "Handoff to primary complete";
+        qCInfo(lcApp) << (delivered ? "Handoff to primary complete" : "Handoff write failed");
+        return delivered;
     }
     else
     {
         qCWarning(lcApp) << "Could not reach primary instance:" << socket.errorString();
+        return false;
     }
 }
 
@@ -303,18 +358,14 @@ int Application::run()
     // once the session has settled. Skipped in capture mode.
     if (captureOutput.isEmpty())
     {
-        const QStringList args = QCoreApplication::arguments();
-        for (qsizetype i = 1; i < args.size(); ++i)
+        const QString activationArgument = firstActivationArgument(QCoreApplication::arguments());
+        if (activationArgument != u"activate"_s)
         {
-            const QString &arg = args.at(i);
-            if (arg.startsWith(u"--"_s))
-                continue;
-            QTimer::singleShot(0, this, [this, arg]
+            QTimer::singleShot(0, this, [this, activationArgument]
             {
                 if (m_appController)
-                    m_appController->handleActivationRequest(arg);
+                    m_appController->handleActivationRequest(activationArgument);
             });
-            break;
         }
     }
 
@@ -374,12 +425,22 @@ void Application::initEngine()
     Logger::initInstance();
     Path profileRoot;
     QString configurationName;
-    for (const QString &arg : QCoreApplication::arguments())
+    const QStringList args = QCoreApplication::arguments();
+    for (qsizetype i = 1; i < args.size(); ++i)
     {
+        const QString &arg = args.at(i);
         if (arg.startsWith(u"--profile-root="_s))
             profileRoot = Path(arg.sliced(15));
         else if (arg.startsWith(u"--configuration="_s))
             configurationName = arg.sliced(16);
+        else if ((arg == u"--profile-root"_s || arg == u"--configuration"_s)
+            && (i + 1 < args.size()))
+        {
+            if (arg == u"--profile-root"_s)
+                profileRoot = Path(args.at(++i));
+            else
+                configurationName = args.at(++i);
+        }
     }
     Profile::initInstance(profileRoot, configurationName, false);
     SettingsStorage::initInstance();

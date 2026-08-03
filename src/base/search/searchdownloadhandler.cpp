@@ -28,10 +28,13 @@
 
 #include "searchdownloadhandler.h"
 
+#include <QFileInfo>
 #include <QtLogging>
 #include <QProcess>
+#include <QTimer>
 
 #include "base/global.h"
+#include "base/logging.h"
 #include "base/logger.h"
 #include "base/path.h"
 #include "base/utils/foreignapps.h"
@@ -51,6 +54,13 @@ SearchDownloadHandler::SearchDownloadHandler(const QString &pluginName, const QS
 #endif
     connect(m_downloadProcess, qOverload<int, QProcess::ExitStatus>(&QProcess::finished)
             , this, &SearchDownloadHandler::downloadProcessFinished);
+    connect(m_downloadProcess, &QProcess::errorOccurred, this,
+        [this](const QProcess::ProcessError error)
+    {
+        if (error != QProcess::FailedToStart)
+            return;
+        finishDownload({}, tr("The search downloader could not start: %1.").arg(m_downloadProcess->errorString()));
+    });
     const QStringList params
     {
         Utils::ForeignApps::PYTHON_ISOLATE_MODE_FLAG,
@@ -61,10 +71,33 @@ SearchDownloadHandler::SearchDownloadHandler(const QString &pluginName, const QS
     };
     // Launch search
     m_downloadProcess->start(Utils::ForeignApps::pythonInfo().executablePath.data(), params, QIODevice::ReadOnly);
+
+    QTimer::singleShot(30000, this, [this]
+    {
+        if (m_finished || !m_downloadProcess
+            || (m_downloadProcess->state() == QProcess::NotRunning))
+        {
+            return;
+        }
+        qCWarning(lcSearch) << "Search torrent download timed out" << m_pluginName << m_url;
+        m_downloadProcess->kill();
+        finishDownload({}, tr("The search downloader timed out after 30 seconds."));
+    });
+}
+
+void SearchDownloadHandler::finishDownload(const QString &path, const QString &errorMessage)
+{
+    if (m_finished)
+        return;
+    m_finished = true;
+    emit downloadFinished(path, errorMessage);
 }
 
 void SearchDownloadHandler::downloadProcessFinished(const int exitcode)
 {
+    if (m_finished)
+        return;
+
     const auto errMsg = QString::fromUtf8(m_downloadProcess->readAllStandardError()).trimmed();
     if (!errMsg.isEmpty())
     {
@@ -82,5 +115,18 @@ void SearchDownloadHandler::downloadProcessFinished(const int exitcode)
             path = parts[0].toString();
     }
 
-    emit downloadFinished(path, errMsg);
+    QString finalError = errMsg;
+    if ((exitcode != 0) || (m_downloadProcess->exitStatus() != QProcess::NormalExit))
+    {
+        if (finalError.isEmpty())
+            finalError = tr("The search downloader exited before returning a torrent file.");
+        path.clear();
+    }
+    else if (path.isEmpty() || !QFileInfo(path).isFile())
+    {
+        finalError = tr("The search downloader did not return a readable torrent file.");
+        path.clear();
+    }
+
+    finishDownload(path, finalError);
 }

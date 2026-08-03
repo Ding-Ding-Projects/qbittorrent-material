@@ -67,7 +67,7 @@ namespace
         proc.setUnixProcessParameters(QProcess::UnixProcessFlag::CloseFileDescriptors);
 #endif
         proc.start(exePath.data(), {u"--version"_s}, QIODevice::ReadOnly);
-        if (proc.waitForFinished() && (proc.exitStatus() == QProcess::NormalExit))
+        if (proc.waitForFinished(3000) && (proc.exitStatus() == QProcess::NormalExit))
         {
             QByteArray procOutput = proc.readAllStandardOutput();
             if (procOutput.isEmpty())
@@ -95,6 +95,8 @@ namespace
             return true;
         }
 
+        if (proc.state() != QProcess::NotRunning)
+            proc.kill();
         return false;
     }
 

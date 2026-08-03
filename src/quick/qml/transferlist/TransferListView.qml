@@ -279,6 +279,8 @@ Item {
             return;
         if ((r.autoTMM !== undefined) && (r.autoTMM !== Qt.PartiallyChecked))
             TransferController.setAutoTMM(r.autoTMM === Qt.Checked);
+        if ((r.useDownloadPath !== undefined) || (r.downloadPath !== undefined))
+            TransferController.setDownloadPath(r.downloadPath || "", r.useDownloadPath === true);
         if (r.category !== undefined)
             TransferController.setCategory(r.category);
         if ((r.savePath !== undefined) && (("" + r.savePath).length > 0))
@@ -300,6 +302,16 @@ Item {
                 r.seedingTimeLimit !== undefined ? r.seedingTimeLimit : -2,
                 r.inactiveSeedingTimeLimit !== undefined ? r.inactiveSeedingTimeLimit : -2);
         }
+        if ((r.shareLimitMode !== undefined) || (r.shareLimitAction !== undefined))
+            TransferController.setShareLimitPolicy(
+                r.shareLimitMode !== undefined ? r.shareLimitMode : -1,
+                r.shareLimitAction !== undefined ? r.shareLimitAction : -1);
+        if ((r.disableDHT !== undefined) && (r.disableDHT !== Qt.PartiallyChecked))
+            TransferController.setDHTDisabled(r.disableDHT === Qt.Checked);
+        if ((r.disablePEX !== undefined) && (r.disablePEX !== Qt.PartiallyChecked))
+            TransferController.setPEXDisabled(r.disablePEX === Qt.Checked);
+        if ((r.disableLSD !== undefined) && (r.disableLSD !== Qt.PartiallyChecked))
+            TransferController.setLSDDisabled(r.disableLSD === Qt.Checked);
         Log.info("ui", "Applied torrent options to selection");
     }
 

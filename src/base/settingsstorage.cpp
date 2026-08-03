@@ -29,6 +29,34 @@
 
 using namespace std::chrono_literals;
 
+namespace
+{
+    // QFile::rename() cannot replace an existing file on Windows. Move the
+    // old settings aside first, then restore it if the replacement fails; the
+    // previous implementation deleted the only good copy before attempting
+    // the second rename.
+    bool replaceSettingsFile(const Path &source, const Path &destination)
+    {
+        if (!destination.exists())
+            return Utils::Fs::renameFile(source, destination);
+
+        const Path backup {destination.toString() + u".qbt-previous"_s};
+        Utils::Fs::removeFile(backup);
+        if (!Utils::Fs::renameFile(destination, backup))
+            return false;
+
+        if (Utils::Fs::renameFile(source, destination))
+        {
+            Utils::Fs::removeFile(backup);
+            return true;
+        }
+
+        if (!Utils::Fs::renameFile(backup, destination))
+            qCCritical(lcApp) << "Could not restore the previous settings file after replacement failed";
+        return false;
+    }
+}
+
 SettingsStorage *SettingsStorage::m_instance = nullptr;
 
 /**
@@ -171,8 +199,8 @@ void SettingsStorage::readNativeSettings()
         finalPathStr.remove(index, 4);
 
         const Path finalPath {finalPathStr};
-        Utils::Fs::removeFile(finalPath);
-        Utils::Fs::renameFile(newPath, finalPath);
+        if (!replaceSettingsFile(newPath, finalPath))
+            qCCritical(lcApp) << "Could not promote fallback settings file to" << finalPath.toString();
     }
     else
     {
@@ -191,7 +219,7 @@ bool SettingsStorage::writeNativeSettings() const
         confPath.exists() && !Utils::Fs::isWritable(confPath))
     {
         qCWarning(lcApp).noquote() << tr("The configuration file is not writable: %1").arg(confPath.toString());
-        return true;  // no need to retry saving
+        return false;
     }
 
     std::unique_ptr<QSettings> nativeSettings = profile->applicationSettings(m_nativeSettingsName + u"_new");
@@ -236,8 +264,7 @@ bool SettingsStorage::writeNativeSettings() const
     finalPathStr.remove(index, 4);
 
     const Path finalPath {finalPathStr};
-    Utils::Fs::removeFile(finalPath);
-    return Utils::Fs::renameFile(newPath, finalPath);
+    return replaceSettingsFile(newPath, finalPath);
 }
 
 void SettingsStorage::removeValue(const QString &key)

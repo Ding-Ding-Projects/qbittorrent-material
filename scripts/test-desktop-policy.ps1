@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string] $RepositoryRoot
+    [string] $RepositoryRoot,
+    [switch] $SkipRuntimeStartup
 )
 
 $ErrorActionPreference = "Stop"
@@ -125,7 +126,11 @@ $requiredDesktopFiles = @(
     "resources/branding/qbittorrent-material.rc",
     "docs/assets/logo-mark.png",
     "resources/experience/changelog.json",
-    "resources/experience/dim-sum.json"
+    "resources/experience/dim-sum.json",
+    "resources/dim-sum/index.json",
+    "scripts/count-lines.ps1",
+    "scripts/select-release-dim-sum.ps1",
+    "src/quick/qml/shell/MaterialTitleBar.qml"
 )
 foreach ($relativePath in $requiredDesktopFiles) {
     Test-Policy (Test-Path -LiteralPath (Get-RepositoryPath $relativePath) -PathType Leaf) `
@@ -167,6 +172,18 @@ if ($null -ne $dishes) {
         if ($resourcePath -match '^qrc:/(.+)$') {
             Test-DecodablePng "resources/$($Matches[1])"
         }
+    }
+}
+
+$releaseCatalog = Read-JsonFile "resources/dim-sum/index.json"
+if ($null -ne $releaseCatalog) {
+    foreach ($dish in @($releaseCatalog)) {
+        $releaseImage = "resources/dim-sum/$([string]$dish.image)"
+        Test-Policy (-not [string]::IsNullOrWhiteSpace([string]$dish.id) `
+                -and -not [string]::IsNullOrWhiteSpace([string]$dish.english) `
+                -and -not [string]::IsNullOrWhiteSpace([string]$dish.cantonese) `
+                -and (Test-Path -LiteralPath (Get-RepositoryPath $releaseImage) -PathType Leaf)) `
+            "release catalog entry '$($dish.id)' has a bundled photo"
     }
 }
 
@@ -300,6 +317,7 @@ if (Test-Path -LiteralPath $wikiSafetyTest -PathType Leaf) {
 }
 
 $mainQml = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/Main.qml")
+$titleBarQml = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/shell/MaterialTitleBar.qml")
 foreach ($surface in @("DimSumSurprise", "NotificationsSheet", "RegexBuilderSheet", "SettingsSheet")) {
     Test-Policy ($mainQml -match [regex]::Escape($surface)) "Main.qml wires $surface"
 }
@@ -311,6 +329,12 @@ Test-Policy ($mainQml.Contains('shortcut: root.textEditorHasFocus ? "" : Standar
         -and $mainQml.Contains('&& !root.textEditorHasFocus') `
         -and $mainQml -match 'sequences:\s*\[StandardKey\.Paste\][\s\S]*?enabled:\s*root\.currentTabIndex === 0 && !root\.textEditorHasFocus') `
     "Undo, Delete, and Paste yield to focused text editors"
+Test-Policy ($mainQml.Contains('Qt.FramelessWindowHint') `
+        -and $mainQml.Contains('MaterialTitleBar') `
+        -and $titleBarQml.Contains('showMinimized()') `
+        -and $titleBarQml.Contains('showMaximized()') `
+        -and $titleBarQml.Contains('startSystemMove()')) `
+    "the Windows app paints a functional Material title bar and window controls"
 
 $guiAddManager = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/controllers/guiaddtorrentmanager.h")
@@ -346,7 +370,17 @@ Test-Policy ($duplicateQmlIds.Count -eq 0) `
 $qmlStartupTest = Get-RepositoryPath "scripts/test-qml-startup.ps1"
 Test-Policy (Test-Path -LiteralPath $qmlStartupTest -PathType Leaf) `
     "the built application has a QML startup regression test"
-if (Test-Path -LiteralPath $qmlStartupTest -PathType Leaf) {
+$qmlStartupSource = if (Test-Path -LiteralPath $qmlStartupTest -PathType Leaf) {
+    Get-Content -Raw -LiteralPath $qmlStartupTest
+}
+else { "" }
+Test-Policy ($qmlStartupSource.Contains('$ready') `
+        -and $qmlStartupSource.Contains('startup readiness marker')) `
+    "the QML startup smoke test requires a real readiness marker"
+if ($SkipRuntimeStartup) {
+    Write-Host "[SKIP] Runtime QML startup is deferred until after the build."
+}
+elseif (Test-Path -LiteralPath $qmlStartupTest -PathType Leaf) {
     try {
         & $qmlStartupTest -RepositoryRoot $RepositoryRoot | ForEach-Object { Write-Host $_ }
         Test-Policy $true "the QML root object loads without a runtime fault"
@@ -368,6 +402,11 @@ $settingsSheetSource = Get-Content -Raw -LiteralPath `
 Test-Policy ($narratorSource.Contains('pref->value(kEnabledKey, false).toBool()') `
         -and $narratorSource.Contains('bool m_enabled = false') -eq $false) `
     "the narrator is disabled until the user enables it"
+Test-Policy ($narratorSource.Contains('QProcess::errorOccurred') `
+        -and $narratorSource.Contains('QMediaPlayer::errorOccurred') `
+        -and $narratorSource.Contains('setSpeaking(false)') `
+        -and $narratorSource.Contains('qBound<qreal>')) `
+    "narrator playback errors release the queue and clamp restored volume"
 Test-Policy ($narratorHeader.Contains('English = 0') `
         -and $narratorHeader.Contains('Cantonese = 1') `
         -and $narratorHeader.Contains('Both = 2') `
@@ -498,6 +537,8 @@ $propertiesControllerHeader = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/controllers/propertiescontroller.h")
 $transferControllerHeader = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/controllers/transfercontroller.h")
+$transferController = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/controllers/transfercontroller.cpp")
 $trackersTab = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/properties/TrackersTab.qml")
 $addTrackersDialog = Get-Content -Raw -LiteralPath `
@@ -516,6 +557,9 @@ Test-Policy ($missingTrackerVerbs.Count -eq 0) `
     "every Trackers-tab command is backed by a real controller verb$($missingTrackerVerbs -join '; ')"
 Test-Policy ($transferControllerHeader.Contains('int removeTrackerFromAll(const QString &host)')) `
     "removing a tracker from every torrent is backed by a real controller verb"
+Test-Policy ($transferController.Contains('Session *const session = BitTorrent::Session::instance()') `
+        -and $transferController.Contains('Cannot remove tracker host without a torrent session')) `
+    "tracker removal fails safely when the session is unavailable"
 # The shims silently swallowed a missing verb; nothing may reintroduce them.
 Test-Policy (($trackersTab -notmatch 'is not available') `
         -and ($addTrackersDialog -notmatch 'is not available') `
@@ -750,6 +794,12 @@ Test-Policy ($appCMake -match 'qbittorrent-material\.rc') `
 $transfersPage = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/shell/TransfersPage.qml")
 Test-Policy ($transfersPage -match 'enabled:\s*TransferController\.selectionCount\s*>\s*0') `
     "selection-only Split Dock actions expose their disabled state"
+Test-Policy ($transferControllerHeader.Contains('setDHTDisabled(bool disabled)') `
+        -and $transferControllerHeader.Contains('setPEXDisabled(bool disabled)') `
+        -and $transferControllerHeader.Contains('setLSDDisabled(bool disabled)') `
+        -and $transfersPage.Contains('onOptionsAccepted') `
+        -and $transfersPage.Contains('setShareLimitPolicy')) `
+    "the redesigned Torrent Options dialog applies its accepted selection edits"
 
 $transferFilterProxyHeader = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/models/torrentfilterproxymodel.h")
@@ -1108,6 +1158,7 @@ if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {
     }
     $policyStep = $stepLines["Run desktop policy and content-integrity tests"]
     $buildStep = $stepLines["Build"]
+    $runtimeStep = $stepLines["Run built QML startup smoke test"]
     $packageStep = $stepLines["Build and verify the NSIS installer"]
     $publishStep = $stepLines["Publish one immutable non-draft release"]
     Test-Policy ($null -ne $policyStep -and $null -ne $buildStep `
@@ -1115,18 +1166,33 @@ if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {
             -and $policyStep -lt $buildStep -and $buildStep -lt $packageStep `
             -and $packageStep -lt $publishStep) `
         "policy, build, installed-package tests, and publication are strictly ordered"
+    Test-Policy ($null -ne $runtimeStep -and $buildStep -lt $runtimeStep `
+            -and $runtimeStep -lt $packageStep `
+            -and $workflow -match 'Install runtime for QML startup smoke test' `
+            -and $workflow -match 'PlatformPluginPath') `
+        "the built QML startup smoke test runs against a deployed runtime before packaging"
 
     $tokenPattern = 'secrets\.RELEASE_TOKEN\s*\|\|\s*secrets\.ORG_TOKEN\s*\|\|\s*secrets\.GITHUB_TOKEN'
-    Test-Policy (([regex]::Matches($workflow, $tokenPattern)).Count -eq 2) `
-        "both GitHub operations use RELEASE_TOKEN, ORG_TOKEN, GITHUB_TOKEN fallback order"
+    Test-Policy (([regex]::Matches($workflow, $tokenPattern)).Count -eq 3) `
+        "release identity, dim-sum allocation, and publication use the token fallback order"
     Test-Policy ($workflow -match 'Measure hosted runner resources') `
         "the workflow measures the hosted runner before relying on it"
     Test-Policy ($workflow -match 'GITHUB_WORKSPACE' -and $workflow -match 'RUNNER_TEMP') `
         "the workflow measures the actual workspace and temporary build volumes"
     Test-Policy ($workflow -match 'test-desktop-policy\.ps1') `
         "the workflow runs this desktop policy test before release"
-    Test-Policy ($workflow -match 'resources/dim-sum/har-gow\.png') `
-        "the release attaches the bundled Shrimp dumpling image"
+    Test-Policy ($workflow -match 'count-lines\.ps1' `
+            -and $workflow -match 'Project line count' `
+            -and $workflow -match 'LINE_COUNT_PATH') `
+        "the release notes include the committed CI line-count table"
+    Test-Policy ($workflow -match 'select-release-dim-sum\.ps1' `
+            -and $workflow -match 'resources/dim-sum/index\.json' `
+            -and $workflow -match 'DIM_SUM_CODE_NAME' `
+            -and $workflow -match 'DIM_SUM_PATH') `
+        "the release selects a verified catalog photo and a non-repeating code name"
+    Test-Policy ($workflow -match '--latest=false' `
+            -and $workflow -match 'GITHUB_REF_NAME -eq "master"') `
+        "feature-branch releases cannot silently become the latest release"
     Test-Policy (([regex]::Matches($workflow, '(?m)^\s*gh release create\s')).Count -eq 1) `
         "the workflow has exactly one GitHub Release creation command"
     Test-Policy ($workflow -match 'build-\$env:GITHUB_RUN_NUMBER-\$shortSha') `

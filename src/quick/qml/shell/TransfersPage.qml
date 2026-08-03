@@ -472,7 +472,7 @@ Item {
             // view: a user who selects all and deletes should know whether that
             // meant the 12 rows on screen or every torrent in the session.
             Rectangle {
-                id: selectionBar
+                id: bulkSelectionBar
                 visible: root.selectedRows.length > 0
                 Layout.fillWidth: true
                 Layout.leftMargin: 4

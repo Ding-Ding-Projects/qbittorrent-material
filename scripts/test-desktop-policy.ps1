@@ -317,6 +317,46 @@ $guiAddManager = Get-Content -Raw -LiteralPath `
 $addTorrentDialog = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/addtorrent/AddNewTorrentDialog.qml")
 
+# A QML fault compiles perfectly and then aborts the application at startup, so
+# nothing static can catch it. Duplicate ids across a single QML file are the
+# cheap half of that check; the behavioural half runs the real binary below.
+$duplicateQmlIds = [System.Collections.Generic.List[string]]::new()
+Get-ChildItem -LiteralPath (Get-RepositoryPath "src/quick/qml") -Filter "*.qml" -File -Recurse |
+    ForEach-Object {
+        $inDocComment = $false
+        $ids = [System.Collections.Generic.List[string]]::new()
+        foreach ($line in (Get-Content -LiteralPath $_.FullName)) {
+            # Ignore the \qml examples inside documentation comments.
+            if ($line -match '^\s*/\*!') { $inDocComment = $true }
+            if ($inDocComment) {
+                if ($line -match '\*/') { $inDocComment = $false }
+                continue
+            }
+            if ($line -match '^\s*id:\s*([A-Za-z_][A-Za-z0-9_]*)\s*$') {
+                $ids.Add($Matches[1])
+            }
+        }
+        foreach ($duplicate in ($ids | Group-Object | Where-Object { $_.Count -gt 1 })) {
+            $duplicateQmlIds.Add("$($_.Name):$($duplicate.Name)")
+        }
+    }
+Test-Policy ($duplicateQmlIds.Count -eq 0) `
+    "no QML file declares the same id twice$($duplicateQmlIds -join ', ')"
+
+$qmlStartupTest = Get-RepositoryPath "scripts/test-qml-startup.ps1"
+Test-Policy (Test-Path -LiteralPath $qmlStartupTest -PathType Leaf) `
+    "the built application has a QML startup regression test"
+if (Test-Path -LiteralPath $qmlStartupTest -PathType Leaf) {
+    try {
+        & $qmlStartupTest -RepositoryRoot $RepositoryRoot | ForEach-Object { Write-Host $_ }
+        Test-Policy $true "the QML root object loads without a runtime fault"
+    }
+    catch {
+        Test-Policy $false `
+            "the QML root object loads without a runtime fault ($($_.Exception.Message))"
+    }
+}
+
 # The spoken narrator is optional, off until the user turns it on, serialized so
 # utterances never overlap, and honest about sending text to a speech service.
 $narratorHeader = Get-Content -Raw -LiteralPath `

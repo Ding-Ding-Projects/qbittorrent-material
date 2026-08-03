@@ -1211,6 +1211,11 @@ Test-Policy (Test-Path -LiteralPath `
 
 $workflowPath = Get-RepositoryPath ".github/workflows/release-every-push.yml"
 Test-Policy (Test-Path -LiteralPath $workflowPath -PathType Leaf) "the push release workflow exists"
+$releaseSelectorSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "scripts/select-release-dim-sum.ps1")
+Test-Policy ($releaseSelectorSource.Contains('for ($attempt = 1; $attempt -le 3; ++$attempt)') `
+        -and $releaseSelectorSource.Contains('Start-Sleep -Seconds ($attempt * 2)')) `
+    "dim-sum release allocation retries transient release-note reads"
 if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {
     $workflow = Get-Content -Raw -LiteralPath $workflowPath
     $workflowLines = @(Get-Content -LiteralPath $workflowPath)

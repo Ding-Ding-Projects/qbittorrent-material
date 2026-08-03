@@ -53,17 +53,34 @@ if (-not [string]::IsNullOrWhiteSpace($ReleaseBodiesPath)) {
     }
 }
 elseif (-not [string]::IsNullOrWhiteSpace($env:GITHUB_REPOSITORY)) {
+    function Get-ReleaseBody([string] $tagName) {
+        for ($attempt = 1; $attempt -le 3; ++$attempt) {
+            $view = gh release view $tagName --repo $env:GITHUB_REPOSITORY --json body 2>$null
+            $viewExitCode = $LASTEXITCODE
+            if ($viewExitCode -eq 0) {
+                try {
+                    $release = ($view -join [Environment]::NewLine) | ConvertFrom-Json
+                    return [string]$release.body
+                }
+                catch {
+                    $viewExitCode = 1
+                }
+            }
+
+            if ($attempt -lt 3) {
+                Start-Sleep -Seconds ($attempt * 2)
+            }
+        }
+
+        throw "Could not read release notes for $tagName while allocating the dim-sum code name. gh exit code: $viewExitCode"
+    }
+
     $releaseJson = gh release list --repo $env:GITHUB_REPOSITORY --limit 1000 --json tagName
     if ($LASTEXITCODE -ne 0) {
         throw "Could not list existing releases while allocating the dim-sum code name."
     }
     foreach ($release in @($releaseJson | ConvertFrom-Json)) {
-        $view = gh release view $release.tagName --repo $env:GITHUB_REPOSITORY --json body
-        if ($LASTEXITCODE -ne 0) {
-            throw "Could not read release notes for $($release.tagName) while allocating the dim-sum code name."
-        }
-        $releaseBody = $view | ConvertFrom-Json
-        $releaseBodies.Add([string]$releaseBody.body)
+        $releaseBodies.Add((Get-ReleaseBody ([string]$release.tagName)))
     }
 }
 

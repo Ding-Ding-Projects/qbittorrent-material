@@ -23,8 +23,10 @@ import qBittorrent
     \c Session. The bulk run/stop/remove actions operate on the currently visible
     torrents through the shared \l proxy.
 */
-Menu {
+SearchableMenu {
     id: root
+
+    searchAccessibleName: qsTr("Search tag actions")
 
     /*! The shared \c TorrentFilterProxyModel (target of the bulk actions). */
     property var proxy: null
@@ -54,6 +56,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Add tag…")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
             icon: Icons.add; size: 18; x: Spacing.md
@@ -65,7 +69,7 @@ Menu {
 
     MenuItem {
         text: qsTr("Remove tag")
-        visible: root.isReal
+        visible: (root.isReal) && root.matches(text)
         height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
@@ -78,6 +82,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Remove unused tags")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
             icon: Icons.close; size: 18; x: Spacing.md
@@ -91,6 +97,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Start torrents")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
             icon: Icons.play_arrow; size: 18; x: Spacing.md
@@ -102,6 +110,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Stop torrents")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
             icon: Icons.pause; size: 18; x: Spacing.md
@@ -113,6 +123,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Remove torrents")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
             icon: Icons.deleteIcon; size: 18; x: Spacing.md

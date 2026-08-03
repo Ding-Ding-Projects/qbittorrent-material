@@ -22,13 +22,17 @@ import qBittorrent
     / \c queueDown / \c queueBottom). The moves are no-ops when the session
     queueing system is disabled, so the submenu is always available.
 */
-Menu {
+SearchableMenu {
     id: root
+
+    searchAccessibleName: qsTr("Search queue actions")
 
     title: qsTr("Queue")
 
     MenuItem {
         text: qsTr("Move to top")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
             icon: Icons.vertical_align_top; size: 18; x: Spacing.md
@@ -43,6 +47,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Move up")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
             icon: Icons.arrow_upward; size: 18; x: Spacing.md
@@ -57,6 +63,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Move down")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
             icon: Icons.arrow_downward; size: 18; x: Spacing.md
@@ -71,6 +79,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Move to bottom")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
             icon: Icons.vertical_align_bottom; size: 18; x: Spacing.md

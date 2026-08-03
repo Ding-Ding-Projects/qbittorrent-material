@@ -23,8 +23,10 @@ import qBittorrent
     bulk run/stop/remove actions operate on the currently visible torrents through
     the shared \l proxy.
 */
-Menu {
+SearchableMenu {
     id: root
+
+    searchAccessibleName: qsTr("Search tracker actions")
 
     /*! The shared \c TorrentFilterProxyModel (target of the bulk actions). */
     property var proxy: null
@@ -52,7 +54,7 @@ Menu {
 
     MenuItem {
         text: qsTr("Remove tracker from all torrents")
-        visible: root.isHost
+        visible: (root.isHost) && root.matches(text)
         height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
@@ -67,6 +69,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Start torrents")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
             icon: Icons.play_arrow; size: 18; x: Spacing.md
@@ -78,6 +82,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Stop torrents")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
             icon: Icons.pause; size: 18; x: Spacing.md
@@ -89,6 +95,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Remove torrents")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
             icon: Icons.deleteIcon; size: 18; x: Spacing.md

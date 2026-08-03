@@ -23,8 +23,10 @@ import qBittorrent
     \c visible flag is toggled in place. Unchecking is blocked when only one
     column remains visible (the guard keeps at least one column on screen).
 */
-Menu {
+SearchableMenu {
     id: root
+
+    searchAccessibleName: qsTr("Search columns")
 
     /*!
         The column descriptor list (array of objects with at least \c role,
@@ -53,6 +55,8 @@ Menu {
         id: columnItems
         model: root.columns
         delegate: MenuItem {
+            visible: root.matches(text)
+            height: visible ? implicitHeight : 0
             required property var modelData
             required property int index
             text: modelData.title
@@ -76,6 +80,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Resize columns")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         onTriggered: {
             Log.debug("ui", "ColumnHeaderMenu: resize columns requested")
             root.resizeRequested()

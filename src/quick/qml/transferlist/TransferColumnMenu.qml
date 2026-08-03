@@ -26,8 +26,10 @@ import qBittorrent
     \c DataTable (objects with \c role, \c title, \c visible). Toggling emits
     \l visibilityChanged; the view mutates its authoritative array and re-applies.
 */
-Menu {
+SearchableMenu {
     id: root
+
+    searchAccessibleName: qsTr("Search columns")
 
     title: qsTr("Column visibility")
 
@@ -55,6 +57,8 @@ Menu {
         id: columnItems
         model: root.columns
         delegate: MenuItem {
+            visible: root.matches(text)
+            height: visible ? implicitHeight : 0
             required property var modelData
             text: modelData.title
             checkable: true
@@ -76,6 +80,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Resize columns")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         ToolTip.visible: hovered
         ToolTip.text: qsTr("Resize all non-hidden columns to the size of their contents")
         onTriggered: {

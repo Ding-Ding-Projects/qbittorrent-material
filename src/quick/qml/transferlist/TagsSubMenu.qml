@@ -27,8 +27,10 @@ import qBittorrent
     Per-tag tri-state membership (present on all / some / none of the selection)
     is not shown because the bridge does not publish per-selection tag sets.
 */
-Menu {
+SearchableMenu {
     id: root
+
+    searchAccessibleName: qsTr("Search tags")
 
     title: qsTr("Tags")
 
@@ -68,6 +70,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Add…")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
             icon: Icons.add; size: 18; x: Spacing.md
@@ -82,6 +86,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Remove All")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
             icon: Icons.close; size: 18; x: Spacing.md
@@ -101,6 +107,8 @@ Menu {
         id: tagItems
         model: root.tagList
         delegate: MenuItem {
+            visible: root.matches(text)
+            height: visible ? implicitHeight : 0
             required property var modelData
             text: ("" + modelData)
             leftPadding: 44

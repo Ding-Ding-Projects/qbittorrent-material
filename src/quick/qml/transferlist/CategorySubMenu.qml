@@ -25,8 +25,10 @@ import qBittorrent
     new category needs a text prompt, so it is bubbled up via
     \l newCategoryRequested for the owning view to handle.
 */
-Menu {
+SearchableMenu {
     id: root
+
+    searchAccessibleName: qsTr("Search categories")
 
     title: qsTr("Category")
 
@@ -64,6 +66,8 @@ Menu {
 
     MenuItem {
         text: qsTr("New…")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
             icon: Icons.add; size: 18; x: Spacing.md
@@ -78,6 +82,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Reset")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
             icon: Icons.close; size: 18; x: Spacing.md
@@ -97,6 +103,8 @@ Menu {
         id: categoryItems
         model: root.categoryList
         delegate: MenuItem {
+            visible: root.matches(text)
+            height: visible ? implicitHeight : 0
             required property var modelData
             text: modelData
             leftPadding: 44

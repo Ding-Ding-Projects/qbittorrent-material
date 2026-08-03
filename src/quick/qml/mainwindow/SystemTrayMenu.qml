@@ -21,8 +21,10 @@ import qBittorrent
     It re-uses the shell's shared Actions and mirrors the legacy desktop-
     integration menu (§5). The whole menu is disabled while the UI is locked.
 */
-Menu {
+SearchableMenu {
     id: trayMenu
+
+    searchAccessibleName: qsTr("Search tray actions")
 
     /// Main.qml root (shell).
     required property var shell
@@ -34,6 +36,8 @@ Menu {
     // Show / Hide the main window.
     MenuItem {
         text: trayMenu.shell.visible && (trayMenu.shell.visibility !== Window.Minimized)
+        visible: trayMenu.matches(text)
+        height: visible ? implicitHeight : 0
               ? qsTr("Hide") : qsTr("Show")
         onTriggered: {
             Log.info("ui", "Tray menu: toggle visibility")
@@ -42,12 +46,28 @@ Menu {
     }
     MenuSeparator {}
 
-    MenuItem { action: trayMenu.shell.actionOpen }
-    MenuItem { action: trayMenu.shell.actionDownloadFromURL }
+    MenuItem {
+        action: trayMenu.shell.actionOpen
+        visible: trayMenu.matches(text)
+        height: visible ? implicitHeight : 0
+    }
+    MenuItem {
+        action: trayMenu.shell.actionDownloadFromURL
+        visible: trayMenu.matches(text)
+        height: visible ? implicitHeight : 0
+    }
     MenuSeparator {}
 
-    MenuItem { action: trayMenu.shell.actionUseAlternativeSpeedLimits }
-    MenuItem { action: trayMenu.shell.actionSetGlobalSpeedLimits }
+    MenuItem {
+        action: trayMenu.shell.actionUseAlternativeSpeedLimits
+        visible: trayMenu.matches(text)
+        height: visible ? implicitHeight : 0
+    }
+    MenuItem {
+        action: trayMenu.shell.actionSetGlobalSpeedLimits
+        visible: trayMenu.matches(text)
+        height: visible ? implicitHeight : 0
+    }
     MenuSeparator {}
 
     MenuItem {
@@ -62,5 +82,9 @@ Menu {
     }
     MenuSeparator {}
 
-    MenuItem { action: trayMenu.shell.actionExit }
+    MenuItem {
+        action: trayMenu.shell.actionExit
+        visible: trayMenu.matches(text)
+        height: visible ? implicitHeight : 0
+    }
 }

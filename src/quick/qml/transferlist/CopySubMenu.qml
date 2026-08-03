@@ -25,13 +25,17 @@ import qBittorrent
     Menu items carry a leading Material Symbols glyph rendered by an anchored
     \c MDIcon; the item text is inset via \c leftPadding so it never overlaps.
 */
-Menu {
+SearchableMenu {
     id: root
+
+    searchAccessibleName: qsTr("Search copy actions")
 
     title: qsTr("Copy")
 
     MenuItem {
         text: qsTr("Name")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
             icon: Icons.content_copy; size: 18; x: Spacing.md
@@ -46,6 +50,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Info hash")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
             icon: Icons.tag; size: 18; x: Spacing.md
@@ -60,6 +66,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Magnet link")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
             icon: Icons.link; size: 18; x: Spacing.md

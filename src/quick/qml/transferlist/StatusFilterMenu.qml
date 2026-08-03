@@ -24,8 +24,10 @@ import qBittorrent
     \c selectedIds, each action first sets the selection to \c proxy.visibleIds()
     and then invokes the corresponding verb.
 */
-Menu {
+SearchableMenu {
     id: root
+
+    searchAccessibleName: qsTr("Search status actions")
 
     /*! The shared \c TorrentFilterProxyModel whose visible rows are the target. */
     property var proxy: null
@@ -48,6 +50,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Start torrents")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
             icon: Icons.play_arrow; size: 18; x: Spacing.md
@@ -62,6 +66,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Force start torrents")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
             icon: Icons.bolt; size: 18; x: Spacing.md
@@ -76,6 +82,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Stop torrents")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
             icon: Icons.pause; size: 18; x: Spacing.md
@@ -90,6 +98,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Remove torrents")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         leftPadding: 44
         MDIcon {
             icon: Icons.deleteIcon; size: 18; x: Spacing.md

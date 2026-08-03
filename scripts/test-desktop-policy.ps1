@@ -317,6 +317,38 @@ $guiAddManager = Get-Content -Raw -LiteralPath `
 $addTorrentDialog = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/addtorrent/AddNewTorrentDialog.qml")
 
+# Irreversible actions sit behind a deliberate gate: two independently operated
+# keys, then a full-range slider, with an always-available emergency exit. A
+# partial slide is not a decision and must spring back.
+$superConfirm = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/components/SuperConfirmDialog.qml")
+Test-Policy ($superConfirm.Contains('id: keyOne') `
+        -and $superConfirm.Contains('id: keyTwo') `
+        -and $superConfirm.Contains('readonly property bool bothKeysTurned: keyOne.checked && keyTwo.checked') `
+        -and $superConfirm.Contains('enabled: root.bothKeysTurned')) `
+    "the destructive gate needs two independent keys before its slider arms"
+Test-Policy (($superConfirm -match 'if \(value < to\)\s*\r?\n\s*value = 0') `
+        -and $superConfirm.Contains('root._authorize()')) `
+    "a partial slide springs back and never authorizes a destructive action"
+Test-Policy ($superConfirm.Contains('qsTr("Emergency exit")') `
+        -and $superConfirm.Contains('closePolicy: Popup.CloseOnEscape') `
+        -and $superConfirm.Contains('function _restoreFocus()') `
+        -and $superConfirm.Contains('root._restoreFocus()')) `
+    "the destructive gate always offers an escape and returns focus to its origin"
+Test-Policy ($superConfirm.Contains('ThemeManager.reducedMotion === true') `
+        -and $superConfirm.Contains('enabled: !root.reducedMotion')) `
+    "the destructive gate honors reduced motion instead of playing its animations"
+Test-Policy ($superConfirm.Contains('qsTr("This cannot be undone.")') `
+        -and $superConfirm.Contains('root.actionText') `
+        -and $superConfirm.Contains('qsTr("This affects: %1").arg(root.affectedText)')) `
+    "the destructive gate states the exact action and what it affects"
+$deletionDialog = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/dialogs/DeletionConfirmationDialog.qml")
+Test-Policy ($deletionDialog.Contains('SuperConfirmDialog {') `
+        -and $deletionDialog.Contains('superConfirm.originatingControl = confirmButton') `
+        -and $deletionDialog.Contains('onAuthorized:')) `
+    "erasing downloaded files goes through the destructive gate"
+
 # Controls presented as usable must perform their labelled action. The Trackers
 # tab shipped five commands and a download button that routed through shims and
 # only wrote a log line, so the whole surface looked live and did nothing.

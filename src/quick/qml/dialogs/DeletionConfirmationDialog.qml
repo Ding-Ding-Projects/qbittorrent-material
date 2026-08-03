@@ -141,12 +141,45 @@ Dialog {
         }
 
         Button {
+            id: confirmButton
             text: removeContent.checked ? qsTr("Remove torrent and content") : qsTr("Remove torrent")
             highlighted: true
             Material.accent: Theme.color("error")
-            DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
-            onClicked: root.accept()
+            // Deleting content files destroys data that nothing in the app can
+            // bring back, so that path goes through the super-confirmation gate.
+            // Removing only from the transfer list is recoverable — the torrent
+            // can be added again — and stays a single click.
+            DialogButtonBox.buttonRole: removeContent.checked
+                ? DialogButtonBox.ActionRole : DialogButtonBox.AcceptRole
+            onClicked: {
+                if (!removeContent.checked) {
+                    root.accept()
+                    return
+                }
+                Log.info("ui", "DeletionConfirmationDialog escalating to super confirmation")
+                superConfirm.originatingControl = confirmButton
+                superConfirm.open()
+            }
         }
+    }
+
+    SuperConfirmDialog {
+        id: superConfirm
+        actionText: root.torrentsCount === 1
+            ? qsTr("Delete '%1' and its content files").arg(root.torrentName)
+            : qsTr("Delete %1 torrents and their content files").arg(root.torrentsCount)
+        affectedText: root.torrentsCount === 1
+            ? qsTr("'%1' and every file it downloaded").arg(root.torrentName)
+            : qsTr("%1 torrents and every file they downloaded").arg(root.torrentsCount)
+        consequenceText: qsTr("The downloaded files are erased from disk, not moved to the recycle bin.")
+        confirmLabel: qsTr("Slide to delete the files")
+
+        onAuthorized: {
+            Log.info("ui", "Super confirmation authorized content deletion")
+            root.confirmed(true)
+            root.close()
+        }
+        onCancelled: Log.info("ui", "Super confirmation declined; nothing was deleted")
     }
 
     onAccepted: {

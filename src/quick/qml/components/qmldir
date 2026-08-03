@@ -28,6 +28,7 @@ ColumnHeaderMenu        1.0 ColumnHeaderMenu.qml
 ProgressCell            1.0 ProgressCell.qml
 Snackbar                1.0 Snackbar.qml
 ConfirmDialog           1.0 ConfirmDialog.qml
+SuperConfirmDialog      1.0 SuperConfirmDialog.qml
 TextInputDialog         1.0 TextInputDialog.qml
 SharedShareLimitsForm   1.0 SharedShareLimitsForm.qml
 AddTorrentParamsForm    1.0 AddTorrentParamsForm.qml

@@ -1,5 +1,49 @@
 # Handoff
 
+## 2026-08-02 — a real gate in front of erasing files
+
+There was no destructive-action gate at all: deleting a torrent's content files
+was a checkbox and one highlighted button. New `components/SuperConfirmDialog.qml`
+supplies the required three stages — two independently operated keys, then a
+full-range slider that stays disabled until both are turned, then authorization
+only on a completed slide.
+
+The details that make it a gate rather than decoration:
+
+- **A partial slide springs back to zero.** Leaving the handle parked near the
+  end would let the next stray click finish an irreversible action.
+- **Turning either key back off disarms the slider immediately**, so the gate
+  cannot be left half-armed.
+- **Emergency exit and Escape work the whole time, including mid-slide**, and
+  every exit path — authorized, cancelled, dismissed — resets the controls and
+  returns focus to the control that opened the gate.
+- **Reduced motion is honored** by replacing the progress and completion
+  animations with their end states and closing immediately, rather than holding
+  for an animation the user asked not to see.
+- The dialog anchors beside its originating control, tries the opposite side
+  when that would overflow, and centres only when neither side fits.
+
+It is wired to the one transfer-list path that destroys unrecoverable data:
+erasing downloaded content files. Removing a torrent from the list *without* its
+files stays a single click, because that is recoverable — the torrent can simply
+be added again. Gating a reversible action at the same ceremony as an
+irreversible one trains people to slide through both.
+
+Verification:
+
+- All 328 desktop policy and content-integrity checks passed (322 before). Six
+  new ones: two keys gate the slider; a partial slide springs back; the escape
+  routes and focus restoration exist; reduced motion is honored; the exact
+  action and affected data are stated; and content deletion routes through the
+  gate.
+- `run.ps1 -NoRun -Jobs 8` completed a clean Release compile.
+
+Not verified by execution: the gate was not operated in a running window, so the
+spring-back, the animations and the focus restoration are covered by compilation
+and policy assertions rather than by interaction. Remaining adopters, not yet
+converted: `ConfirmDialog`'s destructive callers and the workspace bulk-close
+confirmation.
+
 ## 2026-08-02 — the Trackers tab stops pretending
 
 An audit of the app against the shared requirements found the most direct

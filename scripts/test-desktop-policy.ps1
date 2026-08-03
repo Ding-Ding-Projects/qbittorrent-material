@@ -317,6 +317,25 @@ $guiAddManager = Get-Content -Raw -LiteralPath `
 $addTorrentDialog = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/addtorrent/AddNewTorrentDialog.qml")
 
+# A settings tab that configures nothing is a fake placeholder. All five Search
+# settings were already staged and committed by OptionsController; the page just
+# never rendered them.
+$searchOptionsPage = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/options/SearchPage.qml")
+$optionsDialogSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/options/OptionsDialog.qml")
+$unboundSearchSettings = @(
+    "searchEnabled", "storeOpenedSearchTabs", "storeOpenedSearchTabResults",
+    "searchHistoryLength", "pythonExecutablePath"
+) | Where-Object { -not $searchOptionsPage.Contains($_) }
+Test-Policy (($unboundSearchSettings.Count -eq 0) `
+        -and $optionsDialogSource.Contains('SearchPage {}') `
+        -and ($optionsDialogSource -notmatch 'informational placeholder')) `
+    "the Search options page renders real settings instead of a placeholder$($unboundSearchSettings -join ', ')"
+Test-Policy ($searchOptionsPage.Contains('SearchController.unavailableReason') `
+        -and $searchOptionsPage.Contains('SearchController.refreshPythonDetection()')) `
+    "the Search options page reports whether the chosen interpreter actually works"
+
 # Selecting one row and repeating an action forty times is the app failing to do
 # its job. "Select all" must also state its scope: with a filter narrowing the
 # view, a user who selects all and deletes needs to know whether that meant the

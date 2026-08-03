@@ -313,36 +313,7 @@ Dialog {
                 SpeedPage {}
                 BitTorrentPage {}
 
-            // Search — its settings are minimal in this build (the Python
-            // executable path lives on the Advanced page); shown as an
-            // informational placeholder so the rail order matches the legacy
-            // Tabs enum. The full Search options screen is owned by the search
-            // feature and can replace this page.
-                Flickable {
-                contentHeight: searchCol.implicitHeight + (2 * Spacing.lg)
-                clip: true
-                ColumnLayout {
-                    id: searchCol
-                    x: Spacing.lg
-                    y: Spacing.lg
-                    width: parent.width - (2 * Spacing.lg)
-                    spacing: Spacing.lg
-                    MaterialCard {
-                        title: qsTr("Search")
-                        titleIcon: Icons.search
-                        Layout.fillWidth: true
-                        Label {
-                            text: qsTr("Search engine settings are managed from the Search tab. The Python interpreter used by search plugins can be configured on the Advanced page.")
-                            font: Typography.bodyMedium
-                            color: Theme.color("onSurfaceVariant")
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
-                    }
-                }
-                ScrollBar.vertical: ScrollBar {}
-            }
-
+                SearchPage {}
                 RSSPage {}
                 WebUIPage {}
                 AdvancedPage {}

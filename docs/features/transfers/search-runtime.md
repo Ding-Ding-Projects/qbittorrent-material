@@ -50,6 +50,24 @@ the user cannot control:
 The record of what has been seeded lives in the `SearchEngines/seededPlugins`
 preference. Deleting that key makes the next launch restore the full bundled set.
 
+## Documented exemption: the site-query field has no regex builder
+
+Every search bar in this application provides direct access to the full regex
+builder, anchored beside that field. The Search tab's **query** field is the one
+exemption, and it is deliberate rather than an oversight.
+
+That field is not a filter over a local collection. Its contents are passed as
+command-line words to `nova2.py`, which forwards them to remote torrent sites,
+each of which runs its own server-side matching. A regular expression built
+locally has nothing to apply itself to: the app never sees the corpus, so it
+cannot evaluate a pattern against it, and the sites do not accept one. Offering a
+builder there would produce patterns that silently behave as literal text — the
+"reduced regex toggle" outcome the rule explicitly rejects.
+
+The regex requirement is met where it can actually be honoured: the **search
+results** filter (`SearchResultsTab.qml`) is a `FilterTextField` with its own
+anchored builder, matching locally over the results the query returned.
+
 ## Prerequisites
 
 Search needs a Python interpreter. The application resolves one by executing the

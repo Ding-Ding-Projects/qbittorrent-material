@@ -317,6 +317,21 @@ $guiAddManager = Get-Content -Raw -LiteralPath `
 $addTorrentDialog = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/addtorrent/AddNewTorrentDialog.qml")
 
+# Local search surfaces reach the anchored regex builder rather than owning a
+# hand-rolled ".*" toggle that cannot build a pattern.
+$historySheet = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/shell/HistorySheet.qml")
+Test-Policy ($historySheet.Contains('FilterTextField {') `
+        -and $historySheet.Contains('readonly property bool histRegex: searchField.regexEnabled') `
+        -and -not ($historySheet -match 'text:\s*"\.\*"')) `
+    "the history panel searches through the shared field and its anchored builder"
+# The Search tab's site query genuinely cannot take a local pattern; the rule
+# requires that exemption to be written down rather than left as a silent gap.
+Test-Policy ((Get-Content -Raw -LiteralPath `
+        (Get-RepositoryPath "docs/features/transfers/search-runtime.md")) `
+        -match 'Documented exemption: the site-query field has no regex builder') `
+    "the one search field without a builder documents why the rule cannot apply"
+
 # Irreversible actions sit behind a deliberate gate: two independently operated
 # keys, then a full-range slider, with an always-available emergency exit. A
 # partial slide is not a decision and must spring back.

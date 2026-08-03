@@ -29,7 +29,9 @@ Sheet {
         filterText: searchField.text
         filterRegex: histRegex
     }
-    property bool histRegex: false
+    // Owned by the search field's own regex toggle, so the panel and the field
+    // can never disagree about which mode is active.
+    readonly property bool histRegex: searchField.regexEnabled
 
     ColumnLayout {
         anchors.fill: parent
@@ -177,54 +179,19 @@ Sheet {
             }
         }
 
-        // Search.
-        Rectangle {
+        // Search. A FilterTextField so the history panel carries the same
+        // anchored regex builder as every other search surface, instead of the
+        // hand-rolled ".*" toggle it used to own.
+        FilterTextField {
+            id: searchField
             Layout.fillWidth: true
             Layout.leftMargin: 16
             Layout.rightMargin: 16
             Layout.bottomMargin: 10
-            Layout.preferredHeight: 38
-            radius: 19
-            color: Theme.color("surfaceVariant")
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 14
-                anchors.rightMargin: 6
-                spacing: 8
-                MDIcon { name: "search"; size: 17; color: Theme.color("onSurfaceVariant") }
-                TextInput {
-                    id: searchField
-                    Layout.fillWidth: true
-                    font.family: Typography.family
-                    font.pixelSize: 13
-                    color: Theme.color("onSurface")
-                    clip: true
-                    selectByMouse: true
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        visible: searchField.text.length === 0
-                        text: qsTr("Search commits (message, sha)")
-                        font: searchField.font
-                        color: Theme.color("onSurfaceVariant")
-                    }
-                }
-                Rectangle {
-                    Layout.preferredHeight: 24
-                    Layout.preferredWidth: 34
-                    radius: 12
-                    color: root.histRegex ? Theme.color("primaryContainer") : "transparent"
-                    Text {
-                        anchors.centerIn: parent
-                        text: ".*"
-                        font.family: Typography.monoFamily
-                        font.pixelSize: 11
-                        font.weight: Font.Bold
-                        color: root.histRegex ? Theme.color("onPrimaryContainer") : Theme.color("onSurfaceVariant")
-                    }
-                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.histRegex = !root.histRegex }
-                }
-            }
+            placeholder: qsTr("Search commits (message, sha)")
+            builderTitle: qsTr("Regex Builder")
+            builderSampleText: "Fix the tracker list\nAdd search plugins\n蝦餃 1080p"
+            Accessible.name: qsTr("Search local history commits")
         }
 
         // Commit timeline.

@@ -1,5 +1,51 @@
 # Handoff
 
+## 2026-08-02 — the build could not start, and nothing noticed
+
+Read this first if you are adding QML to this repository.
+
+The bulk-selection bar added earlier today reused the id `selectionBar`, which
+`TransfersPage.qml` already declared at line 222. QML rejects a duplicate id, so
+`TransfersPage` became unavailable, which made `CentralTabs` unavailable, which
+made `Main.qml`'s root object fail to create, and the application aborted at
+startup.
+
+**Every existing check passed while this was true.** qmlcachegen compiled it,
+the linker linked it, `run.ps1` reported a clean Release build, and 343 desktop
+policy checks went green — against a binary that could not open a window. The
+fault was dewed to the default branch and sat there through two further
+commits.
+
+It was also misread once before it was found: an earlier headless run showed the
+narrator controller never constructing, and that was recorded in this handoff as
+lazy initialisation. It was not. The application was dying before it got there.
+A negative observation from a process that aborts is not evidence about the
+feature you were looking at.
+
+`scripts/test-qml-startup.ps1` now closes the gap. It launches the real binary
+offscreen against a short throwaway profile — long profile paths make libgit2
+refuse the resume-data repository, after which the session never reports
+restored — waits for the UI to come up, and fails on the faults that exist only
+at runtime: a root object that will not create, a duplicate id, an unavailable
+type, a failed assignment, a `ReferenceError`, a `TypeError`. It skips cleanly
+when no binary or no offscreen plugin is present, so a source-only checkout is
+unaffected. The policy suite invokes it, and adds a cheap static sweep for
+duplicate ids within a file that ignores `\qml` documentation examples.
+
+Both checks were confirmed to actually fail by reintroducing the bug — a gate
+that cannot fail is decoration. The static one names the file and the offending
+id.
+
+Verification:
+
+- The application now starts offscreen, stays up past 25 seconds, and logs zero
+  QML faults; the controllers construct.
+- All 346 desktop policy and content-integrity checks passed.
+
+Standing advice: a clean compile says nothing about whether this application
+starts. Run the startup test, or the policy suite that calls it, before
+believing a QML change works.
+
 ## 2026-08-02 — the spoken narrator, on Edge TTS
 
 Requested: use Edge TTS. New `NarratorController` speaks application events

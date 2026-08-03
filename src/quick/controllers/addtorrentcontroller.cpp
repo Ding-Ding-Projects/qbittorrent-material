@@ -652,7 +652,15 @@ bool AddTorrentController::saveTorrentFile(const QString &filePath)
 void AddTorrentController::accept(const QVariantMap &values)
 {
     if (!m_context)
+    {
+        // A response with no context emits nothing, so the add manager's
+        // serialized dialog pipeline learns nothing from it. That is safe only
+        // because the first response always advances the pipeline before
+        // clearing the context; log it so a genuine stall is diagnosable rather
+        // than silent.
+        qCWarning(lcUi) << "AddTorrentController: accept() with no active context; ignoring";
         return;
+    }
 
     qCInfo(lcUi) << "AddTorrentController: accepted" << m_context->source;
 
@@ -746,7 +754,12 @@ void AddTorrentController::accept(const QVariantMap &values)
 void AddTorrentController::reject()
 {
     if (!m_context)
+    {
+        // Expected when the QML Dialog emits rejected() while closing after an
+        // accept; see the note in accept().
+        qCDebug(lcUi) << "AddTorrentController: reject() with no active context; ignoring";
         return;
+    }
 
     qCInfo(lcUi) << "AddTorrentController: rejected" << m_context->source;
     const QString source = m_context->source;

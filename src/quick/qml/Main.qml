@@ -803,6 +803,82 @@ ApplicationWindow {
         parent: root.contentItem
     }
 
+    // Drag-and-drop adding. Dropping a .torrent file or a magnet link on the
+    // window is the way most people add torrents, and without this the drop is
+    // a complete no-op — no dialog, no error, not even a log line.
+    DropArea {
+        id: torrentDropArea
+        parent: root.contentItem
+        anchors.fill: parent
+        // Sit above page content but below the lock screen and modal dialogs.
+        z: 50
+        enabled: !AppController.locked
+
+        keys: ["text/uri-list", "text/plain"]
+
+        function _addableFromDrop(drop) {
+            var sources = []
+            if (drop.hasUrls) {
+                for (var i = 0; i < drop.urls.length; ++i) {
+                    var u = drop.urls[i].toString()
+                    // Accept .torrent files and magnet links; ignore anything
+                    // else so dropping a folder or an image does nothing odd.
+                    if (u.toLowerCase().startsWith("magnet:")
+                            || u.toLowerCase().endsWith(".torrent"))
+                        sources.push(u)
+                }
+            }
+            if ((sources.length === 0) && drop.hasText) {
+                var lines = drop.text.split(/[\r\n]+/)
+                for (var j = 0; j < lines.length; ++j) {
+                    var line = lines[j].trim()
+                    if (line.length > 0)
+                        sources.push(line)
+                }
+            }
+            return sources
+        }
+
+        onEntered: (drag) => {
+            drag.accepted = (drag.hasUrls || drag.hasText)
+        }
+
+        onDropped: (drop) => {
+            var sources = torrentDropArea._addableFromDrop(drop)
+            if (sources.length === 0) {
+                Log.info("ui", "Drop ignored: nothing addable")
+                NotificationCenter.notify(
+                    qsTr("Drop a .torrent file or a magnet link to add it."),
+                    "warning")
+                drop.accepted = false
+                return
+            }
+
+            Log.info("ui", "Drop accepted with " + sources.length + " source(s)")
+            for (var i = 0; i < sources.length; ++i)
+                AppController.addTorrentFromSource(sources[i])
+            drop.accepted = true
+        }
+
+        // Visible affordance so a drag reads as "this window will take it".
+        Rectangle {
+            anchors.fill: parent
+            visible: torrentDropArea.containsDrag
+            color: Theme.color("primaryContainer")
+            opacity: 0.28
+            border.width: 2
+            border.color: Theme.color("primary")
+            radius: Spacing.radiusPanel
+
+            Label {
+                anchors.centerIn: parent
+                text: qsTr("Drop to add torrents")
+                font: Typography.titleLarge
+                color: Theme.color("onSurface")
+            }
+        }
+    }
+
     DimSumSurprise {
         parent: root.contentItem
     }

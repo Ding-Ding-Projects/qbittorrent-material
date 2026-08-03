@@ -1,5 +1,71 @@
 # Handoff
 
+## 2026-08-02 — adding a torrent: drop target, local-file routing, pipeline latch
+
+Reported: "adding torrent doesn't add to list". Three defects, found by tracing
+every entry point rather than trusting the earlier magnet-add handoff. That
+earlier fix (`287a468`) was re-verified line by line and is **intact and not
+regressed**; `TransferListModel`'s insertion is also correct, and the filter
+proxy cannot hide a new torrent on a fresh profile. The problem was upstream of
+all of that.
+
+**1. There was no drag-and-drop target anywhere.** No `DropArea`, no
+`onDropped`, no `drop.urls` handling outside the workspace tab strip and the
+search-plugins dialog. Dropping a `.torrent` or a magnet on the window did
+nothing at all — no dialog, no error, not even a log line, which is
+indistinguishable from "adding a torrent does nothing". `Main.qml` now has a
+window-filling `DropArea` that accepts `.torrent` URLs and magnet links, falls
+back to dropped text (one source per line), shows a drop affordance while a drag
+is over the window, tells the user when a drop contained nothing addable, and is
+disabled while the UI is locked.
+
+**2. Local files were routed through the HTTP download stack.** The file picker
+hands `AppController.addTorrentFromSource()` a `file:///…` URL, and
+`Net::DownloadManager::hasSupportedScheme()` matches it because
+`QNetworkAccessManager::supportedSchemes()` includes `file`. So
+`startDialogRequest()`'s local-file branch — the one that builds the
+`TorrentFileGuard` — was dead for every picker add: the "delete the source
+.torrent" preference silently never applied, `onDialogAccepted`'s guard lookup
+always missed, and any local problem surfaced as a network error.
+`GuiAddTorrentManager::addTorrent()` now normalises `file:` sources to a native
+path at the door, so every entry point (picker, drop, activation) takes the
+local branch.
+
+**3. The serialized dialog pipeline could latch forever.**
+`respondMergeTrackers()` returned early when no merge matched the source without
+releasing `m_dialogPipelineBusy`, and that latch is only cleared by a terminal
+response. Once stranded, every later add was enqueued silently while
+`addTorrent()` still returned `true` — a permanent, session-long "adds do
+nothing". It now releases, but only when no merge prompt is genuinely pending,
+so a stray response cannot skip an on-screen dialog. `AddTorrentController`'s
+`accept()`/`reject()` still return early without emitting when they have no
+context; that is safe because the first response always advances the pipeline
+before clearing the context, and both paths now log instead of failing silently.
+
+Verification:
+
+- All 313 desktop policy and content-integrity checks passed (309 before; the
+  4 new ones require the drop target and its affordance, the source
+  normalisation, and the merge-response pipeline release).
+- `run.ps1 -NoRun -Jobs 8` completed a clean Release compile.
+- Routing proven end to end in the real application: fed
+  `file:///C:/…/rp.torrent` (exactly what the picker and a drop produce), the
+  log shows `addTorrent source= "C:\…\rp.torrent"` — normalised — followed by
+  `TorrentFileGuard: created for C:\…\rp.torrent` and
+  `AddTorrentController: presenting dialog`, with **zero**
+  `downloading torrent from` lines. Before this change the guard line could not
+  appear at all.
+
+Not verified by execution: the drop gesture itself, which needs a real drag and
+cannot be driven headlessly. It is covered by compilation, the QML type check,
+and the policy assertions.
+
+Harness note for the next agent: an isolated profile root must be a **short**
+path. libgit2 refuses the resume-data repository with "path too long" under a
+deep scratch directory, the session then never reports restored, and
+`SessionImpl::addTorrent()` returns `false` before doing anything — which looks
+exactly like the bug under investigation.
+
 ## 2026-08-02 — search plugins ship with the application
 
 Requested. Upstream qBittorrent ships no search plugins — they live in the

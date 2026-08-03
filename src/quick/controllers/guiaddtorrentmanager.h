@@ -15,6 +15,7 @@
 #include <memory>
 #include <optional>
 
+#include <QDir>
 #include <QHash>
 #include <QJSEngine>
 #include <QMetaMethod>
@@ -118,10 +119,12 @@ private:
 
 public:
     /// Main entry point. Returns @c true if the request was started/handled.
-    Q_INVOKABLE bool addTorrent(const QString &source
+    Q_INVOKABLE bool addTorrent(const QString &rawSource
             , const BitTorrent::AddTorrentParams &params = {}
             , const Option option = Option::Default)
     {
+        const QString source = normalizeSource(rawSource);
+
         if (source.isEmpty())
         {
             qCWarning(lcUi) << "GuiAddTorrentManager: empty source ignored";
@@ -167,6 +170,13 @@ public:
         if ((pendingIt == m_pendingMerges.end()) || pendingIt->isEmpty())
         {
             qCWarning(lcUi) << "GuiAddTorrentManager: no pending tracker merge for" << source;
+            // Returning here used to strand the serialized dialog pipeline: the
+            // latch is only released by a terminal response, so every later add
+            // would be enqueued forever while addTorrent() still reported
+            // success. Release it, but only when nothing is genuinely waiting on
+            // a prompt, so a stray response cannot skip an on-screen dialog.
+            if (m_pendingMerges.isEmpty())
+                scheduleNextDialogRequest();
             return;
         }
 
@@ -218,6 +228,25 @@ signals:
     void mergeTrackersRequested(const QString &source, const QString &name, bool isPrivate);
 
 private:
+    /// A "file://" URL denotes a local file, not a download. The file picker and
+    /// drag-and-drop both hand us URLs, and QNetworkAccessManager lists "file"
+    /// among its supported schemes, so leaving them as URLs sends them through
+    /// the HTTP stack: that skips the TorrentFileGuard entirely (breaking the
+    /// "delete the source .torrent" preference) and reports local problems as
+    /// network errors. Normalise once, at the door, for every entry point.
+    static QString normalizeSource(const QString &source)
+    {
+        const QString trimmed = source.trimmed();
+        if (!trimmed.startsWith(u"file:", Qt::CaseInsensitive))
+            return trimmed;
+
+        const QString localFile = QUrl::fromEncoded(trimmed.toUtf8()).toLocalFile();
+        if (localFile.isEmpty())
+            return trimmed;
+
+        return QDir::toNativeSeparators(localFile);
+    }
+
     // ---- pipeline steps ----------------------------------------------------
 
     struct PendingDialogRequest

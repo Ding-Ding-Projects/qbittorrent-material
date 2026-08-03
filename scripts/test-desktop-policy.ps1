@@ -316,6 +316,27 @@ $guiAddManager = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/controllers/guiaddtorrentmanager.h")
 $addTorrentDialog = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/addtorrent/AddNewTorrentDialog.qml")
+
+# Dropping a .torrent or magnet on the window must add it. Without a drop
+# target the gesture is a complete no-op — no dialog, no error, no log line —
+# which is indistinguishable from "adding a torrent does nothing".
+Test-Policy ($mainQml.Contains('DropArea {') `
+        -and $mainQml.Contains('id: torrentDropArea') `
+        -and $mainQml -match 'onDropped:\s*\(drop\)\s*=>' `
+        -and $mainQml.Contains('AppController.addTorrentFromSource(sources[i])')) `
+    "dropping a torrent file or magnet link on the window adds it"
+Test-Policy ($mainQml -match 'torrentDropArea[\s\S]{0,600}?containsDrag') `
+    "an active drag over the window shows a drop affordance"
+
+# A "file://" URL matches QNetworkAccessManager's supported schemes, so leaving
+# it unnormalized routes local files through the HTTP download stack, skipping
+# the TorrentFileGuard and reporting local errors as network failures.
+Test-Policy ($guiAddManager.Contains('static QString normalizeSource(const QString &source)') `
+        -and $guiAddManager.Contains('const QString source = normalizeSource(rawSource);') `
+        -and $guiAddManager.Contains('QDir::toNativeSeparators(localFile)')) `
+    "local file sources are normalized before the download-scheme test"
+Test-Policy ($guiAddManager -match 'if \(m_pendingMerges\.isEmpty\(\)\)\s*\r?\n\s*scheduleNextDialogRequest\(\);') `
+    "an unmatched tracker-merge response cannot strand the serialized dialog pipeline"
 Test-Policy ($guiAddManager.Contains('QQueue<PendingDialogRequest> m_pendingDialogRequests') `
         -and $guiAddManager.Contains('m_dialogPipelineBusy') `
         -and $guiAddManager.Contains('QTimer::singleShot(0, this') `

@@ -22,8 +22,10 @@ import qBittorrent
     selection) before calling \c open()/\c popup(). Actions are delegated to the
     \c SearchController.
 */
-Menu {
+SearchableMenu {
     id: root
+
+    searchAccessibleName: qsTr("Search result actions")
 
     /*! The owning SearchController tab id. */
     property int tabId: -1
@@ -37,6 +39,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Open download window")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         icon.source: ""
         contentItem: Row {
             spacing: Spacing.sm
@@ -52,6 +56,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Download")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         contentItem: Row {
             spacing: Spacing.sm
             MDIcon { icon: Icons.download; size: 18; color: Theme.color("primary") }
@@ -68,6 +74,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Open description page")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         contentItem: Row {
             spacing: Spacing.sm
             MDIcon { icon: Icons.open_in_new; size: 18; color: Theme.color("onSurface") }
@@ -85,6 +93,8 @@ Menu {
 
         MenuItem {
             text: qsTr("Name")
+            visible: root.matches(text)
+            height: visible ? implicitHeight : 0
             contentItem: Row {
                 spacing: Spacing.sm
                 MDIcon { icon: Icons.content_copy; size: 18; color: Theme.color("onSurface") }
@@ -97,6 +107,8 @@ Menu {
         }
         MenuItem {
             text: qsTr("Download link")
+            visible: root.matches(text)
+            height: visible ? implicitHeight : 0
             contentItem: Row {
                 spacing: Spacing.sm
                 MDIcon { icon: Icons.link; size: 18; color: Theme.color("onSurface") }
@@ -109,6 +121,8 @@ Menu {
         }
         MenuItem {
             text: qsTr("Description page URL")
+            visible: root.matches(text)
+            height: visible ? implicitHeight : 0
             contentItem: Row {
                 spacing: Spacing.sm
                 MDIcon { icon: Icons.open_in_new; size: 18; color: Theme.color("onSurface") }

@@ -23,8 +23,10 @@ import qBittorrent
     \c request* signal per action which \c RSSTab wires to \c RSSController and
     the relevant dialogs.
 */
-Menu {
+SearchableMenu {
     id: root
+
+    searchAccessibleName: qsTr("Search feed actions")
 
     property string currentPath: ""
     property bool isFeed: false
@@ -49,14 +51,14 @@ Menu {
     // ---- With a selection --------------------------------------------------
     MenuItem {
         text: qsTr("Update")
-        visible: root.hasSelection
+        visible: (root.hasSelection) && root.matches(text)
         height: visible ? implicitHeight : 0
         icon.source: ""
         onTriggered: { Log.info("rss", "Menu: Update"); root.requestUpdate() }
     }
     MenuItem {
         text: qsTr("Mark items read")
-        visible: root.hasSelection
+        visible: (root.hasSelection) && root.matches(text)
         height: visible ? implicitHeight : 0
         onTriggered: { Log.info("rss", "Menu: Mark items read"); root.requestMarkRead() }
     }
@@ -65,19 +67,19 @@ Menu {
 
     MenuItem {
         text: qsTr("Rename...")
-        visible: root.hasSelection && !root.isSticky
+        visible: (root.hasSelection && !root.isSticky) && root.matches(text)
         height: visible ? implicitHeight : 0
         onTriggered: { Log.info("rss", "Menu: Rename"); root.requestRename() }
     }
     MenuItem {
         text: qsTr("Feed options...")
-        visible: root.isFeed
+        visible: (root.isFeed) && root.matches(text)
         height: visible ? implicitHeight : 0
         onTriggered: { Log.info("rss", "Menu: Feed options"); root.requestEditFeed() }
     }
     MenuItem {
         text: qsTr("Delete")
-        visible: root.hasSelection && !root.isSticky
+        visible: (root.hasSelection && !root.isSticky) && root.matches(text)
         height: visible ? implicitHeight : 0
         onTriggered: { Log.info("rss", "Menu: Delete"); root.requestDelete() }
     }
@@ -86,7 +88,7 @@ Menu {
 
     MenuItem {
         text: qsTr("New folder...")
-        visible: root.isFolder || !root.hasSelection
+        visible: (root.isFolder || !root.hasSelection) && root.matches(text)
         height: visible ? implicitHeight : 0
         onTriggered: { Log.info("rss", "Menu: New folder"); root.requestNewFolder() }
     }
@@ -95,6 +97,8 @@ Menu {
 
     MenuItem {
         text: qsTr("New subscription...")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         onTriggered: { Log.info("rss", "Menu: New subscription"); root.requestNewSubscription() }
     }
 
@@ -102,7 +106,7 @@ Menu {
 
     MenuItem {
         text: qsTr("Copy feed URL")
-        visible: root.isFeed
+        visible: (root.isFeed) && root.matches(text)
         height: visible ? implicitHeight : 0
         onTriggered: { Log.info("rss", "Menu: Copy feed URL"); root.requestCopyUrl() }
     }
@@ -110,7 +114,7 @@ Menu {
     // ---- Nothing selected --------------------------------------------------
     MenuItem {
         text: qsTr("Update all feeds")
-        visible: !root.hasSelection
+        visible: (!root.hasSelection) && root.matches(text)
         height: visible ? implicitHeight : 0
         onTriggered: { Log.info("rss", "Menu: Update all feeds"); root.requestUpdateAll() }
     }

@@ -19,7 +19,7 @@ import qBittorrent
     exclusive choice of button text position. Emits \c positionSelected with the
     chosen Qt::ToolButtonStyle-ordered index (0 icons only … 4 follow style).
 */
-Menu {
+SearchableMenu {
     id: menu
 
     /// The currently active text position (drives the checkmarks).
@@ -28,7 +28,8 @@ Menu {
     /// Emitted when the user picks a text position.
     signal positionSelected(int position)
 
-    Material.elevation: 8
+    searchPlaceholder: qsTr("Search toolbar options")
+    searchAccessibleName: qsTr("Search toolbar text-position options")
     onOpened: Log.debug("ui", "Toolbar text-position menu opened")
 
     ButtonGroup {
@@ -38,6 +39,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Icons Only")
+        visible: menu.matches(text)
+        height: visible ? implicitHeight : 0
         checkable: true
         checked: menu.currentPosition === 0
         ButtonGroup.group: styleGroup
@@ -45,6 +48,8 @@ Menu {
     }
     MenuItem {
         text: qsTr("Text Only")
+        visible: menu.matches(text)
+        height: visible ? implicitHeight : 0
         checkable: true
         checked: menu.currentPosition === 1
         ButtonGroup.group: styleGroup
@@ -52,6 +57,8 @@ Menu {
     }
     MenuItem {
         text: qsTr("Text Alongside Icons")
+        visible: menu.matches(text)
+        height: visible ? implicitHeight : 0
         checkable: true
         checked: menu.currentPosition === 2
         ButtonGroup.group: styleGroup
@@ -59,6 +66,8 @@ Menu {
     }
     MenuItem {
         text: qsTr("Text Under Icons")
+        visible: menu.matches(text)
+        height: visible ? implicitHeight : 0
         checkable: true
         checked: menu.currentPosition === 3
         ButtonGroup.group: styleGroup
@@ -66,6 +75,8 @@ Menu {
     }
     MenuItem {
         text: qsTr("Follow System Style")
+        visible: menu.matches(text)
+        height: visible ? implicitHeight : 0
         checkable: true
         checked: menu.currentPosition === 4
         ButtonGroup.group: styleGroup

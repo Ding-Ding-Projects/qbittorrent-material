@@ -1,5 +1,57 @@
 # Handoff
 
+## 2026-08-02 — every context menu is searchable and wide enough
+
+Reported: the right-click menu is not wide enough and is missing its search bar.
+Both were real, and the second was worse than reported: only **2 of 10** context
+menus had a search field. The transfer-row and execution-log menus each carried
+their own hand-rolled copy, and the other eight — content tree, RSS feeds,
+articles and rules, search plugins, search results, search tabs, and the toolbar
+text-position menu — had none at all.
+
+The width fault has a specific cause worth remembering: a menu item renders its
+keyboard shortcut in a **right-anchored** label, and an anchored child
+contributes nothing to `implicitWidth`. A menu sized purely from its content
+therefore collapsed to the label width and painted the shortcut on top of the
+text, which is what "not wide enough" looked like.
+
+New shared component `components/SearchableMenu.qml` supplies, once, what each
+menu was supposed to have: the search field, keyboard focus on open, Escape to
+close, a density-scaled minimum width that still grows for longer content and
+longer localized strings, and a height bounded by the window that scrolls rather
+than clipping its last items. All ten context menus now derive from it and gate
+their items on `matches(text)`, preserving each item's existing visibility
+condition rather than replacing it.
+
+The field is a `FilterTextField`, so every menu also gets the anchored regex
+builder that belongs to that specific field — plain text stays the default,
+regex is an explicit opt-in, and matching runs through the application's own
+`QRegularExpression` engine rather than JavaScript's, so a pattern behaves in a
+menu exactly as it does in every other search surface. No second builder was
+written: the existing one was reused.
+
+One QML trap is worth recording. The base installs its reset-on-show and
+focus-on-open behavior through a `Connections` block, **not** `onAboutToShow:` /
+`onOpened:` handlers. A handler declared in a base type is replaced outright when
+a deriving menu declares its own, so the obvious implementation would have
+silently cost several menus their query reset and their keyboard focus.
+
+Verification:
+
+- All 317 desktop policy and content-integrity checks passed (313 before). Four
+  new ones: the base filters through the app's regex engine and reaches the
+  builder; the width floor and bounded scrolling exist; the base handlers
+  survive a deriving menu declaring its own; and **every** `*ContextMenu.qml`
+  derives from `SearchableMenu`, so a future menu cannot quietly ship without a
+  search field. Two older assertions that pinned the now-removed hand-rolled
+  implementations were rewritten against the shared base.
+- `run.ps1 -NoRun -Jobs 8` completed a clean Release compile; every converted
+  menu and the new component compiled through qmlcachegen.
+
+Not verified by execution: the menus were not opened in a running window, so the
+visual width and the filtering are covered by compilation and policy assertions
+rather than by interaction.
+
 ## 2026-08-02 — adding a torrent: drop target, local-file routing, pipeline latch
 
 Reported: "adding torrent doesn't add to list". Three defects, found by tracing

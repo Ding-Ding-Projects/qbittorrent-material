@@ -22,6 +22,7 @@ SpeedSpinBox            1.0 SpeedSpinBox.qml
 TriStateComboField      1.0 TriStateComboField.qml
 FilterTextField         1.0 FilterTextField.qml
 FilterPatternFormatMenu 1.0 FilterPatternFormatMenu.qml
+SearchableMenu          1.0 SearchableMenu.qml
 DataTable               1.0 DataTable.qml
 ColumnHeaderMenu        1.0 ColumnHeaderMenu.qml
 ProgressCell            1.0 ProgressCell.qml

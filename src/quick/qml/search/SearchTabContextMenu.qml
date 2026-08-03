@@ -21,8 +21,10 @@ import qBittorrent
     Set \l tabId and \l ongoing before \c popup(). When the tab is running the
     first item is "Stop search"; otherwise it is "Refresh tab".
 */
-Menu {
+SearchableMenu {
     id: root
+
+    searchAccessibleName: qsTr("Search tab actions")
 
     /*! The SearchController tab id this menu targets. */
     property int tabId: -1
@@ -36,6 +38,8 @@ Menu {
 
     MenuItem {
         text: root.ongoing ? qsTr("Stop search") : qsTr("Refresh tab")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         contentItem: Row {
             spacing: Spacing.sm
             MDIcon {
@@ -64,6 +68,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Close tab")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         contentItem: Row {
             spacing: Spacing.sm
             MDIcon { icon: Icons.close; size: 18; color: Theme.color("onSurface") }
@@ -77,6 +83,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Close all tabs")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         contentItem: Row {
             spacing: Spacing.sm
             MDIcon { icon: Icons.deleteIcon; size: 18; color: Theme.color("onSurface") }

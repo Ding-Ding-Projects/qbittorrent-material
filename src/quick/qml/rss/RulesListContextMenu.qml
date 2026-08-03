@@ -22,8 +22,10 @@ import qBittorrent
     \c request* signal per action that the dialog wires to the
     \c RuleEditorController.
 */
-Menu {
+SearchableMenu {
     id: root
+
+    searchAccessibleName: qsTr("Search rule actions")
 
     property int selectionCount: 0
 
@@ -39,12 +41,14 @@ Menu {
 
     MenuItem {
         text: qsTr("Add new rule...")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         onTriggered: { Log.info("rss", "RulesMenu: Add"); root.requestAdd() }
     }
 
     MenuItem {
         text: root.selectionCount > 1 ? qsTr("Delete selected rules") : qsTr("Delete rule")
-        visible: root.selectionCount >= 1
+        visible: (root.selectionCount >= 1) && root.matches(text)
         height: visible ? implicitHeight : 0
         onTriggered: { Log.info("rss", "RulesMenu: Delete"); root.requestDelete() }
     }
@@ -53,14 +57,14 @@ Menu {
 
     MenuItem {
         text: qsTr("Rename rule...")
-        visible: root.selectionCount === 1
+        visible: (root.selectionCount === 1) && root.matches(text)
         height: visible ? implicitHeight : 0
         onTriggered: { Log.info("rss", "RulesMenu: Rename"); root.requestRename() }
     }
 
     MenuItem {
         text: qsTr("Clone rule...")
-        visible: root.selectionCount === 1
+        visible: (root.selectionCount === 1) && root.matches(text)
         height: visible ? implicitHeight : 0
         onTriggered: { Log.info("rss", "RulesMenu: Clone"); root.requestClone() }
     }
@@ -69,7 +73,7 @@ Menu {
 
     MenuItem {
         text: qsTr("Clear downloaded episodes...")
-        visible: root.selectionCount >= 1
+        visible: (root.selectionCount >= 1) && root.matches(text)
         height: visible ? implicitHeight : 0
         onTriggered: { Log.info("rss", "RulesMenu: Clear downloaded episodes"); root.requestClearEpisodes() }
     }

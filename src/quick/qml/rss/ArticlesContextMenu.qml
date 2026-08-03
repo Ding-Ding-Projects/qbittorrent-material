@@ -22,8 +22,10 @@ import qBittorrent
     their action is unavailable, and the menu is not shown at all when neither
     applies.
 */
-Menu {
+SearchableMenu {
     id: root
+
+    searchAccessibleName: qsTr("Search article actions")
 
     property bool hasTorrent: false
     property bool hasLink: false
@@ -37,14 +39,14 @@ Menu {
 
     MenuItem {
         text: qsTr("Download torrent")
-        visible: root.hasTorrent
+        visible: (root.hasTorrent) && root.matches(text)
         height: visible ? implicitHeight : 0
         onTriggered: { Log.info("rss", "Menu: Download torrent"); root.requestDownload() }
     }
 
     MenuItem {
         text: qsTr("Open news URL")
-        visible: root.hasLink
+        visible: (root.hasLink) && root.matches(text)
         height: visible ? implicitHeight : 0
         onTriggered: { Log.info("rss", "Menu: Open news URL"); root.requestOpenUrl() }
     }

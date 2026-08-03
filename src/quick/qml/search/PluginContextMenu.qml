@@ -22,8 +22,10 @@ import qBittorrent
     state of the first selection, used to seed the checkable "Enabled" item)
     before \c open().
 */
-Menu {
+SearchableMenu {
     id: root
+
+    searchAccessibleName: qsTr("Search plugin actions")
 
     /*! Selected plugin ids the actions operate on. */
     property var pluginIds: []
@@ -37,6 +39,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Enabled")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         checkable: true
         checked: root.firstEnabled
         onTriggered: {
@@ -49,6 +53,8 @@ Menu {
 
     MenuItem {
         text: qsTr("Uninstall")
+        visible: root.matches(text)
+        height: visible ? implicitHeight : 0
         contentItem: Row {
             spacing: Spacing.sm
             MDIcon { icon: Icons.deleteIcon; size: 18; color: Theme.color("error") }

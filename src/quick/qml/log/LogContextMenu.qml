@@ -24,7 +24,7 @@ import qBittorrent
     host view wires \c onCopyRequested / \c onClearRequested to the actual work.
     Open with \c popup().
 */
-Menu {
+SearchableMenu {
     id: root
 
     /*! Whether the Copy item is enabled (a row is selected). */
@@ -35,31 +35,7 @@ Menu {
     /*! Emitted when the user chooses Clear. */
     signal clearRequested()
 
-    modal: true
-    Material.elevation: Spacing.elevationMenu
-    property string filterText: ""
-
-    function matches(label) {
-        return filterText.length === 0
-            || String(label).toLocaleLowerCase().includes(filterText.toLocaleLowerCase())
-    }
-
-    MenuItem {
-        focusPolicy: Qt.NoFocus
-        implicitHeight: Spacing.controlHeight + (Spacing.sm * 2)
-        contentItem: TextField {
-            id: menuSearch
-            enabled: true
-            placeholderText: qsTr("Search actions")
-            text: root.filterText
-            selectByMouse: true
-            Accessible.name: qsTr("Search log actions")
-            onTextEdited: root.filterText = text
-            Keys.onEscapePressed: root.close()
-        }
-    }
-
-    MenuSeparator {}
+    searchAccessibleName: qsTr("Search log actions")
 
     MenuItem {
         id: copyItem

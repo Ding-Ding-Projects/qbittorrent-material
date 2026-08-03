@@ -33,7 +33,7 @@ import qBittorrent
     \l TransferListView can host the Material dialogs; immediate actions dispatch
     straight to \c TransferController.
 */
-Menu {
+SearchableMenu {
     id: root
 
     // ---- Signals the owning view handles (they need dialogs) ---------------
@@ -49,43 +49,15 @@ Menu {
     signal addTagRequested()
     signal removeAllTagsRequested()
 
-    modal: false
-    Material.elevation: Spacing.elevationMenu
+    searchAccessibleName: qsTr("Search transfer actions")
 
     readonly property bool single: TransferController.selectionCount === 1
     property var startAction: null
     property var stopAction: null
     property var removeAction: null
-    property string filterText: ""
 
-    function matches(label) {
-        return filterText.length === 0
-            || String(label).toLocaleLowerCase().includes(filterText.toLocaleLowerCase())
-    }
-
-    onAboutToShow: {
-        filterText = ""
-        Log.debug("ui", "TransferRowContextMenu opening for "
-                  + TransferController.selectionCount + " torrent(s)")
-    }
-    onOpened: Qt.callLater(menuSearch.forceActiveFocus)
-
-    MenuItem {
-        focusPolicy: Qt.NoFocus
-        implicitHeight: Spacing.controlHeight + (Spacing.sm * 2)
-        contentItem: TextField {
-            id: menuSearch
-            enabled: true
-            placeholderText: qsTr("Search actions")
-            text: root.filterText
-            selectByMouse: true
-            Accessible.name: qsTr("Search transfer actions")
-            onTextEdited: root.filterText = text
-            Keys.onEscapePressed: root.close()
-        }
-    }
-
-    MenuSeparator {}
+    onAboutToShow: Log.debug("ui", "TransferRowContextMenu opening for "
+                             + TransferController.selectionCount + " torrent(s)")
 
     // 1 — Start ---------------------------------------------------------------
     MenuItem {

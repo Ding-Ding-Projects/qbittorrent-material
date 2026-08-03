@@ -317,6 +317,34 @@ $guiAddManager = Get-Content -Raw -LiteralPath `
 $addTorrentDialog = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/addtorrent/AddNewTorrentDialog.qml")
 
+# Every context menu carries its own keyboard-accessible search field, and that
+# field reaches the regex builder like every other search surface. Menus derive
+# from SearchableMenu so none of that can be forgotten one menu at a time.
+$searchableMenu = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/components/SearchableMenu.qml")
+Test-Policy ($searchableMenu.Contains('FilterTextField {') `
+        -and $searchableMenu.Contains('function matches(label)') `
+        -and $searchableMenu.Contains('WorkspaceManager.evaluateRegularExpression(')) `
+    "menu search filters through the app's own regex engine and reaches the builder"
+# A menu item's shortcut Label is right-anchored, so it adds nothing to
+# implicitWidth; without a floor the menu collapses and paints over the label.
+Test-Policy ($searchableMenu.Contains('property int minimumMenuWidth') `
+        -and ($searchableMenu -match 'implicitWidth: Math\.max\(root\.minimumMenuWidth') `
+        -and $searchableMenu.Contains('height: Math.min(implicitHeight, root.maxMenuHeight)')) `
+    "context menus are wide enough for their shortcuts and scroll instead of clipping"
+# Base handlers live in Connections: a derived `onOpened:` would replace them.
+Test-Policy (($searchableMenu -match 'Connections \{[\s\S]{0,400}?function onAboutToShow\(\)') `
+        -and ($searchableMenu -match 'function onOpened\(\)')) `
+    "menu search reset and focus survive a deriving menu declaring its own handlers"
+
+$contextMenuFiles = @(Get-ChildItem -LiteralPath (Get-RepositoryPath "src/quick/qml") `
+    -Filter "*ContextMenu.qml" -File -Recurse)
+$unsearchableMenus = @($contextMenuFiles | Where-Object {
+    (Get-Content -Raw -LiteralPath $_.FullName) -notmatch '(?m)^SearchableMenu \{'
+})
+Test-Policy (($contextMenuFiles.Count -ge 10) -and ($unsearchableMenus.Count -eq 0)) `
+    "every context menu derives from SearchableMenu$(($unsearchableMenus.Name) -join ', ')"
+
 # Dropping a .torrent or magnet on the window must add it. Without a drop
 # target the gesture is a complete no-op — no dialog, no error, no log line —
 # which is indistinguishable from "adding a torrent does nothing".
@@ -762,10 +790,12 @@ Test-Policy ($transferListView -match 'property var _selectedTorrentIds:\s*\[\]'
         -and $transferListView -match 'visibleIds\.indexOf\(id\)' `
         -and $transferListView -match 'function onLayoutChanged\(\) \{ view\._remapSelection\(\); \}') `
     "legacy transfer selection remaps stable torrent IDs after model layout changes"
-Test-Policy ($transferContextMenu -match 'placeholderText:\s*qsTr\("Search actions"\)' `
-        -and $transferContextMenu -match 'function matches\(label\)' `
-        -and $transferContextMenu -match 'visible:\s*root\.matches\(text\)' `
-        -and $transferContextMenu -match 'Qt\.callLater\(menuSearch\.forceActiveFocus\)') `
+# The search field, its focus and its regex builder now come from SearchableMenu
+# rather than being re-hand-rolled per menu, so assert the derivation and the
+# per-item gating that the base cannot supply on the menu's behalf.
+Test-Policy (($transferContextMenu -match '(?m)^SearchableMenu \{') `
+        -and ($transferContextMenu -match 'searchAccessibleName:\s*qsTr\("Search transfer actions"\)') `
+        -and ($transferContextMenu -match 'visible:\s*root\.matches\(text\)')) `
     "the transfer context menu provides keyboard-focused local action search"
 Test-Policy ($transferContextMenu -match 'root\.startAction\.shortcut\.toString\(\)' `
         -and $transferContextMenu -match 'root\.stopAction\.shortcut\.toString\(\)' `
@@ -775,10 +805,10 @@ Test-Policy ($transferContextMenu -match 'root\.startAction\.shortcut\.toString\
         -and $transfersPage -match 'stopAction:\s*root\.shell\.actionStop' `
         -and $transfersPage -match 'removeAction:\s*root\.shell\.actionDelete') `
     "transfer context shortcuts derive from shared actions and use Qt 6.8 accessibility properties"
-Test-Policy ($logContextMenu -match 'Accessible\.name:\s*qsTr\("Search log actions"\)' `
-        -and $logContextMenu -match 'visible:\s*root\.matches\(text\)' `
-        -and $logContextMenu -match 'Accessible\.description:\s*qsTr\("Keyboard shortcut Ctrl\+C"\)' `
-        -and $logContextMenu -match 'Qt\.callLater\(menuSearch\.forceActiveFocus\)') `
+Test-Policy (($logContextMenu -match '(?m)^SearchableMenu \{') `
+        -and ($logContextMenu -match 'searchAccessibleName:\s*qsTr\("Search log actions"\)') `
+        -and ($logContextMenu -match 'visible:\s*root\.matches\(text\)') `
+        -and ($logContextMenu -match 'Accessible\.description:\s*qsTr\("Keyboard shortcut Ctrl\+C"\)')) `
     "the log context menu filters locally and truthfully exposes its Copy shortcut"
 Test-Policy (Test-Path -LiteralPath `
         (Get-RepositoryPath "docs/features/experience/context-menu-search.md") -PathType Leaf) `

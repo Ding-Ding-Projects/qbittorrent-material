@@ -68,9 +68,29 @@ Item {
         }
     }
 
-    function openPluginsDialog() {
+    function openPluginsDialog(pluginId) {
         Log.info("search", "Search plugins dialog opened from application menu")
-        pluginsDialog.open()
+        if (pluginId && pluginId.length)
+            pluginsDialog.openPlugin(pluginId)
+        else
+            pluginsDialog.open()
+    }
+
+    function selectPlugin(pluginId) {
+        var scopes = SearchController.pluginScopes
+        for (var i = 0; i < scopes.length; ++i) {
+            if (scopes[i].value !== pluginId)
+                continue
+            scopeCombo.currentIndex = i
+            root.currentScope = pluginId
+            root._refillCategories()
+            searchField.forceActiveFocus(Qt.ShortcutFocusReason)
+            Log.info("search", "Search plugin selected from command palette: " + pluginId)
+            return true
+        }
+        NotificationCenter.notify(
+            qsTr("The selected search plugin is no longer enabled."), "warning")
+        return false
     }
 
     Component.onCompleted: {

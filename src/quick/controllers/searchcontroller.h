@@ -16,9 +16,11 @@
 #include <QList>
 #include <QObject>
 #include <QQmlEngine>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
+#include <QVariantMap>
 
 // SearchResultsModel/SearchResultsProxyModel must be COMPLETE here: resultsModel()
 // is a Q_INVOKABLE returning SearchResultsProxyModel*, so moc records the type in
@@ -73,6 +75,23 @@ class SearchController : public QObject
     Q_PROPERTY(QVariantList tabs READ tabs NOTIFY tabsChanged)
     /// The plugin-scope combo items, as `{ label, value }` objects.
     Q_PROPERTY(QVariantList pluginScopes READ pluginScopes NOTIFY pluginsChanged)
+    /// Palette-ready union of validated/default plugins and runtime-registered
+    /// custom plugins. Rows remain present with explicit waiting state when the
+    /// Python runtime is unavailable.
+    Q_PROPERTY(QVariantList plugins READ plugins NOTIFY pluginsChanged)
+    /// Aggregate verified unofficial-catalog progress and counts.
+    Q_PROPERTY(QVariantMap unofficialPluginStatus READ unofficialPluginStatus NOTIFY unofficialPluginStatusChanged)
+    /// Last concrete diagnostic for each plugin id. Diagnostics stay available
+    /// in rows and palette records without creating one global notification per
+    /// failing plugin.
+    Q_PROPERTY(QVariantMap pluginDiagnostics READ pluginDiagnostics NOTIFY pluginDiagnosticsChanged)
+    /// True while an explicit install, update, or runtime-recovery batch is
+    /// waiting for all asynchronous plugin outcomes.
+    Q_PROPERTY(bool pluginOperationInProgress READ pluginOperationInProgress NOTIFY pluginOperationInProgressChanged)
+    /// Aggregate operation summaries not yet presented by the UI. Keeping the
+    /// queue in the always-live controller means a lazy Search tab cannot miss
+    /// a startup/runtime warning.
+    Q_PROPERTY(QVariantList pendingPluginOperationSummaries READ pendingPluginOperationSummaries NOTIFY pendingPluginOperationSummariesChanged)
     /// The search-input history (most-recent first).
     Q_PROPERTY(QStringList history READ history NOTIFY historyChanged)
 
@@ -121,6 +140,17 @@ public:
     Q_INVOKABLE void refreshPythonDetection();
     [[nodiscard]] QVariantList tabs() const;
     [[nodiscard]] QVariantList pluginScopes() const;
+    /// Each plugin row contains id/label, installedOnDisk, registered, enabled,
+    /// version, url, runtimeWaiting, canRetry, and canManage. `enabled` is only
+    /// meaningful when `registered` is true.
+    [[nodiscard]] QVariantList plugins() const;
+    [[nodiscard]] QVariantMap unofficialPluginStatus() const;
+    [[nodiscard]] QVariantMap pluginDiagnostics() const;
+    [[nodiscard]] bool pluginOperationInProgress() const;
+    [[nodiscard]] QVariantList pendingPluginOperationSummaries() const { return m_pendingPluginOperationSummaries; }
+    [[nodiscard]] Q_INVOKABLE QString pluginDiagnostic(const QString &id) const;
+    /// Remove a summary only after a notification host has presented it.
+    Q_INVOKABLE void acknowledgePluginOperationSummary(qulonglong serial);
     [[nodiscard]] QStringList history() const { return m_history; }
 
     // ---- Combo population ---------------------------------------------------
@@ -191,6 +221,13 @@ public:
     Q_INVOKABLE void installPluginFromUrl(const QString &url);
     /// Download @c versions.txt and update any out-of-date plugins.
     Q_INVOKABLE void checkForPluginUpdates();
+    /// Retry the verified default unofficial catalog after a network/runtime
+    /// recovery without requiring an application restart.
+    Q_INVOKABLE void retryUnofficialPluginSync();
+    /// Explicitly validate and promote one verified unofficial-catalog plugin
+    /// out of quarantine. The manager keeps untrusted bytes out of the active
+    /// Python engine directory until this action succeeds.
+    Q_INVOKABLE void trustUnofficialPlugin(const QString &id);
     /// The human display name for a plugin id (for feedback strings).
     [[nodiscard]] Q_INVOKABLE QString pluginFullName(const QString &id) const;
 
@@ -211,6 +248,10 @@ signals:
     void pythonAvailableChanged();
     void unavailableReasonChanged();
     void pluginsChanged();
+    void unofficialPluginStatusChanged();
+    void pluginDiagnosticsChanged();
+    void pluginOperationInProgressChanged();
+    void pendingPluginOperationSummariesChanged();
     void tabsChanged();
     void historyChanged();
 
@@ -233,8 +274,8 @@ signals:
     /// The Search Plugins dialog should be opened (scope combo picked "Select…").
     void pluginSelectionRequested();
 
-    // Plugin-management outcomes (forwarded from SearchPluginManager) — the
-    // Search Plugins dialog turns these into inline feedback.
+    // Per-plugin outcomes remain available to detail views/models. Global
+    // feedback is emitted only through pluginOperationSummaryReady().
     void pluginInstalled(const QString &name);
     void pluginInstallFailed(const QString &name, const QString &reason);
     void pluginUpdated(const QString &name);
@@ -243,6 +284,14 @@ signals:
     /// Update check finished; @p hasUpdates false means everything was current.
     void pluginUpdatesChecked(bool hasUpdates);
     void pluginUpdateCheckFailed(const QString &reason);
+    /// One aggregate completion event for the default unofficial catalog.
+    void unofficialPluginSyncFinished(const QVariantMap &status);
+    /// Forwarded explicit-trust outcomes for palette and plugin-management UI.
+    void unofficialPluginTrusted(const QString &id);
+    void unofficialPluginTrustFailed(const QString &id, const QString &reason);
+    /// One aggregate summary for an entire install/update/recovery/catalog
+    /// operation. Per-plugin reasons remain in pluginDiagnostics/summary details.
+    void pluginOperationSummaryReady(const QVariantMap &summary);
 
 private:
     /// One open search tab: its query, engine handler, and models.
@@ -261,6 +310,19 @@ private:
         SearchResultsProxyModel *proxy = nullptr;
     };
 
+    struct PluginBatch
+    {
+        QString kind;
+        QSet<QString> pending;
+        QHash<QString, QString> failures;
+        int requested = 0;
+        int succeeded = 0;
+        int skipped = 0;
+        bool awaitingUpdateList = false;
+
+        [[nodiscard]] bool active() const { return !kind.isEmpty(); }
+    };
+
     [[nodiscard]] SearchTab *tabById(int id);
     [[nodiscard]] const SearchTab *tabById(int id) const;
     [[nodiscard]] QStringList pluginsForScope(const QString &scope) const;
@@ -272,11 +334,25 @@ private:
     void saveHistoryAsync() const;
     void detectPython();
     void doDownload(SearchTab *tab, int sourceRow, bool showDialog);
+    [[nodiscard]] QString pluginRuntimeBlockReason() const;
+    [[nodiscard]] QStringList runtimeRecoveryPluginIDs() const;
+    void beginPluginBatch(const QString &kind, const QStringList &ids = {},
+                          bool awaitingUpdateList = false, int skipped = 0);
+    void recordPluginBatchOutcome(const QString &id, bool succeeded, const QString &reason = {});
+    void finishPluginBatch(const QString &forcedState = {}, const QString &runtimeReason = {});
+    void finishRuntimeRecovery();
+    void publishPluginOperationSummary(QVariantMap summary);
+    void setPluginDiagnostic(const QString &id, const QString &reason);
+    void importCatalogDiagnostics(const QVariantMap &status);
 
     bool m_pythonAvailable = false;
     int m_nextTabId = 1;
     QList<SearchTab *> m_tabs;
     QStringList m_history;
+    QHash<QString, QString> m_pluginDiagnostics;
+    PluginBatch m_pluginBatch;
+    QVariantList m_pendingPluginOperationSummaries;
+    qulonglong m_nextPluginOperationSerial = 1;
 
     static SearchController *s_instance;
 };

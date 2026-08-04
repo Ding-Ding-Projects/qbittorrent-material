@@ -15,6 +15,15 @@ Item {
     id: root
 
     readonly property string commitBaseUrl: "https://github.com/Ding-Ding-Projects/qbittorrent-material/commit/"
+    readonly property var releaseIdentity: Experience.currentReleaseIdentity || ({})
+    readonly property string releaseCodeName: String(releaseIdentity.codeName || "")
+    readonly property string releasePhotoUrl: String(releaseIdentity.photoUrl || "")
+    readonly property string releaseCatalogRevision: String(releaseIdentity.catalogRevision || "")
+    readonly property string releaseIdentityReason: String(releaseIdentity.reason || "")
+    readonly property bool releaseIdentityAvailable: releaseIdentity.available === true
+        && releaseCodeName.length > 0 && releasePhotoUrl.length > 0
+    readonly property string applicationVersion: Qt.application.version.length > 0
+        ? Qt.application.version : qsTr("unknown")
 
     readonly property var filterResult: Experience.filterChangelog(
         changelogSearch.text, changelogSearch.regexEnabled, changelogSearch.regexFlags,
@@ -161,6 +170,81 @@ Item {
                 .arg(Experience.changelog.length)
             font: Typography.bodySmall
             color: Theme.color("onSurfaceVariant")
+        }
+
+        MaterialCard {
+            Layout.fillWidth: true
+            title: qsTr("Installed release identity")
+            Accessible.name: title
+            Accessible.description: root.releaseIdentityAvailable
+                ? root.releaseCodeName : qsTr("Version-only release")
+
+            Label {
+                Layout.fillWidth: true
+                text: root.releaseIdentityAvailable
+                    ? qsTr("Version %1 · %2").arg(root.applicationVersion)
+                        .arg(root.releaseCodeName)
+                    : qsTr("Version %1 · version-only release")
+                        .arg(root.applicationVersion)
+                font: Typography.titleMedium
+                color: Theme.color("onSurface")
+                wrapMode: Text.WordWrap
+            }
+
+            Button {
+                id: changelogPhotoLink
+                Layout.fillWidth: true
+                visible: root.releaseIdentityAvailable
+                text: qsTr("Open public dim sum photo")
+                flat: true
+                focusPolicy: Qt.StrongFocus
+                implicitHeight: Math.max(40,
+                    changelogPhotoLinkLabel.implicitHeight + topPadding + bottomPadding)
+                Accessible.name: text
+                Accessible.description: qsTr("Open the public catalog photo for %1")
+                    .arg(root.releaseCodeName)
+                contentItem: Label {
+                    id: changelogPhotoLinkLabel
+                    text: changelogPhotoLink.text
+                    font: changelogPhotoLink.font
+                    color: changelogPhotoLink.enabled
+                        ? Theme.color("primary") : Theme.color("onSurfaceVariant")
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    wrapMode: Text.WordWrap
+                }
+                onClicked: Qt.openUrlExternally(root.releasePhotoUrl)
+            }
+
+            Label {
+                Layout.fillWidth: true
+                visible: root.releaseIdentityAvailable
+                    && root.releaseCatalogRevision.length > 0
+                text: qsTr("Catalog revision %1").arg(root.releaseCatalogRevision)
+                font: Typography.bodySmall
+                color: Theme.color("onSurfaceVariant")
+                wrapMode: Text.WrapAnywhere
+            }
+
+            Label {
+                Layout.fillWidth: true
+                visible: !root.releaseIdentityAvailable
+                text: qsTr("No public dim sum code name is available for this release. Version %1 remains the release identity.")
+                    .arg(root.applicationVersion)
+                font: Typography.bodyMedium
+                color: Theme.color("onSurfaceVariant")
+                wrapMode: Text.WordWrap
+            }
+
+            Label {
+                Layout.fillWidth: true
+                visible: !root.releaseIdentityAvailable
+                    && root.releaseIdentityReason.length > 0
+                text: qsTr("Reason: %1").arg(root.releaseIdentityReason)
+                font: Typography.bodySmall
+                color: Theme.color("onSurfaceVariant")
+                wrapMode: Text.WordWrap
+            }
         }
 
         ListView {

@@ -19,6 +19,7 @@ import qBittorrent
 Sheet {
     id: root
     sheetWidth: 460
+    accessibleName: qsTr("History")
 
     property string repo: "actions"
     property string expandedCommit: ""

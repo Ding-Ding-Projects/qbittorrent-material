@@ -23,6 +23,9 @@ Item {
     property bool rssEnabled: false
     property bool logEnabled: false
     property int currentIndex: 0
+    property string pendingSearchPluginId: ""
+    property string pendingSearchPluginSettingsId: ""
+    property bool pendingSearchPluginsDialog: false
 
     readonly property int rssUnread:
         (typeof RSSController !== "undefined" && RSSController.unreadCount) || 0
@@ -77,7 +80,7 @@ Item {
         return workspaceLoader.item
     }
 
-    function openSearchPlugins() {
+    function openSearchPlugins(pluginId) {
         // Enabling the loader and selecting the page are deliberately kept in
         // one synchronous path. This also makes the menu action work when
         // Search has not been enabled in Preferences yet.
@@ -85,7 +88,37 @@ Item {
             central.shell.setSearchTabEnabled(true)
         central.currentIndex = 1
         if (searchLoader.item && searchLoader.item.openPluginsDialog)
-            searchLoader.item.openPluginsDialog()
+            searchLoader.item.openPluginsDialog(pluginId || "")
+        else {
+            pendingSearchPluginSettingsId = pluginId || ""
+            pendingSearchPluginsDialog = true
+        }
+    }
+
+    function openSearchPlugin(pluginId) {
+        if (!pluginId || !pluginId.length)
+            return
+        if (!searchEnabled)
+            central.shell.setSearchTabEnabled(true)
+        central.currentIndex = 1
+        pendingSearchPluginId = pluginId
+        Qt.callLater(central.applyPendingSearchPlugin)
+    }
+
+    function applyPendingSearchPlugin() {
+        if (!pendingSearchPluginId.length || !searchLoader.item
+                || !searchLoader.item.selectPlugin)
+            return
+        if (searchLoader.item.selectPlugin(pendingSearchPluginId))
+            pendingSearchPluginId = ""
+    }
+
+    function applyPendingSearchPluginSettings() {
+        if (!pendingSearchPluginsDialog || !searchLoader.item || !searchLoader.item.openPluginsDialog)
+            return
+        searchLoader.item.openPluginsDialog(pendingSearchPluginSettingsId)
+        pendingSearchPluginSettingsId = ""
+        pendingSearchPluginsDialog = false
     }
 
     function newWorkspaceTab() {
@@ -183,7 +216,12 @@ Item {
                     id: searchLoader
                     active: central.searchEnabled
                     sourceComponent: SearchTab {}
-                    onLoaded: Log.debug("ui", "Search workspace instantiated")
+                    onLoaded: {
+                        Log.debug("ui", "Search workspace instantiated")
+                        Qt.callLater(central.applyPendingSearchPlugin)
+                        if (central.pendingSearchPluginsDialog)
+                            Qt.callLater(central.applyPendingSearchPluginSettings)
+                    }
                 }
 
                 Loader {

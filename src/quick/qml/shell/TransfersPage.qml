@@ -487,8 +487,15 @@ Item {
                                 anchors.centerIn: parent
                                 name: splitDockActionButton.modelData.icon
                                 size: 20
-                                color: splitDockActionButton.modelData.icon === "delete"
-                                    ? Theme.color("error") : Theme.color("onSurface")
+                                // Custom content bypasses AbstractButton's
+                                // built-in disabled palette. Do not paint a
+                                // zero-selection delete button as an active red
+                                // destructive action (or start/stop as active
+                                // black controls).
+                                color: !splitDockActionButton.enabled
+                                    ? Theme.color("outline")
+                                    : (splitDockActionButton.modelData.icon === "delete"
+                                        ? Theme.color("error") : Theme.color("onSurface"))
                             }
                             HoverHandler { cursorShape: Qt.PointingHandCursor }
                             ToolTip.visible: splitDockActionButton.hovered
@@ -1364,17 +1371,14 @@ Item {
         onAccepted: {
             const directory = root.localPath(folder)
             if (TransferController.exportTorrent(directory))
-                actionSnackbar.show(qsTr("Torrent file(s) exported."))
+                NotificationCenter.notify(qsTr("Torrent file(s) exported."), "success")
             else
-                actionSnackbar.show(qsTr("Could not export the selected torrent file(s)."))
+                NotificationCenter.notify(
+                    qsTr("Could not export the selected torrent file(s)."), "error")
         }
     }
     TabularExportDialog {
         id: tabularExportDialog
-    }
-    Snackbar {
-        id: actionSnackbar
-        parent: Overlay.overlay
     }
     TorrentOptionsDialog {
         id: torrentOptionsDialog

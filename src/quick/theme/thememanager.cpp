@@ -12,12 +12,15 @@
 
 #include "thememanager.h"
 
+#include <QCoreApplication>
 #include <QFile>
 #include <QFontDatabase>
 #include <QGuiApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QStringList>
 #include <QStyleHints>
+#include <QQmlEngine>
 
 #include "base/logging.h"
 #include "base/preferences.h"
@@ -82,9 +85,12 @@ ThemeManager::ThemeManager(QObject *parent)
         m_uiStyle = (style == u"SplitDock"_s) ? SplitDock
             : (style == u"CardFlow"_s) ? CardFlow : TonalRail;
         m_densityScale = qBound<qreal>(0.75, prefs->value(kDensityKey, 1.0).toReal(), 1.5);
-        const QColor seed(prefs->value(kSeedKey).toString());
+        QColor seed(prefs->value(kSeedKey).toString());
         if (seed.isValid())
+        {
+            seed.setAlpha(255);
             m_seedColor = seed;
+        }
         m_uiFontFamily = prefs->value(kFontFamilyKey).toString();
         m_uiFontScale = qBound<qreal>(0.75, prefs->value(kFontScaleKey, 1.0).toReal(), 1.75);
         m_uiFontWeight = qBound(100, prefs->value(kFontWeightKey, 400).toInt(), 900);
@@ -115,13 +121,28 @@ ThemeManager *ThemeManager::create(QQmlEngine *engine, QJSEngine *jsEngine)
 ThemeManager *ThemeManager::instance()
 {
     if (!m_instance)
+    {
         m_instance = new ThemeManager;
+        m_instance->setParent(QCoreApplication::instance());
+        QQmlEngine::setObjectOwnership(m_instance, QQmlEngine::CppOwnership);
+    }
     return m_instance;
 }
 
 ThemeManager::ColorScheme ThemeManager::colorScheme() const
 {
     return m_colorScheme;
+}
+
+int ThemeManager::paletteRevision() const
+{
+    return m_paletteRevision;
+}
+
+void ThemeManager::notifyThemeChanged()
+{
+    ++m_paletteRevision;
+    emit themeChanged();
 }
 
 void ThemeManager::setColorScheme(ColorScheme value)
@@ -137,7 +158,7 @@ void ThemeManager::setColorScheme(ColorScheme value)
         prefs->setValue(kColorSchemeKey, static_cast<int>(value));
         prefs->apply();
     }
-    emit themeChanged();
+    notifyThemeChanged();
 }
 
 ThemeManager::TrayIconStyle ThemeManager::trayIconStyle() const
@@ -182,7 +203,7 @@ void ThemeManager::setUiStyle(const UiStyle value)
         prefs->setValue(kUiStyleKey, name);
         prefs->apply();
     }
-    emit themeChanged();
+    notifyThemeChanged();
 }
 
 QString ThemeManager::styleName() const
@@ -229,13 +250,47 @@ QColor ThemeManager::seedColor() const
 
 void ThemeManager::setSeedColor(const QColor &value)
 {
-    if (!value.isValid() || m_seedColor == value)
+    if (!value.isValid())
         return;
-    m_seedColor = value;
+
+    // Material seed colors generate opaque tonal roles. Accepting an alpha
+    // channel while silently showing a translucent swatch made the editor lie
+    // about the palette that was actually applied, so normalize at the single
+    // authoritative boundary and state that policy in the picker UI.
+    QColor normalized = value;
+    normalized.setAlpha(255);
+    if (m_seedColor == normalized)
+        return;
+    m_seedColor = normalized;
     buildStylePalette();
     persistAppearance();
     emit appearanceChanged();
-    emit themeChanged();
+    notifyThemeChanged();
+}
+
+bool ThemeManager::isValidColor(const QString &value) const
+{
+    return QColor(value.trimmed()).isValid();
+}
+
+QColor ThemeManager::parseColorValue(const QString &value) const
+{
+    return QColor(value.trimmed());
+}
+
+QString ThemeManager::nameForColor(const QColor &value) const
+{
+    if (!value.isValid() || value.alpha() != 255)
+        return {};
+
+    const QRgb target = value.rgb();
+    const QStringList names = QColor::colorNames();
+    for (const QString &name : names)
+    {
+        if (QColor(name).rgb() == target)
+            return name;
+    }
+    return {};
 }
 
 QString ThemeManager::uiFontFamily() const
@@ -313,7 +368,7 @@ void ThemeManager::resetAppearance()
     buildStylePalette();
     persistAppearance();
     emit appearanceChanged();
-    emit themeChanged();
+    notifyThemeChanged();
 }
 
 void ThemeManager::persistAppearance() const
@@ -352,7 +407,7 @@ void ThemeManager::onSystemColorSchemeChanged()
         return; // only relevant while following the OS
 
     qCInfo(lcTheme) << "System color scheme changed; effective isDark=" << isDark();
-    emit themeChanged();
+    notifyThemeChanged();
 }
 
 QColor ThemeManager::color(const QString &id) const
@@ -444,7 +499,7 @@ bool ThemeManager::loadColorOverrides(const QString &jsonPath)
     const int dark = ingest(root.value(u"colors.dark"_s).toObject(), m_darkOverrides);
 
     qCInfo(lcTheme) << "Loaded color overrides:" << light << "light," << dark << "dark";
-    emit themeChanged();
+    notifyThemeChanged();
     return (light + dark) > 0;
 }
 
@@ -609,6 +664,7 @@ void ThemeManager::buildStylePalette()
         // Surfaces / text.
         put(u"surface"_s, parseColor(p.surf));
         put(u"surfaceVariant"_s, parseColor(p.sc));
+        put(u"surfaceContainer"_s, parseColor(p.sc));
         put(u"surfaceContainerHigh"_s, parseColor(p.sc2));
         put(u"onSurface"_s, on);
         put(u"onSurfaceVariant"_s, parseColor(p.onv));

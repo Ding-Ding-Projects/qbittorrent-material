@@ -20,6 +20,7 @@ import qBittorrent
 Sheet {
     id: root
     sheetWidth: 430
+    accessibleName: qsTr("Settings")
 
     signal closeRequested()
     signal openHistoryRequested()
@@ -31,6 +32,334 @@ Sheet {
         { style: 2, name: qsTr("Card Flow"), desc: qsTr("Cards + persistent detail panel") }
     ]
     readonly property var retentionOptions: ["30 days", "1 year", "Forever"]
+    property var pendingSeedColor: ThemeManager.seedColor
+    property string paletteRevealSection: ""
+    property string highlightedPaletteSetting: ""
+    property real paletteHighlightX: 0
+    property real paletteHighlightY: 0
+    property real paletteHighlightWidth: 0
+    property real paletteHighlightHeight: 0
+
+    function paletteEntries() {
+        return [
+            { id: "settings.appearance.colorScheme", title: qsTr("Theme"), section: "appearance", keywords: "light dark color scheme", targetId: "settingsThemeSegments", controlKind: "select" },
+            { id: "settings.appearance.uiStyle", title: qsTr("UI style"), section: "appearance", keywords: "Tonal Rail Split Dock Card Flow", targetId: "settingsUiStyleChoices", controlKind: "select" },
+            { id: "settings.appearance.densityScale", title: qsTr("Density"), section: "appearance", keywords: "compact comfortable scale", targetId: "settingsDensity", controlKind: "slider", minimum: 0.8, maximum: 1.35, step: 0.05 },
+            { id: "settings.appearance.seedColor", title: qsTr("Accent / seed color"), section: "appearance", keywords: "Material color named HEX picker translator contrast", targetId: "settingsSeedColorField", controlKind: "color" },
+            { id: "settings.appearance.seedColorPicker", title: qsTr("Open Material seed color picker"), section: "appearance", keywords: "continuous spectrum wheel RGB HSL OKLCH CMYK", targetId: "settingsSeedColorPickerButton", controlKind: "action" },
+            { id: "settings.appearance.uiFontFamily", title: qsTr("UI font family"), section: "appearance", keywords: "typeface installed fonts", targetId: "settingsFontFamily", controlKind: "select" },
+            { id: "settings.appearance.uiFontScale", title: qsTr("Font scale"), section: "appearance", keywords: "text size", targetId: "settingsFontScale", controlKind: "slider", minimum: 0.8, maximum: 1.6, step: 0.05 },
+            { id: "settings.appearance.uiFontWeight", title: qsTr("Font weight"), section: "appearance", keywords: "bold thickness", targetId: "settingsFontWeight", controlKind: "spin", minimum: 100, maximum: 900, step: 50 },
+            { id: "settings.appearance.reducedMotion", title: qsTr("Reduce motion"), section: "appearance", keywords: "animation accessibility", targetId: "settingsReducedMotion", controlKind: "toggle" },
+            { id: "settings.appearance.reset", title: qsTr("Reset global appearance"), section: "appearance", keywords: "defaults reset theme", targetId: "settingsAppearanceReset", controlKind: "action" },
+            { id: "settings.startup.dimSumSurprise", title: qsTr("10% dim sum surprise"), section: "startup", keywords: "10% public catalog cached photo offline unavailable cannot disable", targetId: "settingsDimSumSurprise", controlKind: "readonly", readOnly: true },
+            { id: "settings.narrator.enabled", title: qsTr("Speak app events aloud"), section: "narrator", keywords: "narrator speech Edge online service", targetId: "settingsNarratorEnabled", controlKind: "toggle" },
+            { id: "settings.narrator.languageMode", title: qsTr("Narration language"), section: "narrator", keywords: "English Cantonese Both", targetId: "settingsNarratorLanguage", controlKind: "select" },
+            { id: "settings.narrator.englishVoice", title: qsTr("English voice"), section: "narrator", keywords: "voice preview", targetId: "settingsEnglishVoice", controlKind: "select" },
+            { id: "settings.narrator.previewEnglish", title: qsTr("Preview English voice"), section: "narrator", keywords: "speak sample", targetId: "settingsEnglishVoicePreview", controlKind: "action" },
+            { id: "settings.narrator.cantoneseVoice", title: qsTr("Cantonese voice"), section: "narrator", keywords: "Hong Kong voice preview", targetId: "settingsCantoneseVoice", controlKind: "select" },
+            { id: "settings.narrator.previewCantonese", title: qsTr("Preview Cantonese voice"), section: "narrator", keywords: "speak sample", targetId: "settingsCantoneseVoicePreview", controlKind: "action" },
+            { id: "settings.narrator.volume", title: qsTr("Narration volume"), section: "narrator", keywords: "speaker level", targetId: "settingsNarratorVolume", controlKind: "slider", minimum: 0, maximum: 1, step: 0.05 },
+            { id: "settings.narrator.quietHours", title: qsTr("Quiet — keep the settings but stay silent"), section: "narrator", keywords: "mute quiet", targetId: "settingsNarratorQuiet", controlKind: "toggle" },
+            { id: "settings.editor.selected", title: qsTr("External editor"), section: "editor", keywords: "Visual Studio Code VSCodium Cursor Sublime Notepad", targetId: "settingsExternalEditor", controlKind: "select" },
+            { id: "settings.editor.customPath", title: qsTr("Custom editor executable"), section: "editor", keywords: "path application", targetId: "settingsCustomEditorPath", controlKind: "path", sensitive: true },
+            { id: "settings.editor.browse", title: qsTr("Browse for an external editor"), section: "editor", keywords: "file picker executable", targetId: "settingsEditorBrowse", controlKind: "action" },
+            { id: "settings.editor.refresh", title: qsTr("Refresh detected editors"), section: "editor", keywords: "detect rescan", targetId: "settingsEditorRefresh", controlKind: "action" },
+            { id: "settings.editor.openWorkspace", title: qsTr("Open workspace in external editor"), section: "editor", keywords: "project folder workspace root", targetId: "settingsEditorOpenWorkspace", controlKind: "action" },
+            { id: "settings.history.retention", title: qsTr("History retention"), section: "history", keywords: "30 days 1 year Forever commits", targetId: "settingsHistoryRetention", controlKind: "select" },
+            { id: "settings.history.open", title: qsTr("Open history manager"), section: "history", keywords: "versions undo journal", targetId: "settingsOpenHistory", controlKind: "action" },
+            { id: "settings.options.open", title: qsTr("All qBittorrent options…"), section: "options", keywords: "advanced full preferences", targetId: "settingsOpenFullOptions", controlKind: "action" }
+        ]
+    }
+
+    function paletteTarget(settingId) {
+        switch (settingId) {
+        case "settings.appearance.colorScheme": return themeSegmentContainer
+        case "settings.appearance.uiStyle": return uiStyleChoices.itemAt(Math.max(0, ThemeManager.uiStyle)) || uiStyleLabel
+        case "settings.appearance.densityScale": return densitySlider
+        case "settings.appearance.seedColor": return seedColorField
+        case "settings.appearance.seedColorPicker": return seedColorPickerButton
+        case "settings.appearance.uiFontFamily": return fontFamilyCombo
+        case "settings.appearance.uiFontScale": return fontScaleSlider
+        case "settings.appearance.uiFontWeight": return fontWeightSpin
+        case "settings.appearance.reducedMotion": return reducedMotionSwitch
+        case "settings.appearance.reset": return appearanceResetButton
+        case "settings.startup.dimSumSurprise": return dimSumSurpriseCard
+        case "settings.narrator.enabled": return narratorEnabledSwitch
+        case "settings.narrator.languageMode": return narratorLanguageBox
+        case "settings.narrator.englishVoice": return englishVoiceBox
+        case "settings.narrator.previewEnglish": return englishVoicePreviewButton
+        case "settings.narrator.cantoneseVoice": return cantoneseVoiceBox
+        case "settings.narrator.previewCantonese": return cantoneseVoicePreviewButton
+        case "settings.narrator.volume": return narratorVolumeSlider
+        case "settings.narrator.quietHours": return narratorQuietSwitch
+        case "settings.editor.selected": return editorCombo
+        case "settings.editor.customPath": return customEditorPath
+        case "settings.editor.browse": return editorBrowseButton
+        case "settings.editor.refresh": return editorRefreshButton
+        case "settings.editor.openWorkspace": return editorOpenWorkspaceButton
+        case "settings.history.retention": return retentionChoices.itemAt(0) || historyRetentionLabel
+        case "settings.history.open": return openHistoryCard
+        case "settings.options.open": return fullOptionsCard
+        default: return null
+        }
+    }
+
+    function paletteValue(settingId) {
+        switch (settingId) {
+        case "settings.appearance.colorScheme": return Theme.isDark ? qsTr("Dark") : qsTr("Light")
+        case "settings.appearance.uiStyle":
+            return (ThemeManager.uiStyle >= 0 && ThemeManager.uiStyle < root.styleCards.length)
+                ? root.styleCards[ThemeManager.uiStyle].name : qsTr("Unknown")
+        case "settings.appearance.densityScale": return Number(ThemeManager.densityScale).toFixed(2) + "×"
+        case "settings.appearance.seedColor": return String(ThemeManager.seedColor)
+        case "settings.appearance.uiFontFamily": return ThemeManager.uiFontFamily || qsTr("Default")
+        case "settings.appearance.uiFontScale": return Number(ThemeManager.uiFontScale).toFixed(2) + "×"
+        case "settings.appearance.uiFontWeight": return ThemeManager.uiFontWeight
+        case "settings.appearance.reducedMotion": return ThemeManager.reducedMotion
+        case "settings.narrator.enabled": return NarratorController.enabled
+        case "settings.narrator.languageMode": return [qsTr("English"), qsTr("Cantonese"), qsTr("Both")][NarratorController.languageMode]
+        case "settings.narrator.englishVoice": return NarratorController.englishVoice
+        case "settings.narrator.cantoneseVoice": return NarratorController.cantoneseVoice
+        case "settings.narrator.volume": return Math.round(NarratorController.volume * 100) + "%"
+        case "settings.narrator.quietHours": return NarratorController.quietHours
+        case "settings.editor.selected": return DesktopIntegration.selectedEditor
+        case "settings.editor.customPath": return DesktopIntegration.customEditorPath
+        case "settings.history.retention": return JournalController.retention
+        default: return qsTr("Open control")
+        }
+    }
+
+    function paletteControlValue(settingId) {
+        switch (settingId) {
+        case "settings.appearance.colorScheme": return Theme.isDark ? 1 : 0
+        case "settings.appearance.uiStyle": return ThemeManager.uiStyle
+        case "settings.appearance.densityScale": return ThemeManager.densityScale
+        case "settings.appearance.seedColor": return String(ThemeManager.seedColor)
+        case "settings.appearance.uiFontFamily": return fontFamilyCombo.currentIndex
+        case "settings.appearance.uiFontScale": return ThemeManager.uiFontScale
+        case "settings.appearance.uiFontWeight": return ThemeManager.uiFontWeight
+        case "settings.appearance.reducedMotion": return ThemeManager.reducedMotion
+        case "settings.narrator.enabled": return NarratorController.enabled
+        case "settings.narrator.languageMode": return NarratorController.languageMode
+        case "settings.narrator.englishVoice": return englishVoiceBox.currentIndex
+        case "settings.narrator.cantoneseVoice": return cantoneseVoiceBox.currentIndex
+        case "settings.narrator.volume": return NarratorController.volume
+        case "settings.narrator.quietHours": return NarratorController.quietHours
+        case "settings.editor.selected": return editorCombo.currentIndex
+        case "settings.editor.customPath": return ""
+        case "settings.history.retention": return root.retentionOptions.indexOf(JournalController.retention)
+        default: return undefined
+        }
+    }
+
+    function paletteChoices(settingId) {
+        switch (settingId) {
+        case "settings.appearance.colorScheme":
+            return [qsTr("Light"), qsTr("Dark")]
+        case "settings.appearance.uiStyle":
+            return root.styleCards.map(function(item) { return item.name })
+        case "settings.appearance.uiFontFamily":
+            return ThemeManager.installedFontFamilies()
+        case "settings.narrator.languageMode":
+            return [qsTr("English"), qsTr("Cantonese"), qsTr("Both")]
+        case "settings.narrator.englishVoice":
+            return comboTextChoices(englishVoiceBox)
+        case "settings.narrator.cantoneseVoice":
+            return comboTextChoices(cantoneseVoiceBox)
+        case "settings.editor.selected":
+            return comboTextChoices(editorCombo)
+        case "settings.history.retention":
+            return root.retentionOptions
+        default:
+            return []
+        }
+    }
+
+    function comboTextChoices(combo) {
+        var choices = []
+        if (!combo)
+            return choices
+        for (var index = 0; index < combo.count; ++index)
+            choices.push(combo.textAt(index))
+        return choices
+    }
+
+    function paletteCommands() {
+        var entries = root.paletteEntries()
+        var commands = []
+        for (var index = 0; index < entries.length; ++index) {
+            var entry = entries[index]
+            var target = root.paletteTarget(entry.id)
+            var value = root.paletteValue(entry.id)
+            var inlineToggle = entry.controlKind === "toggle"
+            var controlValue = root.paletteControlValue(entry.id)
+            var inlineControl = entry.sensitive ? "password"
+                : (entry.controlKind || "readonly")
+            commands.push({
+                id: "setting." + entry.id,
+                kind: "setting",
+                settingId: entry.id,
+                settingScope: "quick",
+                title: entry.title,
+                group: qsTr("Quick setting"),
+                destination: qsTr("Settings · %1").arg(entry.section),
+                context: entry.sensitive ? qsTr("Sensitive value hidden")
+                    : (inlineToggle ? (value ? qsTr("Enabled") : qsTr("Disabled"))
+                        : qsTr("Current: %1").arg(String(value).slice(0, 160))),
+                keywords: entry.keywords + (entry.sensitive ? "" : (" " + String(value))),
+                targetId: entry.targetId,
+                inlineControl: inlineControl,
+                inlineEditable: entry.controlKind !== "readonly"
+                    && !entry.sensitive && target && target.enabled !== false,
+                checked: inlineToggle ? !!value : false,
+                value: controlValue,
+                valueText: entry.sensitive ? "" : String(controlValue === undefined ? value : controlValue),
+                choices: entry.controlKind === "select"
+                    ? root.paletteChoices(entry.id) : [],
+                minimum: entry.minimum === undefined ? 0 : entry.minimum,
+                maximum: entry.maximum === undefined ? 100 : entry.maximum,
+                step: entry.step === undefined ? 1 : entry.step,
+                actionLabel: entry.controlKind === "action" ? entry.title : "",
+                sensitive: entry.sensitive === true,
+                enabled: true
+            })
+        }
+        return commands
+    }
+
+    function finishPaletteReveal(settingId) {
+        var target = root.paletteTarget(settingId)
+        if (!target)
+            return false
+        var mappedContent = target.mapToItem(settingsFlickable.contentItem, 0, 0)
+        var margin = Spacing.lg
+        var targetTop = Math.max(0, mappedContent.y - margin)
+        var targetBottom = mappedContent.y + Math.max(target.height, Spacing.controlHeight) + margin
+        if (targetTop < settingsFlickable.contentY)
+            settingsFlickable.contentY = targetTop
+        else if (targetBottom > settingsFlickable.contentY + settingsFlickable.height)
+            settingsFlickable.contentY = Math.min(
+                Math.max(0, settingsFlickable.contentHeight - settingsFlickable.height),
+                targetBottom - settingsFlickable.height)
+
+        var mapped = target.mapToItem(root, 0, 0)
+        root.paletteHighlightX = mapped.x - Spacing.xs
+        root.paletteHighlightY = mapped.y - Spacing.xs
+        root.paletteHighlightWidth = target.width + (2 * Spacing.xs)
+        root.paletteHighlightHeight = Math.max(target.height, Spacing.controlHeight)
+            + (2 * Spacing.xs)
+        root.highlightedPaletteSetting = settingId
+        paletteHighlightTimer.restart()
+        if (target.enabled !== false)
+            target.forceActiveFocus(Qt.ShortcutFocusReason)
+        return true
+    }
+
+    function revealPaletteSetting(settingId) {
+        var entries = root.paletteEntries()
+        for (var index = 0; index < entries.length; ++index) {
+            if (entries[index].id !== settingId)
+                continue
+            root.paletteRevealSection = entries[index].section
+            Qt.callLater(function() { root.finishPaletteReveal(settingId) })
+            return true
+        }
+        Log.warning("ui", "Quick-settings palette target not found: " + settingId)
+        return false
+    }
+
+    function setPaletteSetting(settingId, value) {
+        switch (settingId) {
+        case "settings.appearance.colorScheme":
+            ThemeManager.colorScheme = Number(value) === 1
+                ? ThemeManager.Dark : ThemeManager.Light
+            break
+        case "settings.appearance.uiStyle":
+            ThemeManager.uiStyle = Number(value)
+            break
+        case "settings.appearance.densityScale":
+            ThemeManager.densityScale = Number(value)
+            break
+        case "settings.appearance.seedColor":
+        case "settings.appearance.seedColorPicker":
+            seedColorPickerButton.clicked()
+            return true
+        case "settings.appearance.uiFontFamily": {
+            var families = ThemeManager.installedFontFamilies()
+            if (Number(value) >= 0 && Number(value) < families.length)
+                ThemeManager.uiFontFamily = families[Number(value)]
+            break
+        }
+        case "settings.appearance.uiFontScale":
+            ThemeManager.uiFontScale = Number(value)
+            break
+        case "settings.appearance.uiFontWeight":
+            ThemeManager.uiFontWeight = Number(value)
+            break
+        case "settings.appearance.reducedMotion":
+            ThemeManager.reducedMotion = !!value
+            break
+        case "settings.appearance.reset":
+            appearanceResetButton.clicked()
+            break
+        case "settings.narrator.enabled":
+            NarratorController.enabled = !!value
+            break
+        case "settings.narrator.languageMode":
+            NarratorController.languageMode = Number(value)
+            break
+        case "settings.narrator.englishVoice":
+            if (Number(value) >= 0 && Number(value) < englishVoiceBox.count)
+                NarratorController.englishVoice = englishVoiceBox.valueAt(Number(value))
+            break
+        case "settings.narrator.previewEnglish":
+            englishVoicePreviewButton.clicked()
+            break
+        case "settings.narrator.cantoneseVoice":
+            if (Number(value) >= 0 && Number(value) < cantoneseVoiceBox.count)
+                NarratorController.cantoneseVoice = cantoneseVoiceBox.valueAt(Number(value))
+            break
+        case "settings.narrator.previewCantonese":
+            cantoneseVoicePreviewButton.clicked()
+            break
+        case "settings.narrator.volume":
+            NarratorController.volume = Number(value)
+            break
+        case "settings.narrator.quietHours":
+            NarratorController.quietHours = !!value
+            break
+        case "settings.editor.selected":
+            if (Number(value) >= 0 && Number(value) < DesktopIntegration.availableEditors.length)
+                DesktopIntegration.selectedEditor = DesktopIntegration.availableEditors[Number(value)].id
+            break
+        case "settings.editor.browse":
+            editorBrowseButton.clicked()
+            return true
+        case "settings.editor.refresh":
+            editorRefreshButton.clicked()
+            break
+        case "settings.editor.openWorkspace":
+            editorOpenWorkspaceButton.clicked()
+            break
+        case "settings.history.retention":
+            if (Number(value) >= 0 && Number(value) < root.retentionOptions.length)
+                JournalController.retention = root.retentionOptions[Number(value)]
+            break
+        case "settings.history.open":
+            root.openHistoryRequested()
+            return true
+        case "settings.options.open":
+            root.openFullOptionsRequested()
+            return true
+        case "settings.startup.dimSumSurprise":
+        case "settings.editor.customPath":
+            return root.revealPaletteSetting(settingId)
+        default:
+            return root.revealPaletteSetting(settingId)
+        }
+        return root.revealPaletteSetting(settingId)
+    }
 
     function settingsMatch(text) {
         var query = settingsSearch.text
@@ -49,6 +378,90 @@ Sheet {
             if (DesktopIntegration.availableEditors[i].id === DesktopIntegration.selectedEditor)
                 return i
         return -1
+    }
+
+    function applySeedColor(value) {
+        seedColorPreviewDebounce.stop()
+        if (!ThemeManager.isValidColor(String(value))) {
+            seedColorField.userEdited = true
+            seedColorField.forceActiveFocus(Qt.ShortcutFocusReason)
+            return false
+        }
+        ThemeManager.seedColor = value
+        seedColorField.text = String(ThemeManager.seedColor)
+        seedColorField.userEdited = false
+        return true
+    }
+
+    function previewSeedColor(value) {
+        if (!ThemeManager.isValidColor(String(value)))
+            return false
+        ThemeManager.seedColor = value
+        return true
+    }
+
+    function queueSeedColorPreview(value) {
+        pendingSeedColor = value
+        seedColorPreviewDebounce.restart()
+    }
+
+    function syncSeedColorField() {
+        if (!seedColorField.userEdited)
+            seedColorField.text = String(ThemeManager.seedColor)
+    }
+
+    Connections {
+        target: ThemeManager
+        function onAppearanceChanged() { root.syncSeedColorField() }
+        function onThemeChanged() { root.syncSeedColorField() }
+    }
+
+    Timer {
+        id: seedColorPreviewDebounce
+        interval: 160
+        repeat: false
+        onTriggered: root.previewSeedColor(root.pendingSeedColor)
+    }
+
+    Timer {
+        id: paletteHighlightTimer
+        interval: 1800
+        repeat: false
+        onTriggered: root.highlightedPaletteSetting = ""
+    }
+
+    Rectangle {
+        x: root.paletteHighlightX
+        y: root.paletteHighlightY
+        width: root.paletteHighlightWidth
+        height: root.paletteHighlightHeight
+        z: 1000
+        visible: root.highlightedPaletteSetting.length > 0
+        color: "transparent"
+        border.width: Math.max(2, Spacing.outlineWidth)
+        border.color: Theme.color("primary")
+        radius: Spacing.radiusControl
+        opacity: visible ? 1 : 0
+        Accessible.ignored: true
+
+        Behavior on opacity {
+            enabled: !ThemeManager.reducedMotion
+            NumberAnimation { duration: Spacing.motionMedium }
+        }
+    }
+
+    AdvancedColorPicker {
+        id: seedColorPicker
+        objectName: "advancedSeedColorPicker"
+        title: qsTr("Material seed color studio")
+        forceOpaque: true
+        onColorPreviewed: (value) => root.queueSeedColorPreview(value)
+        onColorAccepted: (value) => root.applySeedColor(value)
+        onColorCanceled: (originalValue) => {
+            seedColorPreviewDebounce.stop()
+            ThemeManager.seedColor = originalValue
+            root.syncSeedColorField()
+        }
     }
 
     ColumnLayout {
@@ -97,6 +510,7 @@ Sheet {
         }
 
         Flickable {
+            id: settingsFlickable
             Layout.fillWidth: true
             Layout.fillHeight: true
             contentHeight: settingsColumn.implicitHeight
@@ -117,7 +531,8 @@ Sheet {
                     Layout.rightMargin: 20
                     Layout.topMargin: 8
                     spacing: 10
-                    visible: root.settingsMatch(qsTr("Appearance theme light dark UI style density accent seed color font family size weight reduced motion reset"))
+                    visible: root.paletteRevealSection === "appearance"
+                        || root.settingsMatch(qsTr("Appearance theme light dark UI style density accent seed color font family size weight reduced motion reset"))
 
                     Text {
                         text: qsTr("APPEARANCE")
@@ -138,6 +553,8 @@ Sheet {
                         }
                         Item { Layout.fillWidth: true }
                         Rectangle {
+                            id: themeSegmentContainer
+                            objectName: "settingsThemeSegments"
                             Layout.preferredHeight: 36
                             width: themeRow.implicitWidth + 6
                             radius: 18
@@ -195,6 +612,8 @@ Sheet {
                     }
 
                     Text {
+                        id: uiStyleLabel
+                        objectName: "settingsUiStyleChoices"
                         text: qsTr("UI style")
                         font.family: Typography.family
                         font.pixelSize: 14
@@ -202,9 +621,11 @@ Sheet {
                     }
 
                     Repeater {
+                        id: uiStyleChoices
                         model: root.styleCards
                         delegate: Rectangle {
                             id: styleCard
+                            objectName: "settingsUiStyleChoice." + modelData.style
                             required property var modelData
                             readonly property bool active: Theme.uiStyle === modelData.style
                             focus: true
@@ -298,6 +719,8 @@ Sheet {
                         Layout.fillWidth: true
                         Label { text: qsTr("Density"); color: Theme.color("onSurface") }
                         Slider {
+                            id: densitySlider
+                            objectName: "settingsDensity"
                             Layout.fillWidth: true
                             from: 0.8; to: 1.35; stepSize: 0.05
                             value: ThemeManager.densityScale
@@ -307,22 +730,95 @@ Sheet {
                         Label { text: Number(ThemeManager.densityScale).toFixed(2) + "×"; font.family: Typography.monoFamily }
                     }
 
-                    RowLayout {
+                    ColumnLayout {
                         Layout.fillWidth: true
-                        Label { text: qsTr("Accent / seed color"); color: Theme.color("onSurface") }
-                        TextField {
-                            id: seedColorField
+                        spacing: Spacing.xs
+                        Label {
                             Layout.fillWidth: true
-                            text: ThemeManager.seedColor
-                            placeholderText: "#6750A4"
-                            maximumLength: 32
-                            Accessible.name: qsTr("Material seed color")
+                            text: qsTr("Accent / seed color")
+                            color: Theme.color("onSurface")
+                            wrapMode: Text.WordWrap
                         }
-                        Button {
-                            text: qsTr("Apply")
-                            enabled: seedColorField.text.length > 0
-                            onClicked: ThemeManager.seedColor = seedColorField.text
+                        GridLayout {
+                            id: seedColorLayout
+                            Layout.fillWidth: true
+                            columns: width >= 300 ? 3 : 1
+                            columnSpacing: Spacing.sm
+                            rowSpacing: Spacing.xs
+
+                            TextField {
+                                id: seedColorField
+                                objectName: "settingsSeedColorField"
+                                property bool userEdited: false
+                                readonly property bool validColor: ThemeManager.isValidColor(text)
+                                Layout.fillWidth: true
+                                text: ThemeManager.seedColor
+                                maximumLength: 32
+                                Accessible.name: qsTr("Material seed color")
+                                Accessible.description: validColor
+                                    ? qsTr("Valid color")
+                                    : qsTr("Enter a valid named color or HEX value")
+                                onTextEdited: {
+                                    userEdited = true
+                                    seedColorPreviewDebounce.stop()
+                                    if (validColor)
+                                        root.queueSeedColorPreview(text)
+                                }
+                                onAccepted: root.applySeedColor(text)
+                            }
+                            Button {
+                                id: seedColorPickerButton
+                                objectName: "settingsSeedColorPickerButton"
+                                Layout.preferredWidth: 42
+                                Layout.preferredHeight: 40
+                                Layout.fillWidth: seedColorLayout.columns === 1
+                                padding: 8
+                                Accessible.name: qsTr("Open Material seed color picker")
+                                Accessible.description: qsTr("Current color %1").arg(String(ThemeManager.seedColor))
+                                ToolTip.visible: hovered
+                                ToolTip.text: qsTr("Choose color")
+                                ToolTip.delay: 500
+                                onClicked: {
+                                    seedColorPreviewDebounce.stop()
+                                    if (seedColorField.validColor)
+                                        root.previewSeedColor(seedColorField.text)
+                                    seedColorPicker.openFor(seedColorPickerButton,
+                                        ThemeManager.seedColor, Theme.color("surface"))
+                                }
+                                contentItem: Item { }
+                                background: Rectangle {
+                                    radius: 12
+                                    color: ThemeManager.seedColor
+                                    border.width: seedColorPickerButton.visualFocus ? 3 : 1
+                                    border.color: seedColorPickerButton.visualFocus
+                                        ? Theme.color("onSurface") : Theme.color("outline")
+                                }
+                            }
+                            Button {
+                                Layout.fillWidth: seedColorLayout.columns === 1
+                                text: qsTr("Apply")
+                                enabled: seedColorField.validColor
+                                onClicked: root.applySeedColor(seedColorField.text)
+                            }
                         }
+                        Label {
+                            Layout.fillWidth: true
+                            text: qsTr("Type a named color or HEX value. Valid input previews after a short pause; Material seed colors are applied as opaque.")
+                            color: Theme.color("onSurfaceVariant")
+                            font: Typography.bodySmall
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        visible: seedColorField.userEdited && !seedColorField.validColor
+                        text: qsTr("Enter a valid named color or HEX value (for example #6750A4).")
+                        color: Theme.color("error")
+                        font: Typography.bodySmall
+                        wrapMode: Text.WordWrap
+                        Accessible.role: Accessible.AlertMessage
+                        Accessible.name: text
                     }
 
                     ColumnLayout {
@@ -331,6 +827,7 @@ Sheet {
                         Label { text: qsTr("UI font family"); color: Theme.color("onSurface") }
                         ComboBox {
                             id: fontFamilyCombo
+                            objectName: "settingsFontFamily"
                             Layout.fillWidth: true
                             model: ThemeManager.installedFontFamilies()
                             editable: true
@@ -353,6 +850,8 @@ Sheet {
                         Layout.fillWidth: true
                         Label { text: qsTr("Font scale"); color: Theme.color("onSurface") }
                         Slider {
+                            id: fontScaleSlider
+                            objectName: "settingsFontScale"
                             Layout.fillWidth: true
                             from: 0.8; to: 1.6; stepSize: 0.05
                             value: ThemeManager.uiFontScale
@@ -367,6 +866,8 @@ Sheet {
                         Label { text: qsTr("Font weight"); color: Theme.color("onSurface") }
                         Item { Layout.fillWidth: true }
                         SpinBox {
+                            id: fontWeightSpin
+                            objectName: "settingsFontWeight"
                             from: 100; to: 900; stepSize: 50
                             value: ThemeManager.uiFontWeight
                             editable: true
@@ -383,6 +884,8 @@ Sheet {
                             color: Theme.color("onSurface")
                         }
                         Switch {
+                            id: reducedMotionSwitch
+                            objectName: "settingsReducedMotion"
                             checked: ThemeManager.reducedMotion
                             Accessible.name: qsTr("Reduce interface motion")
                             onToggled: ThemeManager.reducedMotion = checked
@@ -390,20 +893,29 @@ Sheet {
                     }
 
                     Button {
+                        id: appearanceResetButton
+                        objectName: "settingsAppearanceReset"
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("Reset global appearance")
                         flat: true
-                        onClicked: ThemeManager.resetAppearance()
+                        onClicked: {
+                            ThemeManager.resetAppearance()
+                            seedColorField.text = String(ThemeManager.seedColor)
+                            seedColorField.userEdited = false
+                        }
                     }
                 }
 
                 // --- Startup delight ----------------------------------------
                 ColumnLayout {
+                    id: dimSumSurpriseCard
+                    objectName: "settingsDimSumSurprise"
                     Layout.fillWidth: true
                     Layout.leftMargin: 20
                     Layout.rightMargin: 20
                     spacing: 8
-                    visible: root.settingsMatch(qsTr("Dim sum startup surprise 10% local picture quiet reduced motion"))
+                    visible: root.paletteRevealSection === "startup"
+                        || root.settingsMatch(qsTr("Dim sum startup surprise 10% public catalog cached photo offline unavailable cannot disable"))
 
                     Text {
                         text: qsTr("STARTUP DELIGHT")
@@ -419,7 +931,7 @@ Sheet {
                         Label { text: qsTr("10% dim sum surprise"); color: Theme.color("onSurface") }
                         Label {
                             Layout.fillWidth: true
-                            text: qsTr("Uses one fresh launch draw and bundled local images. It never appears on first run or while a blocking flow is active, and it cannot be disabled.")
+                            text: qsTr("Uses a fresh 10% launch draw from verified public catalog-v1 photos cached in app data. It never waits for the network; when no verified cached photo is available, the surprise is omitted. It cannot be disabled.")
                             font: Typography.bodySmall
                             color: Theme.color("onSurfaceVariant")
                             wrapMode: Text.WordWrap
@@ -433,7 +945,8 @@ Sheet {
                     Layout.leftMargin: 20
                     Layout.rightMargin: 20
                     spacing: 8
-                    visible: root.settingsMatch(qsTr("Narrator speech voice spoken text to speech English Cantonese Hong Kong volume quiet edge tts"))
+                    visible: root.paletteRevealSection === "narrator"
+                        || root.settingsMatch(qsTr("Narrator speech voice spoken text to speech English Cantonese Hong Kong volume quiet edge tts"))
 
                     Text {
                         text: qsTr("SPOKEN NARRATOR")
@@ -445,6 +958,8 @@ Sheet {
                     }
 
                     Switch {
+                        id: narratorEnabledSwitch
+                        objectName: "settingsNarratorEnabled"
                         text: qsTr("Speak app events aloud")
                         checked: NarratorController.enabled
                         onToggled: NarratorController.enabled = checked
@@ -480,6 +995,8 @@ Sheet {
                             label: qsTr("Speak in:")
                             Layout.fillWidth: true
                             ComboBox {
+                                id: narratorLanguageBox
+                                objectName: "settingsNarratorLanguage"
                                 Layout.fillWidth: true
                                 model: [qsTr("English"), qsTr("Cantonese"), qsTr("Both")]
                                 currentIndex: NarratorController.languageMode
@@ -496,6 +1013,7 @@ Sheet {
                                 spacing: 8
                                 ComboBox {
                                     id: englishVoiceBox
+                                    objectName: "settingsEnglishVoice"
                                     Layout.fillWidth: true
                                     textRole: "name"
                                     valueRole: "id"
@@ -504,6 +1022,8 @@ Sheet {
                                     onActivated: NarratorController.englishVoice = currentValue
                                 }
                                 Button {
+                                    id: englishVoicePreviewButton
+                                    objectName: "settingsEnglishVoicePreview"
                                     text: qsTr("Preview")
                                     flat: true
                                     onClicked: NarratorController.previewVoice(
@@ -521,6 +1041,7 @@ Sheet {
                                 spacing: 8
                                 ComboBox {
                                     id: cantoneseVoiceBox
+                                    objectName: "settingsCantoneseVoice"
                                     Layout.fillWidth: true
                                     textRole: "name"
                                     valueRole: "id"
@@ -529,6 +1050,8 @@ Sheet {
                                     onActivated: NarratorController.cantoneseVoice = currentValue
                                 }
                                 Button {
+                                    id: cantoneseVoicePreviewButton
+                                    objectName: "settingsCantoneseVoicePreview"
                                     text: qsTr("Preview")
                                     flat: true
                                     onClicked: NarratorController.previewVoice(
@@ -541,6 +1064,8 @@ Sheet {
                             label: qsTr("Volume:")
                             Layout.fillWidth: true
                             Slider {
+                                id: narratorVolumeSlider
+                                objectName: "settingsNarratorVolume"
                                 Layout.fillWidth: true
                                 from: 0
                                 to: 1
@@ -551,6 +1076,8 @@ Sheet {
                         }
 
                         Switch {
+                            id: narratorQuietSwitch
+                            objectName: "settingsNarratorQuiet"
                             text: qsTr("Quiet — keep the settings but stay silent")
                             checked: NarratorController.quietHours
                             onToggled: NarratorController.quietHours = checked
@@ -572,7 +1099,8 @@ Sheet {
                     Layout.leftMargin: 20
                     Layout.rightMargin: 20
                     spacing: 8
-                    visible: root.settingsMatch(qsTr("External editor Visual Studio Code VSCodium Cursor Sublime Notepad custom project folder"))
+                    visible: root.paletteRevealSection === "editor"
+                        || root.settingsMatch(qsTr("External editor Visual Studio Code VSCodium Cursor Sublime Notepad custom project folder"))
 
                     Text {
                         text: qsTr("EXTERNAL EDITOR")
@@ -584,6 +1112,7 @@ Sheet {
                     }
                     ComboBox {
                         id: editorCombo
+                        objectName: "settingsExternalEditor"
                         Layout.fillWidth: true
                         model: DesktopIntegration.availableEditors
                         textRole: "name"
@@ -596,23 +1125,33 @@ Sheet {
                         Layout.fillWidth: true
                         TextField {
                             id: customEditorPath
+                            objectName: "settingsCustomEditorPath"
                             Layout.fillWidth: true
                             text: DesktopIntegration.customEditorPath
                             placeholderText: qsTr("Custom editor executable")
                             Accessible.name: placeholderText
                             onEditingFinished: DesktopIntegration.customEditorPath = text
                         }
-                        Button { text: qsTr("Browse…"); onClicked: editorFileDialog.open() }
+                        Button {
+                            id: editorBrowseButton
+                            objectName: "settingsEditorBrowse"
+                            text: qsTr("Browse…")
+                            onClicked: editorFileDialog.open()
+                        }
                     }
                     RowLayout {
                         Layout.fillWidth: true
                         Button {
+                            id: editorRefreshButton
+                            objectName: "settingsEditorRefresh"
                             text: qsTr("Refresh detected editors")
                             flat: true
                             onClicked: DesktopIntegration.refreshEditors()
                         }
                         Item { Layout.fillWidth: true }
                         Button {
+                            id: editorOpenWorkspaceButton
+                            objectName: "settingsEditorOpenWorkspace"
                             text: qsTr("Open workspace")
                             enabled: DesktopIntegration.externalEditorAvailable
                                 && WorkspaceManager.repositoryPath.length > 0
@@ -635,7 +1174,8 @@ Sheet {
                     Layout.leftMargin: 20
                     Layout.rightMargin: 20
                     spacing: 8
-                    visible: root.settingsMatch(qsTr("History retention commits open history manager 30 days 1 year forever"))
+                    visible: root.paletteRevealSection === "history"
+                        || root.settingsMatch(qsTr("History retention commits open history manager 30 days 1 year forever"))
 
                     Text {
                         text: qsTr("HISTORY")
@@ -649,6 +1189,8 @@ Sheet {
                     RowLayout {
                         Layout.fillWidth: true
                         Text {
+                            id: historyRetentionLabel
+                            objectName: "settingsHistoryRetention"
                             text: qsTr("Retention")
                             font.family: Typography.family
                             font.pixelSize: 14
@@ -658,8 +1200,10 @@ Sheet {
                         Row {
                             spacing: 6
                             Repeater {
+                                id: retentionChoices
                                 model: root.retentionOptions
                                 delegate: Rectangle {
+                                    objectName: "settingsHistoryRetentionChoice." + index
                                     required property string modelData
                                     readonly property bool active: JournalController.retention === modelData
                                     focus: true
@@ -693,6 +1237,8 @@ Sheet {
                     }
 
                     Rectangle {
+                        id: openHistoryCard
+                        objectName: "settingsOpenHistory"
                         Layout.fillWidth: true
                         Layout.preferredHeight: 44
                         radius: 12
@@ -746,9 +1292,12 @@ Sheet {
                     Layout.rightMargin: 20
                     Layout.bottomMargin: 20
                     spacing: 8
-                    visible: root.settingsMatch(qsTr("All qBittorrent options advanced full settings"))
+                    visible: root.paletteRevealSection === "options"
+                        || root.settingsMatch(qsTr("All qBittorrent options advanced full settings"))
 
                     Rectangle {
+                        id: fullOptionsCard
+                        objectName: "settingsOpenFullOptions"
                         Layout.fillWidth: true
                         Layout.preferredHeight: 44
                         radius: 12
@@ -795,5 +1344,12 @@ Sheet {
         fileMode: Platform.FileDialog.OpenFile
         nameFilters: [qsTr("Applications (*.exe)"), qsTr("All files (*)")]
         onAccepted: DesktopIntegration.customEditorPath = file
+    }
+
+    onVisibleChanged: {
+        if (!visible) {
+            paletteRevealSection = ""
+            highlightedPaletteSetting = ""
+        }
     }
 }

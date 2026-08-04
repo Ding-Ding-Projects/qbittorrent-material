@@ -317,6 +317,18 @@ Item {
         return selectedRows.indexOf(row) >= 0
     }
 
+    /*! Select, scroll to, and focus one row for deep-link navigation. */
+    function revealRow(row) {
+        if (row < 0 || !model || row >= bodyView.count)
+            return false
+        currentRow = row
+        selectedRows = [row]
+        bodyView.positionViewAtIndex(row, ListView.Contain)
+        bodyView.forceActiveFocus(Qt.ShortcutFocusReason)
+        selectionChanged()
+        return true
+    }
+
     // ---- Visuals -----------------------------------------------------------
 
     ColumnHeaderMenu {

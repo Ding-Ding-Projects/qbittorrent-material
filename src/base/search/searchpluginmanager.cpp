@@ -20,15 +20,24 @@
 
 #include "searchpluginmanager.h"
 
+#include <algorithm>
 #include <memory>
+#include <utility>
 
+#include <QCryptographicHash>
 #include <QDir>
 #include <QDirIterator>
 #include <QDomDocument>
 #include <QDomElement>
 #include <QDomNode>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
 #include <QProcess>
+#include <QRegularExpression>
+#include <QSaveFile>
 #include <QSet>
 #include <QTimer>
 #include <QUrl>
@@ -42,11 +51,134 @@
 #include "base/utils/bytearray.h"
 #include "base/utils/foreignapps.h"
 #include "base/utils/fs.h"
+#include "base/utils/io.h"
 #include "searchdownloadhandler.h"
 #include "searchhandler.h"
 
 namespace
 {
+    constexpr qint64 MAX_UNOFFICIAL_PLUGIN_BYTES = 512 * 1024;
+    constexpr qint64 MAX_UNOFFICIAL_MANIFEST_BYTES = 512 * 1024;
+    constexpr qint64 MAX_PLUGIN_VERSION_INFO_BYTES = 512 * 1024;
+    constexpr qint64 MAX_CATALOG_LEDGER_BYTES = 1024 * 1024;
+    constexpr int CATALOG_LEDGER_SCHEMA = 1;
+    constexpr qsizetype MAX_CAPABILITY_STDOUT_BYTES = 2 * 1024 * 1024;
+    constexpr qsizetype MAX_CAPABILITY_STDERR_BYTES = 512 * 1024;
+    const QString UNOFFICIAL_MANIFEST_PATH = u":/searchengine/unofficial-plugins.json"_s;
+
+    bool isSafeCatalogID(const QString &id)
+    {
+        static const QRegularExpression pattern {u"^[A-Za-z][A-Za-z0-9_]*$"_s};
+        return pattern.match(id).hasMatch();
+    }
+
+    bool isSha256(const QByteArray &hash)
+    {
+        static const QRegularExpression pattern {u"^[0-9a-f]{64}$"_s};
+        return pattern.match(QString::fromLatin1(hash)).hasMatch();
+    }
+
+    bool isGitRevision(const QString &revision)
+    {
+        static const QRegularExpression pattern {u"^[0-9a-f]{40}$"_s};
+        return pattern.match(revision).hasMatch();
+    }
+
+    QProcessEnvironment minimalPythonEnvironment()
+    {
+        const QProcessEnvironment ambient = QProcessEnvironment::systemEnvironment();
+        QProcessEnvironment result;
+        // Python is launched by absolute path. Keep only operating-system,
+        // locale, temporary-directory and executable-discovery values which
+        // the interpreter/runtime may require. In particular, cloud tokens,
+        // developer credentials and arbitrary application variables never
+        // cross into third-party plugin code.
+        const QStringList allowed
+        {
+            u"SystemRoot"_s, u"WINDIR"_s, u"COMSPEC"_s, u"PATHEXT"_s,
+            u"PATH"_s, u"TEMP"_s, u"TMP"_s, u"TMPDIR"_s,
+            u"LANG"_s, u"LANGUAGE"_s, u"LC_ALL"_s, u"LC_CTYPE"_s,
+            u"TZ"_s, u"SSL_CERT_FILE"_s, u"SSL_CERT_DIR"_s
+        };
+        for (const QString &name : allowed)
+        {
+            if (ambient.contains(name))
+                result.insert(name, ambient.value(name));
+        }
+        return result;
+    }
+
+    bool atomicCopyFile(const Path &source, const Path &destination, QString *error = nullptr)
+    {
+        QFile input {source.data()};
+        if (!input.open(QIODevice::ReadOnly))
+        {
+            if (error)
+                *error = input.errorString();
+            return false;
+        }
+
+        if (const Path parent = destination.parentPath(); !parent.isEmpty())
+            Utils::Fs::mkpath(parent);
+        QSaveFile output {destination.data()};
+        if (!output.open(QIODevice::WriteOnly))
+        {
+            if (error)
+                *error = output.errorString();
+            return false;
+        }
+
+        while (!input.atEnd())
+        {
+            const QByteArray chunk = input.read(64 * 1024);
+            if (chunk.isEmpty() && (input.error() != QFileDevice::NoError))
+            {
+                if (error)
+                    *error = input.errorString();
+                output.cancelWriting();
+                return false;
+            }
+            if (output.write(chunk) != chunk.size())
+            {
+                if (error)
+                    *error = output.errorString();
+                output.cancelWriting();
+                return false;
+            }
+        }
+
+        if (!output.commit())
+        {
+            if (error)
+                *error = output.errorString();
+            return false;
+        }
+        return true;
+    }
+
+    QString canonicalCatalogID(const QString &rawID, const QSet<QString> &allIDs)
+    {
+        static const QRegularExpression variantSuffix {u"_([2-9][0-9]*)$"_s};
+        const QRegularExpressionMatch match = variantSuffix.match(rawID);
+        if (!match.hasMatch())
+            return rawID;
+
+        const QString base = rawID.first(match.capturedStart());
+        return allIDs.contains(base) ? base : rawID;
+    }
+
+    QByteArray fileSha256(const Path &path)
+    {
+        QFile file {path.data()};
+        if (!file.open(QIODevice::ReadOnly))
+            return {};
+
+        QCryptographicHash hash {QCryptographicHash::Sha256};
+        if (!hash.addData(&file))
+            return {};
+        return hash.result().toHex();
+    }
+
     /// Remove Python bytecode cache artifacts (`__pycache__` folders and `*.pyc`
     /// files) under @p path so a freshly installed/updated plugin is picked up
     /// instead of a stale compiled copy.
@@ -81,7 +213,7 @@ QPointer<SearchPluginManager> SearchPluginManager::m_instance = nullptr;
 
 SearchPluginManager::SearchPluginManager()
     : m_updateUrl(u"https://raw.githubusercontent.com/qbittorrent/search-plugins/refs/heads/master/nova3/engines/"_s)
-    , m_proxyEnv {QProcessEnvironment::systemEnvironment()}
+    , m_proxyEnv {minimalPythonEnvironment()}
 {
     Q_ASSERT(!m_instance); // only one instance is allowed
     m_instance = this;
@@ -96,17 +228,18 @@ SearchPluginManager::SearchPluginManager()
 
     updateNova();
     seedBundledPlugins();
+    loadCatalogLedger();
 
-    // Defer the capabilities probe off the construction path. update() spawns
-    // Python and blocks on waitForFinished(); measured at ~175 ms here. Search
-    // is enabled by default in this fork, so doing that inline would stall every
-    // startup on the GUI thread. Deferring also means the signals it emits
-    // (pluginInstalled, runtimeErrorChanged) reach SearchController, which
-    // connects to them after this constructor returns — inline, they were
-    // emitted before anything was listening.
-    QTimer::singleShot(0, this, [this] { update(); });
+    // Defer the capability probe until SearchController has connected, then run
+    // Python in a separate process and consume it through asynchronous signals.
+    // Parsing/reconciliation stays on the manager thread after the child exits;
+    // a slow interpreter can never freeze startup.
+    QTimer::singleShot(0, this, [this]
+    {
+        update(true, [this] { startUnofficialCatalogSync(); });
+    });
 
-    qCInfo(lcSearch) << "Search plugin manager ready; capabilities probe queued";
+    qCInfo(lcSearch) << "Search plugin manager ready; capabilities probe and verified catalog sync queued";
 }
 
 SearchPluginManager::~SearchPluginManager()
@@ -133,8 +266,148 @@ QStringList SearchPluginManager::allPlugins() const
     return m_plugins.keys();
 }
 
+QVariantList SearchPluginManager::palettePluginCatalog() const
+{
+    // Start from the two trusted default inventories, then retain custom
+    // runtime plugins as well. m_catalogEntries is replaced only after the
+    // complete embedded manifest passes validation; this getter deliberately
+    // never reparses JSON or treats an on-disk Python file as catalog metadata.
+    QStringList ids = m_catalogCanonicalIDs;
+    ids.append(m_bundledPluginIDs);
+    ids.append(m_plugins.keys());
+    ids.removeDuplicates();
+
+    const auto displayName = [this](const QString &id)
+    {
+        const SearchPluginInfo *info = m_plugins.value(id, nullptr);
+        return (info && !info->fullName.isEmpty()) ? info->fullName : id;
+    };
+    std::sort(ids.begin(), ids.end(), [&displayName](const QString &left, const QString &right)
+    {
+        return QString::localeAwareCompare(displayName(left), displayName(right)) < 0;
+    });
+
+    const QStringList seeded = Preferences::instance()->getSeededSearchPlugins();
+    QVariantList result;
+    result.reserve(ids.size());
+    for (const QString &id : std::as_const(ids))
+    {
+        const auto catalogIt = m_catalogEntries.constFind(id);
+        const bool catalogDefault = catalogIt != m_catalogEntries.cend();
+        const bool bundledDefault = m_bundledPluginIDs.contains(id);
+        const bool defaultPlugin = catalogDefault || bundledDefault;
+        const Path activePath = pluginPath(id);
+        const bool activeOnDisk = activePath.exists();
+        const auto ledgerIt = m_catalogLedger.constFind(id);
+        const bool hasLedger = ledgerIt != m_catalogLedger.cend();
+        const CatalogLedgerEntry ledger = hasLedger ? ledgerIt.value() : CatalogLedgerEntry {};
+        const Path candidatePath = (hasLedger && isSha256(ledger.expectedHash))
+            ? catalogQuarantinePath(id, ledger.expectedHash) : Path {};
+        const bool candidateOnDisk = !candidatePath.isEmpty() && candidatePath.exists()
+            && (fileSha256(candidatePath) == ledger.observedHash)
+            && (ledger.observedHash == ledger.expectedHash);
+        const bool installedOnDisk = activeOnDisk || candidateOnDisk;
+        const QByteArray activeHash = activeOnDisk ? fileSha256(activePath) : QByteArray {};
+        const SearchPluginInfo *info = m_plugins.value(id, nullptr);
+        const bool registered = (info != nullptr) && runtimeReady();
+        const bool runtimeWaiting = activeOnDisk && !runtimeReady();
+        const bool userRemoved = (hasLedger && ledger.userRemoved)
+            || (defaultPlugin && seeded.contains(id) && !installedOnDisk);
+
+        SearchPluginVersion version;
+        if (info)
+            version = info->version;
+        else if (activeOnDisk)
+            version = getPluginVersion(activePath);
+        else if (candidateOnDisk)
+            version = getPluginVersion(candidatePath);
+        else if (bundledDefault)
+        {
+            const Path bundledPath = Path(u":/searchengine/nova3/engines"_s) / Path(id + u".py"_s);
+            version = getPluginVersion(bundledPath);
+        }
+
+        QString url;
+        if (info && !info->url.isEmpty())
+            url = info->url;
+        QString catalogSourceUrl = hasLedger ? ledger.sourceUrl : QString {};
+        if (catalogSourceUrl.isEmpty() && catalogDefault && !catalogIt.value().sources.isEmpty())
+            catalogSourceUrl = catalogIt.value().sources.constFirst().url;
+
+        QString integrityState = ledger.integrityState;
+        if (integrityState.isEmpty())
+        {
+            if (catalogDefault && activeOnDisk)
+            {
+                const bool current = std::ranges::any_of(catalogIt.value().sources,
+                    [&activeHash](const CatalogSource &source) { return source.sha256 == activeHash; });
+                integrityState = current ? u"verified-external"_s : u"user-modified"_s;
+            }
+            else if (activeOnDisk)
+                integrityState = u"user-managed"_s;
+            else
+                integrityState = userRemoved ? u"user-removed"_s : u"missing"_s;
+        }
+
+        QString runtimeState = ledger.runtimeState;
+        if (runtimeWaiting)
+            runtimeState = m_registrationStale ? u"stale-registration"_s : u"waiting-python"_s;
+        else if (registered)
+            runtimeState = u"ready"_s;
+        else if (candidateOnDisk && runtimeState.isEmpty())
+            runtimeState = u"quarantined"_s;
+        else if (activeOnDisk && runtimeState.isEmpty())
+            runtimeState = u"import-failed"_s;
+        else if (runtimeState.isEmpty())
+            runtimeState = userRemoved ? u"user-removed"_s : u"not-installed"_s;
+
+        const bool catalogOwned = hasLedger && ledger.catalogOwned && activeOnDisk
+            && isSha256(ledger.activeHash) && (activeHash == ledger.activeHash);
+        const bool trusted = bundledDefault || (!catalogDefault && activeOnDisk)
+            || (catalogDefault && activeOnDisk && !catalogOwned)
+            || (catalogOwned && ledger.trusted);
+        const bool canTrust = catalogDefault && candidateOnDisk && !userRemoved
+            && (ledger.runtimeState != u"validating")
+            && (!activeOnDisk || (catalogOwned && ledger.trusted))
+            && (!ledger.trusted || (ledger.activeHash != ledger.expectedHash));
+        QString diagnostic = ledger.diagnostic;
+        if (diagnostic.isEmpty() && runtimeWaiting)
+            diagnostic = m_runtimeError;
+
+        QVariantMap item;
+        item.insert(u"id"_s, id);
+        item.insert(u"label"_s, displayName(id));
+        item.insert(u"installedOnDisk"_s, installedOnDisk);
+        item.insert(u"registered"_s, registered);
+        // QML receives a stable bool, but must consult `registered` before
+        // presenting it as a live setting or attempting to toggle the plugin.
+        item.insert(u"enabled"_s, registered && info->enabled);
+        item.insert(u"version"_s, version.isValid() ? version.toString() : QString {});
+        item.insert(u"url"_s, url);
+        item.insert(u"catalogSourceUrl"_s, catalogSourceUrl);
+        item.insert(u"runtimeWaiting"_s, runtimeWaiting);
+        item.insert(u"integrityState"_s, integrityState);
+        item.insert(u"runtimeState"_s, runtimeState);
+        item.insert(u"catalogOwned"_s, catalogOwned);
+        item.insert(u"trusted"_s, trusted);
+        item.insert(u"diagnostic"_s, diagnostic);
+        item.insert(u"canTrust"_s, canTrust);
+        item.insert(u"canRetry"_s, !m_catalogSyncInProgress && defaultPlugin && !userRemoved
+            && (runtimeWaiting || !installedOnDisk || (!registered && !canTrust)));
+        item.insert(u"canManage"_s, registered || installedOnDisk);
+        item.insert(u"catalogDefault"_s, catalogDefault);
+        item.insert(u"bundledDefault"_s, bundledDefault);
+        item.insert(u"userRemoved"_s, userRemoved);
+        result.append(item);
+    }
+
+    return result;
+}
+
 QStringList SearchPluginManager::enabledPlugins() const
 {
+    if (!runtimeReady())
+        return {};
     QStringList plugins;
     for (const SearchPluginInfo *plugin : asConst(m_plugins))
     {
@@ -281,7 +554,8 @@ void SearchPluginManager::installPlugin_impl(const QString &name, const Path &sr
     const bool hasExistingPlugin = destPath.exists();
     bool hasBackup = false;
 
-    if (destPath != srcPath)
+    const bool copiedIntoDestination = (destPath != srcPath);
+    if (copiedIntoDestination)
     {
         // Plugin is not already at the destination path, otherwise there is nothing to copy.
 
@@ -289,8 +563,15 @@ void SearchPluginManager::installPlugin_impl(const QString &name, const Path &sr
         if (hasExistingPlugin)
         {
             hasBackup = Utils::Fs::copyFile(destPath, backupPath);
-            Utils::Fs::removeFile(destPath);
             qCDebug(lcSearch) << "Backed up existing plugin" << name << "->" << backupPath.toString() << "success:" << hasBackup;
+            if (!hasBackup)
+            {
+                const QString errMsg = tr("The existing plugin could not be backed up, so the update was cancelled without changing it.");
+                qCWarning(lcSearch).noquote() << QStringLiteral("%1 Plugin name: \"%2\".").arg(errMsg, name);
+                emit pluginUpdateFailed(name, errMsg);
+                return;
+            }
+            Utils::Fs::removeFile(destPath);
         }
 
         // Copy the plugin to the destination path.
@@ -318,45 +599,60 @@ void SearchPluginManager::installPlugin_impl(const QString &name, const Path &sr
         }
     }
 
-    // Update the supported plugins catalog.
-    update();
-
-    // Check if it was correctly installed.
-    if (m_plugins.contains(name))
+    // Validate asynchronously without leaking an optimistic install/update
+    // signal before the post-copy check and rollback decision.
+    update(true, [this, name, incomingVersion, destPath, backupPath,
+                  hasExistingPlugin, hasBackup, copiedIntoDestination]
     {
-        // Installation successful.
-        qCInfo(lcSearch).noquote() << tr("Search plugin has been updated. Plugin name: \"%1\". Version: %2.")
-            .arg(name, incomingVersion.toString());
-
-        if (hasBackup)
-            Utils::Fs::removeFile(backupPath);
-    }
-    else
-    {
-        qCWarning(lcSearch).noquote() << tr("Search plugin installation failed. Plugin name: \"%1\"").arg(name);
-
-        // Roll back.
-        Utils::Fs::removeFile(destPath);
-        if (hasBackup)
+        if (m_plugins.contains(name))
         {
-            // Restore backup.
-            if (Utils::Fs::copyFile(backupPath, destPath))
-            {
+            qCInfo(lcSearch).noquote() << tr("Search plugin has been updated. Plugin name: \"%1\". Version: %2.")
+                .arg(name, incomingVersion.toString());
+            if (hasBackup)
                 Utils::Fs::removeFile(backupPath);
-                update(); // Update the supported plugins catalog.
-            }
+            if (hasExistingPlugin)
+                emit pluginUpdated(name);
             else
-            {
-                Utils::Fs::removeFile(destPath);
-            }
+                emit pluginInstalled(name);
+            return;
         }
 
-        const QString errMsg = tr("Plugin is not supported.");
-        if (hasExistingPlugin)
-            emit pluginUpdateFailed(name, errMsg);
-        else
-            emit pluginInstallationFailed(name, errMsg);
-    }
+        qCWarning(lcSearch).noquote() << tr("Search plugin installation failed. Plugin name: \"%1\"").arg(name);
+        const QString importDiagnostic = m_pluginImportErrors.value(name);
+        const QString runtimeDiagnostic = m_runtimeError;
+        const QString errMsg = !runtimeDiagnostic.isEmpty()
+            ? runtimeDiagnostic
+            : (!importDiagnostic.isEmpty()
+                ? tr("The plugin failed to import: %1").arg(importDiagnostic)
+                : tr("The runtime did not register an engine named \"%1\". The Python class name must match the file name.").arg(name));
+
+        if (copiedIntoDestination)
+            Utils::Fs::removeFile(destPath);
+
+        const auto reportFailure = [this, name, hasExistingPlugin, errMsg]
+        {
+            if (hasExistingPlugin)
+                emit pluginUpdateFailed(name, errMsg);
+            else
+                emit pluginInstallationFailed(name, errMsg);
+        };
+
+        if (!hasBackup)
+        {
+            reportFailure();
+            return;
+        }
+
+        if (!Utils::Fs::copyFile(backupPath, destPath))
+        {
+            Utils::Fs::removeFile(destPath);
+            reportFailure();
+            return;
+        }
+
+        Utils::Fs::removeFile(backupPath);
+        update(true, reportFailure); // Reconcile the restored plugin silently.
+    });
 }
 
 bool SearchPluginManager::uninstallPlugin(const QString &name)
@@ -377,7 +673,30 @@ bool SearchPluginManager::uninstallPlugin(const QString &name)
     // Remove it from the supported engines.
     delete m_plugins.take(name);
 
+    auto ledgerIt = m_catalogLedger.find(name);
+    if (ledgerIt != m_catalogLedger.end())
+    {
+        CatalogLedgerEntry &state = ledgerIt.value();
+        const Path candidatePath = catalogQuarantinePath(name, state.expectedHash);
+        if (!candidatePath.isEmpty() && candidatePath.exists()
+            && (state.expectedHash == state.observedHash)
+            && (fileSha256(candidatePath) == state.expectedHash))
+        {
+            Utils::Fs::removeFile(candidatePath);
+        }
+        state.activeHash.clear();
+        state.catalogOwned = false;
+        state.trusted = false;
+        state.userRemoved = true;
+        state.integrityState = u"user-removed"_s;
+        state.runtimeState = u"user-removed"_s;
+        state.diagnostic = tr("The default plugin was removed by the user and will not be restored automatically.");
+        state.generation += 1;
+        saveCatalogLedger();
+    }
+
     qCInfo(lcSearch) << "Search plugin uninstalled:" << name;
+    emit pluginCatalogChanged();
     emit pluginUninstalled(name);
     return true;
 }
@@ -407,7 +726,7 @@ void SearchPluginManager::checkForUpdates()
 
     // Download the version file from the update server.
     using namespace Net;
-    DownloadManager::instance()->download({m_updateUrl + u"versions.txt"}
+    DownloadManager::instance()->download(DownloadRequest(m_updateUrl + u"versions.txt").limit(MAX_PLUGIN_VERSION_INFO_BYTES)
             , Preferences::instance()->useProxyForGeneralPurposes()
             , this, &SearchPluginManager::versionInfoDownloadFinished);
 }
@@ -422,6 +741,11 @@ SearchHandler *SearchPluginManager::startSearch(const QString &pattern, const QS
 {
     // No search pattern entered.
     Q_ASSERT(!pattern.isEmpty());
+    if (!runtimeReady())
+    {
+        qCWarning(lcSearch) << "Refusing to start a search against a stale or failed plugin registry";
+        return nullptr;
+    }
 
     qCInfo(lcSearch).noquote() << QStringLiteral("startSearch. Pattern: \"%1\". Category: \"%2\". Plugins: \"%3\".")
         .arg(pattern, category, usedPlugins.join(u", "_s));
@@ -473,6 +797,132 @@ Path SearchPluginManager::engineLocation()
     return location;
 }
 
+Path SearchPluginManager::catalogQuarantineLocation()
+{
+    const Path location = engineLocation() / Path(u"catalog-quarantine"_s);
+    Utils::Fs::mkpath(location);
+    return location;
+}
+
+Path SearchPluginManager::catalogQuarantinePath(const QString &name, const QByteArray &sha256)
+{
+    if (!isSafeCatalogID(name) || !isSha256(sha256))
+        return {};
+    return catalogQuarantineLocation() / Path(u"%1-%2.py"_s.arg(name, QString::fromLatin1(sha256)));
+}
+
+Path SearchPluginManager::catalogLedgerPath()
+{
+    return engineLocation() / Path(u"unofficial-catalog-state.json"_s);
+}
+
+void SearchPluginManager::loadCatalogLedger()
+{
+    m_catalogLedger.clear();
+    QFile file {catalogLedgerPath().data()};
+    if (!file.exists())
+        return;
+    if (!file.open(QIODevice::ReadOnly))
+    {
+        qCWarning(lcSearch) << "Could not open unofficial catalog state:" << file.errorString();
+        return;
+    }
+
+    const QByteArray bytes = file.read(MAX_CATALOG_LEDGER_BYTES + 1);
+    if (bytes.size() > MAX_CATALOG_LEDGER_BYTES)
+    {
+        qCWarning(lcSearch) << "Unofficial catalog state exceeds its safety limit; preserving the file and ignoring it";
+        return;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(bytes, &parseError);
+    if ((parseError.error != QJsonParseError::NoError) || !document.isObject()
+        || (document.object().value(u"schema"_s).toInt() != CATALOG_LEDGER_SCHEMA)
+        || !document.object().value(u"entries"_s).isArray())
+    {
+        qCWarning(lcSearch) << "Unofficial catalog state is invalid; preserving the file and ignoring it:" << parseError.errorString();
+        return;
+    }
+
+    QSet<QString> seen;
+    for (const QJsonValue &value : document.object().value(u"entries"_s).toArray())
+    {
+        if (!value.isObject())
+            continue;
+        const QJsonObject object = value.toObject();
+        const QString id = object.value(u"id"_s).toString();
+        const QByteArray expected = object.value(u"expectedHash"_s).toString().toLatin1().toLower();
+        const QByteArray observed = object.value(u"observedHash"_s).toString().toLatin1().toLower();
+        const QByteArray active = object.value(u"activeHash"_s).toString().toLatin1().toLower();
+        const QUrl source {object.value(u"sourceUrl"_s).toString()};
+        if (!isSafeCatalogID(id) || seen.contains(id)
+            || (!expected.isEmpty() && !isSha256(expected))
+            || (!observed.isEmpty() && !isSha256(observed))
+            || (!active.isEmpty() && !isSha256(active))
+            || (!source.isEmpty() && (!source.isValid() || (source.scheme() != u"https")
+                || source.host().isEmpty() || !source.userInfo().isEmpty())))
+        {
+            qCWarning(lcSearch) << "Ignoring unsafe unofficial catalog state row:" << id;
+            continue;
+        }
+
+        bool generationOK = false;
+        const quint64 generation = object.value(u"generation"_s).toString().toULongLong(&generationOK);
+        CatalogLedgerEntry entry;
+        entry.expectedHash = expected;
+        entry.observedHash = observed;
+        entry.activeHash = active;
+        entry.sourceUrl = source.toString();
+        entry.integrityState = object.value(u"integrityState"_s).toString().left(64);
+        entry.runtimeState = object.value(u"runtimeState"_s).toString().left(64);
+        entry.diagnostic = object.value(u"diagnostic"_s).toString().left(4096);
+        entry.generation = generationOK ? generation : 0;
+        entry.catalogOwned = object.value(u"catalogOwned"_s).toBool(false);
+        entry.trusted = object.value(u"trusted"_s).toBool(false);
+        entry.userRemoved = object.value(u"userRemoved"_s).toBool(false);
+        m_catalogLedger.insert(id, entry);
+        seen.insert(id);
+    }
+    qCInfo(lcSearch) << "Loaded" << m_catalogLedger.size() << "unofficial catalog state row(s)";
+}
+
+bool SearchPluginManager::saveCatalogLedger()
+{
+    QStringList ids = m_catalogLedger.keys();
+    ids.sort();
+    QJsonArray rows;
+    for (const QString &id : std::as_const(ids))
+    {
+        const CatalogLedgerEntry &entry = m_catalogLedger[id];
+        QJsonObject object;
+        object.insert(u"id"_s, id);
+        object.insert(u"expectedHash"_s, QString::fromLatin1(entry.expectedHash));
+        object.insert(u"observedHash"_s, QString::fromLatin1(entry.observedHash));
+        object.insert(u"activeHash"_s, QString::fromLatin1(entry.activeHash));
+        object.insert(u"sourceUrl"_s, entry.sourceUrl);
+        object.insert(u"integrityState"_s, entry.integrityState);
+        object.insert(u"runtimeState"_s, entry.runtimeState);
+        object.insert(u"diagnostic"_s, entry.diagnostic.left(4096));
+        object.insert(u"generation"_s, QString::number(entry.generation));
+        object.insert(u"catalogOwned"_s, entry.catalogOwned);
+        object.insert(u"trusted"_s, entry.trusted);
+        object.insert(u"userRemoved"_s, entry.userRemoved);
+        rows.append(object);
+    }
+
+    QJsonObject root;
+    root.insert(u"schema"_s, CATALOG_LEDGER_SCHEMA);
+    root.insert(u"entries"_s, rows);
+    const auto result = Utils::IO::saveToFile(catalogLedgerPath(), QJsonDocument(root).toJson(QJsonDocument::Compact));
+    if (!result)
+    {
+        qCWarning(lcSearch) << "Could not persist unofficial catalog state:" << result.error();
+        return false;
+    }
+    return true;
+}
+
 void SearchPluginManager::applyProxySettings()
 {
     // For python `urllib`: https://docs.python.org/3/library/urllib.request.html#urllib.request.ProxyHandler
@@ -502,32 +952,34 @@ void SearchPluginManager::applyProxySettings()
 
     case Net::ProxyType::HTTP:
         {
-            const QString credential = proxyConfig.authEnabled
-                ? (proxyConfig.username + u':' + proxyConfig.password + u'@')
-                : QString();
-            const QString proxyURL = u"http://%1%2:%3"_s
-                .arg(credential, proxyConfig.ip, QString::number(proxyConfig.port));
+            // Never place proxy credentials in a child-process environment:
+            // every search engine is third-party Python and can read os.environ.
+            // An authenticated proxy therefore needs a future native broker;
+            // the child receives only the non-secret endpoint today.
+            const QString proxyURL = u"http://%1:%2"_s
+                .arg(proxyConfig.ip, QString::number(proxyConfig.port));
 
             m_proxyEnv.insert(HTTP_PROXY, proxyURL);
             m_proxyEnv.insert(HTTPS_PROXY, proxyURL);
             m_proxyEnv.remove(SOCKS_PROXY);
             qCDebug(lcSearch) << "Applied HTTP proxy to search environment:" << proxyConfig.ip << proxyConfig.port;
+            if (proxyConfig.authEnabled)
+                qCWarning(lcSearch) << "Search plugins receive no proxy credentials; authenticated proxy access requires a native credential broker";
         }
         break;
 
     case Net::ProxyType::SOCKS5:
         {
             const QString scheme = proxyConfig.hostnameLookupEnabled ? u"socks5h"_s : u"socks5"_s;
-            const QString credential = proxyConfig.authEnabled
-                ? (proxyConfig.username + u':' + proxyConfig.password + u'@')
-                : QString();
-            const QString proxyURL = u"%1://%2%3:%4"_s
-                .arg(scheme, credential, proxyConfig.ip, QString::number(proxyConfig.port));
+            const QString proxyURL = u"%1://%2:%3"_s
+                .arg(scheme, proxyConfig.ip, QString::number(proxyConfig.port));
 
             m_proxyEnv.remove(HTTP_PROXY);
             m_proxyEnv.remove(HTTPS_PROXY);
             m_proxyEnv.insert(SOCKS_PROXY, proxyURL);
             qCDebug(lcSearch) << "Applied SOCKS5 proxy to search environment:" << proxyConfig.ip << proxyConfig.port;
+            if (proxyConfig.authEnabled)
+                qCWarning(lcSearch) << "Search plugins receive no proxy credentials; authenticated proxy access requires a native credential broker";
         }
         break;
 
@@ -643,6 +1095,283 @@ QString SearchPluginManager::runtimeError() const
     return m_runtimeError;
 }
 
+bool SearchPluginManager::runtimeReady() const
+{
+    return !m_registrationStale && m_runtimeError.isEmpty();
+}
+
+QVariantMap SearchPluginManager::unofficialCatalogStatus() const
+{
+    return m_catalogStatus;
+}
+
+void SearchPluginManager::retryUnofficialCatalogSync()
+{
+    if (m_catalogSyncInProgress)
+    {
+        m_catalogRetryPending = true;
+        return;
+    }
+    if (m_catalogRetryPending)
+        return;
+
+    qCInfo(lcSearch) << "Retrying verified unofficial search-plugin sync on request";
+    m_catalogRetryPending = true;
+    m_catalogStatus[u"state"_s] = u"probing-runtime"_s;
+    m_catalogStatus[u"inProgress"_s] = true;
+    emit unofficialCatalogStatusChanged(m_catalogStatus);
+    update(true, [this]
+    {
+        m_catalogRetryPending = false;
+        startUnofficialCatalogSync();
+    });
+}
+
+void SearchPluginManager::trustUnofficialPlugin(const QString &id)
+{
+    const auto failWithoutMutation = [this, &id](const QString &reason, const QString &runtimeState,
+                                                  const QString &integrityState)
+    {
+        auto it = m_catalogLedger.find(id);
+        if (it != m_catalogLedger.end())
+        {
+            it->runtimeState = runtimeState;
+            it->integrityState = integrityState;
+            it->diagnostic = reason;
+            saveCatalogLedger();
+        }
+        qCWarning(lcSearch).noquote() << QStringLiteral("Could not trust unofficial plugin \"%1\": %2").arg(id, reason);
+        emit pluginCatalogChanged();
+        emit unofficialPluginTrustFailed(id, reason);
+    };
+
+    if (!isSafeCatalogID(id) || !m_catalogEntries.contains(id))
+    {
+        failWithoutMutation(tr("The requested plugin is not in the validated unofficial catalog."),
+            u"not-installed"_s, u"invalid-request"_s);
+        return;
+    }
+    if (m_catalogSyncInProgress)
+    {
+        failWithoutMutation(tr("The catalog is still synchronizing. Retry trust after the current sync finishes."),
+            u"quarantined"_s, u"pending-trust"_s);
+        return;
+    }
+
+    auto ledgerIt = m_catalogLedger.find(id);
+    if (ledgerIt == m_catalogLedger.end())
+    {
+        failWithoutMutation(tr("No persisted trust record exists for this catalog plugin."),
+            u"not-installed"_s, u"missing"_s);
+        return;
+    }
+
+    CatalogLedgerEntry &state = ledgerIt.value();
+    if (state.runtimeState == u"validating")
+    {
+        failWithoutMutation(tr("This plugin is already being validated."),
+            u"validating"_s, state.integrityState);
+        return;
+    }
+
+    const CatalogEntry catalogEntry = m_catalogEntries.value(id);
+    const bool pinStillCurrent = std::ranges::any_of(catalogEntry.sources,
+        [&state](const CatalogSource &source)
+        {
+            return (source.sha256 == state.expectedHash) && (source.url == state.sourceUrl);
+        });
+    const Path candidatePath = catalogQuarantinePath(id, state.expectedHash);
+    const QByteArray candidateHash = candidatePath.exists() ? fileSha256(candidatePath) : QByteArray {};
+    if (!pinStillCurrent || !isSha256(state.expectedHash)
+        || (state.expectedHash != state.observedHash) || (candidateHash != state.expectedHash))
+    {
+        failWithoutMutation(tr("The quarantined file no longer matches its current expected and observed SHA-256 values."),
+            u"quarantined"_s, u"integrity-failed"_s);
+        return;
+    }
+
+    const Utils::ForeignApps::PythonInfo pyInfo = Utils::ForeignApps::pythonInfo();
+    if (!pyInfo.isValid() || !pyInfo.isSupportedVersion())
+    {
+        const QString reason = tr("Python %1 or later is required before a quarantined plugin can be validated.")
+            .arg(Utils::ForeignApps::PythonInfo::MINIMUM_SUPPORTED_VERSION.toString());
+        failWithoutMutation(reason, u"waiting-python"_s, u"pending-trust"_s);
+        return;
+    }
+
+    const Path activePath = pluginPath(id);
+    const bool hadActive = activePath.exists();
+    const QByteArray previousActiveHash = hadActive ? fileSha256(activePath) : QByteArray {};
+    if (hadActive && (!state.catalogOwned || !state.trusted || !isSha256(state.activeHash)
+        || (previousActiveHash != state.activeHash)))
+    {
+        failWithoutMutation(tr("A user-managed active file is present. It was preserved; remove it explicitly before trusting the catalog file."),
+            runtimeReady() ? u"ready"_s : u"stale-registration"_s, u"user-modified"_s);
+        return;
+    }
+
+    const quint64 generation = state.generation + 1;
+    const Path backupPath = hadActive
+        ? (catalogQuarantineLocation() / Path(u"%1-active-backup-%2-%3.py"_s
+            .arg(id, QString::number(generation), QString::fromLatin1(previousActiveHash))))
+        : Path {};
+    state.generation = generation;
+    state.runtimeState = u"validating"_s;
+    state.integrityState = hadActive ? u"validating-update"_s : u"validating"_s;
+    state.diagnostic = tr("Validating the quarantined plugin in an isolated Python capability probe.");
+    state.userRemoved = false;
+    if (!saveCatalogLedger())
+    {
+        failWithoutMutation(tr("The trust generation could not be persisted, so the active file was not changed."),
+            u"quarantined"_s, u"ledger-write-failed"_s);
+        return;
+    }
+
+    if (hadActive)
+    {
+        if (backupPath.exists())
+        {
+            failWithoutMutation(tr("A transaction backup already exists. It was preserved and the active file was not changed."),
+                u"quarantined"_s, u"transaction-conflict"_s);
+            return;
+        }
+        QString backupError;
+        if (!atomicCopyFile(activePath, backupPath, &backupError)
+            || (fileSha256(backupPath) != previousActiveHash))
+        {
+            failWithoutMutation(tr("The trusted active plugin could not be backed up: %1").arg(backupError),
+                u"quarantined"_s, u"backup-failed"_s);
+            return;
+        }
+    }
+
+    QString promotionError;
+    if (!atomicCopyFile(candidatePath, activePath, &promotionError)
+        || (fileSha256(activePath) != candidateHash))
+    {
+        failWithoutMutation(tr("The quarantined plugin could not be promoted atomically: %1").arg(promotionError),
+            u"quarantined"_s, u"promotion-failed"_s);
+        return;
+    }
+
+    clearPythonCache(engineLocation());
+    update(true, [this, id, generation, candidateHash, previousActiveHash, backupPath, hadActive]
+    {
+        auto currentIt = m_catalogLedger.find(id);
+        if (currentIt == m_catalogLedger.end() || (currentIt->generation != generation))
+        {
+            const QString reason = tr("The trust transaction generation changed while validation was running; no rollback was attempted.");
+            emit unofficialPluginTrustFailed(id, reason);
+            return;
+        }
+
+        CatalogLedgerEntry &current = currentIt.value();
+        const Path currentActivePath = pluginPath(id);
+        const QByteArray currentActiveHash = currentActivePath.exists() ? fileSha256(currentActivePath) : QByteArray {};
+        if (currentActiveHash != candidateHash)
+        {
+            // A manual replacement won the race. The generation and hash guard
+            // deliberately runs before every rollback copy or deletion below.
+            current.catalogOwned = false;
+            current.trusted = false;
+            current.activeHash.clear();
+            current.integrityState = u"user-modified"_s;
+            current.runtimeState = u"transaction-conflict"_s;
+            current.diagnostic = tr("The active file changed during validation. It was preserved and no rollback was attempted.");
+            saveCatalogLedger();
+            emit pluginCatalogChanged();
+            emit unofficialPluginTrustFailed(id, current.diagnostic);
+            return;
+        }
+
+        if (runtimeReady() && m_plugins.contains(id))
+        {
+            current.activeHash = candidateHash;
+            current.catalogOwned = true;
+            current.trusted = true;
+            current.userRemoved = false;
+            current.integrityState = u"verified-current"_s;
+            current.runtimeState = u"ready"_s;
+            current.diagnostic.clear();
+            if (!saveCatalogLedger())
+            {
+                current.diagnostic = tr("The plugin validated, but its trust ledger could not be persisted. Recovery files were preserved.");
+                emit pluginCatalogChanged();
+                emit unofficialPluginTrustFailed(id, current.diagnostic);
+                return;
+            }
+
+            const Path candidate = catalogQuarantinePath(id, candidateHash);
+            if (candidate.exists() && (fileSha256(candidate) == candidateHash))
+                Utils::Fs::removeFile(candidate);
+            if (hadActive && backupPath.exists() && (fileSha256(backupPath) == previousActiveHash))
+                Utils::Fs::removeFile(backupPath);
+
+            QStringList seeded = Preferences::instance()->getSeededSearchPlugins();
+            if (!seeded.contains(id))
+            {
+                seeded.append(id);
+                seeded.sort();
+                Preferences::instance()->setSeededSearchPlugins(seeded);
+            }
+            emit pluginCatalogChanged();
+            if (hadActive)
+                emit pluginUpdated(id);
+            else
+                emit pluginInstalled(id);
+            emit unofficialPluginTrusted(id);
+            return;
+        }
+
+        const QString importDiagnostic = m_pluginImportErrors.value(id);
+        QString reason = !m_runtimeError.isEmpty()
+            ? m_runtimeError
+            : (!importDiagnostic.isEmpty()
+                ? tr("The plugin failed to import: %1").arg(importDiagnostic)
+                : tr("The runtime did not register an engine named \"%1\".").arg(id));
+
+        bool rolledBack = false;
+        if (hadActive && backupPath.exists() && (fileSha256(backupPath) == previousActiveHash))
+        {
+            QString restoreError;
+            rolledBack = atomicCopyFile(backupPath, currentActivePath, &restoreError)
+                && (fileSha256(currentActivePath) == previousActiveHash);
+            if (!rolledBack)
+                reason += tr(" The prior verified file could not be restored: %1").arg(restoreError);
+        }
+        else if (!hadActive)
+        {
+            // This exact active file is transaction-owned and still guarded by
+            // candidateHash, so removing it cannot delete a manual replacement.
+            const auto removeResult = Utils::Fs::removeFile(currentActivePath);
+            rolledBack = static_cast<bool>(removeResult);
+        }
+
+        if (!rolledBack && currentActivePath.exists() && (fileSha256(currentActivePath) == candidateHash))
+        {
+            // A missing/tampered backup must not leave failed third-party code
+            // active on the next launch. Only the exact transaction bytes are
+            // removed; an independently changed file was handled above.
+            Utils::Fs::removeFile(currentActivePath);
+            reason += tr(" The prior file was unavailable, so the failed transaction bytes were removed from the active engine directory.");
+        }
+        if (rolledBack && hadActive && backupPath.exists() && (fileSha256(backupPath) == previousActiveHash))
+            Utils::Fs::removeFile(backupPath);
+
+        current.catalogOwned = hadActive && rolledBack;
+        current.trusted = hadActive && rolledBack;
+        current.activeHash = (hadActive && rolledBack) ? previousActiveHash : QByteArray {};
+        current.integrityState = u"verification-failed"_s;
+        current.runtimeState = runtimeReady() ? u"import-failed"_s : u"stale-registration"_s;
+        current.diagnostic = reason;
+        saveCatalogLedger();
+        clearPythonCache(engineLocation());
+        update(true);
+        emit pluginCatalogChanged();
+        emit unofficialPluginTrustFailed(id, reason);
+    });
+}
+
 void SearchPluginManager::reload()
 {
     qCInfo(lcSearch) << "Reloading the search runtime on request";
@@ -659,12 +1388,20 @@ void SearchPluginManager::setRuntimeError(const QString &reason)
     emit runtimeErrorChanged(reason);
 }
 
+void SearchPluginManager::failCapabilityGeneration(const QString &reason)
+{
+    m_registrationStale = true;
+    setRuntimeError(reason);
+    emit pluginCatalogChanged();
+}
+
 // Write the plugins bundled in our own resources into the profile, so the
 // Search tab has sources without the user having to install anything.
 void SearchPluginManager::seedBundledPlugins()
 {
     const Path bundledDir {u":/searchengine/nova3/engines"_s};
     QDirIterator it {bundledDir.data(), {u"*.py"_s}, QDir::Files};
+    m_bundledPluginIDs.clear();
     if (!it.hasNext())
     {
         qCCritical(lcSearch) << "No bundled search plugins found in the application resources";
@@ -679,6 +1416,7 @@ void SearchPluginManager::seedBundledPlugins()
     {
         const Path bundledPath {it.next()};
         const QString name = bundledPath.removedExtension().filename();
+        m_bundledPluginIDs.append(name);
         const Path diskPath = pluginPath(name);
 
         if (!diskPath.exists())
@@ -720,49 +1458,727 @@ void SearchPluginManager::seedBundledPlugins()
         Preferences::instance()->setSeededSearchPlugins(seeded);
     }
 
+    m_bundledPluginIDs.removeDuplicates();
+    m_bundledPluginIDs.sort();
+
     qCInfo(lcSearch) << "Bundled search plugins seeded:" << written << "written,"
         << seeded.size() << "known";
 }
 
-void SearchPluginManager::update()
+void SearchPluginManager::startUnofficialCatalogSync()
 {
-    qCDebug(lcSearch) << "Refreshing search engine capabilities via nova2.py --capabilities";
+    if (m_catalogSyncInProgress)
+        return;
 
-    // Fail loudly on the two prerequisites the user can actually act on, rather
-    // than letting QProcess fail obscurely and leaving the Search tab claiming
-    // that no plugins are installed.
+    m_catalogQueue.clear();
+    m_catalogPendingSeeded.clear();
+    m_catalogFailures.clear();
+    m_currentCatalogFailure.clear();
+    m_currentCatalogSource = 0;
+    m_catalogPreexisting = false;
+
+    QFile manifest {UNOFFICIAL_MANIFEST_PATH};
+    if (!manifest.open(QIODevice::ReadOnly))
+    {
+        failUnofficialCatalogSync(tr("The verified unofficial search-plugin catalog is missing from this build."));
+        return;
+    }
+
+    const QByteArray bytes = manifest.read(MAX_UNOFFICIAL_MANIFEST_BYTES + 1);
+    if (bytes.size() > MAX_UNOFFICIAL_MANIFEST_BYTES)
+    {
+        failUnofficialCatalogSync(tr("The unofficial search-plugin catalog exceeds the 512 KiB safety limit."));
+        return;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(bytes, &parseError);
+    if ((parseError.error != QJsonParseError::NoError) || !document.isObject())
+    {
+        failUnofficialCatalogSync(tr("The unofficial search-plugin catalog is invalid JSON: %1")
+            .arg(parseError.errorString()));
+        return;
+    }
+
+    const QJsonObject root = document.object();
+    if ((root.value(u"schema"_s).toInt() != 2) || !root.value(u"plugins"_s).isArray())
+    {
+        failUnofficialCatalogSync(tr("The unofficial search-plugin catalog uses an unsupported schema."));
+        return;
+    }
+
+    const QUrl sourceURL {root.value(u"source"_s).toString()};
+    if (!sourceURL.isValid() || (sourceURL.scheme() != u"https") || sourceURL.host().isEmpty()
+        || !sourceURL.userInfo().isEmpty())
+    {
+        failUnofficialCatalogSync(tr("The unofficial search-plugin catalog source is not a safe HTTPS URL."));
+        return;
+    }
+
+    const QString sourceRevision = root.value(u"sourceRevision"_s).toString().toLower();
+    if (!isGitRevision(sourceRevision))
+    {
+        failUnofficialCatalogSync(tr("The unofficial search-plugin catalog has an invalid source revision."));
+        return;
+    }
+
+    const QJsonArray rows = root.value(u"plugins"_s).toArray();
+    if (rows.isEmpty())
+    {
+        failUnofficialCatalogSync(tr("The unofficial search-plugin catalog contains no plugin rows."));
+        return;
+    }
+
+    QSet<QString> allIDs;
+    QSet<QString> caseFoldedIDs;
+    for (const QJsonValue &value : rows)
+    {
+        if (!value.isObject())
+        {
+            failUnofficialCatalogSync(tr("The unofficial search-plugin catalog contains a non-object row."));
+            return;
+        }
+
+        const QString rawID = value.toObject().value(u"id"_s).toString();
+        const QString foldedID = rawID.toCaseFolded();
+        if (!isSafeCatalogID(rawID))
+        {
+            failUnofficialCatalogSync(tr("The unofficial search-plugin catalog contains an unsafe plugin id: %1")
+                .arg(rawID));
+            return;
+        }
+        if (allIDs.contains(rawID) || caseFoldedIDs.contains(foldedID))
+        {
+            failUnofficialCatalogSync(tr("The unofficial search-plugin catalog contains a duplicate or ambiguous plugin id: %1")
+                .arg(rawID));
+            return;
+        }
+        allIDs.insert(rawID);
+        caseFoldedIDs.insert(foldedID);
+    }
+
+    QList<CatalogEntry> entries;
+    QHash<QString, qsizetype> entryIndexes;
+    QHash<QString, QSet<QString>> sourceKeys;
+    int availableSources = 0;
+    int unavailableSources = 0;
+
+    for (const QJsonValue &value : rows)
+    {
+        const QJsonObject object = value.toObject();
+        const QString rawID = object.value(u"id"_s).toString();
+        const QString canonicalID = canonicalCatalogID(rawID, allIDs);
+        if (!entryIndexes.contains(canonicalID))
+        {
+            entryIndexes.insert(canonicalID, entries.size());
+            entries.append({canonicalID, {}});
+        }
+
+        if (!object.value(u"available"_s).toBool(false))
+        {
+            ++unavailableSources;
+            continue;
+        }
+
+        const QUrl url {object.value(u"url"_s).toString()};
+        const QByteArray expectedHash = object.value(u"sha256"_s).toString().toLatin1().toLower();
+        if (!url.isValid() || (url.scheme() != u"https") || url.host().isEmpty()
+            || !url.userInfo().isEmpty() || !isSha256(expectedHash))
+        {
+            failUnofficialCatalogSync(tr("The unofficial search-plugin catalog contains an unsafe or unpinned source for %1.")
+                .arg(rawID));
+            return;
+        }
+
+        const QString sourceKey = url.toString(QUrl::FullyEncoded) + u'|' + QString::fromLatin1(expectedHash);
+        if (sourceKeys[canonicalID].contains(sourceKey))
+        {
+            failUnofficialCatalogSync(tr("The unofficial search-plugin catalog contains a duplicate source for %1.")
+                .arg(canonicalID));
+            return;
+        }
+        sourceKeys[canonicalID].insert(sourceKey);
+        entries[entryIndexes.value(canonicalID)].sources.append({url.toString(), expectedHash});
+        ++availableSources;
+    }
+
+    // Publish no catalog data until every row above has passed validation. A
+    // later retry that somehow encounters a damaged embedded resource retains
+    // the prior validated snapshot instead of replacing it with partial input.
+    QHash<QString, CatalogEntry> validatedEntries;
+    QStringList validatedCanonicalIDs;
+    int canonicalAvailable = 0;
+    for (const CatalogEntry &entry : std::as_const(entries))
+    {
+        validatedEntries.insert(entry.id, entry);
+        validatedCanonicalIDs.append(entry.id);
+        if (!entry.sources.isEmpty())
+            ++canonicalAvailable;
+    }
+    validatedCanonicalIDs.sort();
+    m_catalogEntries = std::move(validatedEntries);
+    m_catalogCanonicalIDs = std::move(validatedCanonicalIDs);
+
+    m_catalogStatus = {
+        {u"state"_s, u"starting"_s},
+        {u"inProgress"_s, true},
+        {u"source"_s, sourceURL.toString()},
+        {u"revision"_s, sourceRevision},
+        {u"rowCount"_s, rows.size()},
+        {u"availableSourceCount"_s, availableSources},
+        {u"unavailableSourceCount"_s, unavailableSources},
+        {u"canonicalCount"_s, entries.size()},
+        {u"canonicalAvailableCount"_s, canonicalAvailable},
+        {u"queued"_s, 0},
+        {u"completed"_s, 0},
+        {u"newlyInstalled"_s, 0},
+        {u"quarantined"_s, 0},
+        {u"awaitingTrust"_s, 0},
+        {u"alreadyPresent"_s, 0},
+        {u"verifiedPresent"_s, 0},
+        {u"preservedExisting"_s, 0},
+        {u"userRemoved"_s, 0},
+        {u"failed"_s, 0},
+        {u"registered"_s, 0},
+        {u"runtimeUnavailable"_s, false},
+        {u"runtimeError"_s, QString {}},
+        {u"awaitingRuntime"_s, 0},
+        {u"errors"_s, QStringList {}}
+    };
+    m_catalogSyncInProgress = true;
+
+    Preferences *const preferences = Preferences::instance();
+    QStringList seeded = preferences->getSeededSearchPlugins();
+    const auto sourceForHash = [](const CatalogEntry &entry, const QByteArray &hash) -> const CatalogSource *
+    {
+        for (const CatalogSource &source : entry.sources)
+        {
+            if (source.sha256 == hash)
+                return &source;
+        }
+        return nullptr;
+    };
+
+    for (const CatalogEntry &entry : std::as_const(entries))
+    {
+        if (entry.sources.isEmpty())
+        {
+            m_catalogFailures.append(tr("%1 has no available verified source.").arg(entry.id));
+            m_catalogStatus[u"failed"_s] = m_catalogStatus.value(u"failed"_s).toInt() + 1;
+            m_catalogStatus[u"completed"_s] = m_catalogStatus.value(u"completed"_s).toInt() + 1;
+            continue;
+        }
+
+        const Path activePath = pluginPath(entry.id);
+        const bool activeExists = activePath.exists();
+        const QByteArray activeHash = activeExists ? fileSha256(activePath) : QByteArray {};
+        auto ledgerIt = m_catalogLedger.find(entry.id);
+        const bool hasLedger = ledgerIt != m_catalogLedger.end();
+        CatalogLedgerEntry ledger = hasLedger ? ledgerIt.value() : CatalogLedgerEntry {};
+        const CatalogSource *activeSource = sourceForHash(entry, activeHash);
+        const CatalogSource *pendingSource = sourceForHash(entry, ledger.expectedHash);
+        const Path candidatePath = (pendingSource && (ledger.observedHash == ledger.expectedHash))
+            ? catalogQuarantinePath(entry.id, ledger.expectedHash) : Path {};
+        const bool candidateVerified = !candidatePath.isEmpty() && candidatePath.exists()
+            && isSha256(ledger.expectedHash) && (fileSha256(candidatePath) == ledger.expectedHash);
+        const bool ownedActiveVerified = activeExists && hasLedger && ledger.catalogOwned && ledger.trusted
+            && isSha256(ledger.activeHash) && (activeHash == ledger.activeHash);
+
+        if (activeExists)
+        {
+            m_catalogPreexisting = true;
+            m_catalogStatus[u"alreadyPresent"_s] = m_catalogStatus.value(u"alreadyPresent"_s).toInt() + 1;
+            if (!seeded.contains(entry.id))
+                seeded.append(entry.id);
+
+            if (activeSource)
+            {
+                // A current pinned file already satisfies the catalog. Preserve
+                // pre-ledger installs as trusted external files; never claim
+                // ownership merely because their bytes happen to match.
+                m_catalogStatus[u"verifiedPresent"_s] = m_catalogStatus.value(u"verifiedPresent"_s).toInt() + 1;
+                m_catalogStatus[u"completed"_s] = m_catalogStatus.value(u"completed"_s).toInt() + 1;
+                if (hasLedger)
+                {
+                    ledger.expectedHash = activeHash;
+                    ledger.observedHash = activeHash;
+                    ledger.sourceUrl = activeSource->url;
+                    ledger.userRemoved = false;
+                    ledger.runtimeState = runtimeReady() && m_plugins.contains(entry.id)
+                        ? u"ready"_s : (runtimeReady() ? u"import-failed"_s : u"stale-registration"_s);
+                    if (ownedActiveVerified)
+                    {
+                        ledger.integrityState = u"verified-current"_s;
+                        ledger.diagnostic.clear();
+                    }
+                    else
+                    {
+                        ledger.catalogOwned = false;
+                        ledger.trusted = false;
+                        ledger.activeHash.clear();
+                        ledger.integrityState = u"verified-external"_s;
+                        ledger.diagnostic = tr("A pre-existing SHA-256-verified plugin is active and was preserved as user-managed.");
+                    }
+                    ledgerIt.value() = ledger;
+                }
+                continue;
+            }
+
+            // The active bytes do not match the current pin. They may be a
+            // manual replacement. Preserve them, and stage catalog bytes only
+            // in the quarantine directory.
+            m_catalogStatus[u"preservedExisting"_s] = m_catalogStatus.value(u"preservedExisting"_s).toInt() + 1;
+            if (hasLedger && ledger.catalogOwned && !ownedActiveVerified)
+            {
+                ledger.catalogOwned = false;
+                ledger.trusted = false;
+                ledger.activeHash.clear();
+                ledger.integrityState = u"user-modified"_s;
+                ledger.runtimeState = runtimeReady() ? u"ready"_s : u"stale-registration"_s;
+                ledger.diagnostic = tr("The active plugin changed outside the catalog transaction and was preserved as user-managed.");
+                ledgerIt.value() = ledger;
+            }
+
+            if (candidateVerified)
+            {
+                CatalogLedgerEntry &state = m_catalogLedger[entry.id];
+                state.integrityState = ownedActiveVerified ? u"pending-update-trust"_s : u"pending-trust"_s;
+                state.runtimeState = u"quarantined"_s;
+                state.userRemoved = false;
+                state.diagnostic = ownedActiveVerified
+                    ? tr("A pinned update is quarantined until you explicitly trust and validate it.")
+                    : tr("A user-managed active file was preserved; the pinned catalog file remains quarantined.");
+                m_catalogStatus[u"quarantined"_s] = m_catalogStatus.value(u"quarantined"_s).toInt() + 1;
+                m_catalogStatus[u"awaitingTrust"_s] = m_catalogStatus.value(u"awaitingTrust"_s).toInt() + 1;
+                m_catalogStatus[u"completed"_s] = m_catalogStatus.value(u"completed"_s).toInt() + 1;
+                m_catalogPendingSeeded.append(entry.id);
+            }
+            else
+            {
+                m_catalogQueue.enqueue(entry);
+            }
+            continue;
+        }
+
+        // A previously trusted catalog file disappearing is an explicit user
+        // removal, even when a newer candidate was already staged. A pending
+        // first-install candidate, however, is not mistaken for a removal just
+        // because the active engine directory is intentionally still empty.
+        const bool removedAfterTrust = hasLedger && ledger.catalogOwned && ledger.trusted
+            && !ledger.activeHash.isEmpty() && seeded.contains(entry.id);
+        const bool userRemoved = (hasLedger && ledger.userRemoved)
+            || removedAfterTrust || (seeded.contains(entry.id) && !hasLedger);
+        if (userRemoved)
+        {
+            CatalogLedgerEntry &state = m_catalogLedger[entry.id];
+            state.userRemoved = true;
+            state.catalogOwned = false;
+            state.trusted = false;
+            state.activeHash.clear();
+            state.integrityState = u"user-removed"_s;
+            state.runtimeState = u"user-removed"_s;
+            state.diagnostic = tr("The default plugin was removed by the user and will not be restored automatically.");
+            if (state.expectedHash.isEmpty())
+            {
+                state.expectedHash = entry.sources.constFirst().sha256;
+                state.sourceUrl = entry.sources.constFirst().url;
+            }
+            m_catalogStatus[u"userRemoved"_s] = m_catalogStatus.value(u"userRemoved"_s).toInt() + 1;
+            m_catalogStatus[u"completed"_s] = m_catalogStatus.value(u"completed"_s).toInt() + 1;
+            continue;
+        }
+
+        if (candidateVerified)
+        {
+            CatalogLedgerEntry &state = m_catalogLedger[entry.id];
+            state.userRemoved = false;
+            state.integrityState = u"pending-trust"_s;
+            state.runtimeState = u"quarantined"_s;
+            state.diagnostic = tr("The SHA-256-verified plugin is installed in quarantine and awaits explicit trust.");
+            m_catalogStatus[u"alreadyPresent"_s] = m_catalogStatus.value(u"alreadyPresent"_s).toInt() + 1;
+            m_catalogStatus[u"quarantined"_s] = m_catalogStatus.value(u"quarantined"_s).toInt() + 1;
+            m_catalogStatus[u"awaitingTrust"_s] = m_catalogStatus.value(u"awaitingTrust"_s).toInt() + 1;
+            m_catalogStatus[u"completed"_s] = m_catalogStatus.value(u"completed"_s).toInt() + 1;
+            m_catalogPendingSeeded.append(entry.id);
+            continue;
+        }
+
+        m_catalogQueue.enqueue(entry);
+    }
+
+    seeded.removeDuplicates();
+    seeded.sort();
+    preferences->setSeededSearchPlugins(seeded);
+    saveCatalogLedger();
+    m_catalogStatus[u"queued"_s] = m_catalogQueue.size();
+    m_catalogStatus[u"state"_s] = m_catalogQueue.isEmpty() ? u"finalizing"_s : u"downloading"_s;
+    emit unofficialCatalogStatusChanged(m_catalogStatus);
+
+    downloadNextUnofficialPlugin();
+}
+
+void SearchPluginManager::downloadNextUnofficialPlugin()
+{
+    if (!m_catalogSyncInProgress)
+        return;
+
+    if (m_catalogQueue.isEmpty())
+    {
+        finishUnofficialCatalogSync();
+        return;
+    }
+
+    m_currentCatalogEntry = m_catalogQueue.dequeue();
+    m_currentCatalogSource = 0;
+    m_currentCatalogFailure.clear();
+    downloadCurrentUnofficialSource();
+}
+
+void SearchPluginManager::downloadCurrentUnofficialSource()
+{
+    if (m_currentCatalogSource >= m_currentCatalogEntry.sources.size())
+    {
+        const QString reason = m_currentCatalogFailure.isEmpty()
+            ? tr("No verified source succeeded.")
+            : m_currentCatalogFailure;
+        m_catalogFailures.append(u"%1: %2"_s.arg(m_currentCatalogEntry.id, reason));
+        m_catalogStatus[u"failed"_s] = m_catalogStatus.value(u"failed"_s).toInt() + 1;
+        m_catalogStatus[u"completed"_s] = m_catalogStatus.value(u"completed"_s).toInt() + 1;
+        emit unofficialCatalogStatusChanged(m_catalogStatus);
+        downloadNextUnofficialPlugin();
+        return;
+    }
+
+    const CatalogSource &source = m_currentCatalogEntry.sources.at(m_currentCatalogSource);
+    qCInfo(lcSearch).noquote() << QStringLiteral("Downloading verified default search plugin \"%1\" from HTTPS source %2 (%3/%4)")
+        .arg(m_currentCatalogEntry.id, source.url)
+        .arg(m_currentCatalogSource + 1)
+        .arg(m_currentCatalogEntry.sources.size());
+
+    using namespace Net;
+    DownloadManager::instance()->download(
+        DownloadRequest(source.url).limit(MAX_UNOFFICIAL_PLUGIN_BYTES),
+        Preferences::instance()->useProxyForGeneralPurposes(),
+        this, &SearchPluginManager::unofficialPluginDownloadFinished);
+}
+
+void SearchPluginManager::unofficialPluginDownloadFinished(const Net::DownloadResult &result)
+{
+    const CatalogSource source = m_currentCatalogEntry.sources.at(m_currentCatalogSource);
+    QString failure;
+
+    if (result.status != Net::DownloadStatus::Success)
+    {
+        failure = tr("Download failed: %1").arg(result.errorString);
+    }
+    else if (result.data.isEmpty())
+    {
+        failure = tr("The verified source returned an empty file.");
+    }
+    else
+    {
+        const QByteArray actualHash = QCryptographicHash::hash(result.data, QCryptographicHash::Sha256).toHex();
+        if (actualHash != source.sha256)
+        {
+            failure = tr("SHA-256 verification failed (expected %1, received %2).")
+                .arg(QString::fromLatin1(source.sha256), QString::fromLatin1(actualHash));
+        }
+        else
+        {
+            const Path destination = catalogQuarantinePath(m_currentCatalogEntry.id, source.sha256);
+            if (destination.exists())
+            {
+                if (fileSha256(destination) != source.sha256)
+                {
+                    // Never overwrite an unexpected file, even inside the
+                    // application-owned quarantine namespace. A concurrent or
+                    // manually placed replacement wins the race and remains.
+                    failure = tr("The quarantine destination already contains different bytes and was preserved.");
+                }
+                else
+                {
+                    m_catalogStatus[u"alreadyPresent"_s] = m_catalogStatus.value(u"alreadyPresent"_s).toInt() + 1;
+                }
+            }
+            else
+            {
+                const auto saveResult = Utils::IO::saveToFile(destination, result.data);
+                if (!saveResult)
+                {
+                    failure = tr("Could not save the verified plugin: %1").arg(saveResult.error());
+                }
+                else
+                {
+                    m_catalogStatus[u"newlyInstalled"_s] = m_catalogStatus.value(u"newlyInstalled"_s).toInt() + 1;
+                    qCInfo(lcSearch) << "Verified default search plugin quarantined:" << m_currentCatalogEntry.id;
+                }
+            }
+
+            if (failure.isEmpty())
+            {
+                CatalogLedgerEntry state = m_catalogLedger.value(m_currentCatalogEntry.id);
+                const Path activePath = pluginPath(m_currentCatalogEntry.id);
+                const QByteArray activeHash = activePath.exists() ? fileSha256(activePath) : QByteArray {};
+                const bool preserveOwnedActive = activePath.exists() && state.catalogOwned && state.trusted
+                    && isSha256(state.activeHash) && (activeHash == state.activeHash);
+
+                state.expectedHash = source.sha256;
+                state.observedHash = source.sha256;
+                state.sourceUrl = source.url;
+                state.generation += 1;
+                state.userRemoved = false;
+                if (!preserveOwnedActive)
+                {
+                    state.catalogOwned = false;
+                    state.trusted = false;
+                    state.activeHash.clear();
+                }
+                state.integrityState = preserveOwnedActive ? u"pending-update-trust"_s : u"pending-trust"_s;
+                state.runtimeState = u"quarantined"_s;
+                if (activePath.exists() && !preserveOwnedActive)
+                    state.diagnostic = tr("A user-managed active file was preserved; the pinned catalog file is quarantined.");
+                else if (preserveOwnedActive)
+                    state.diagnostic = tr("A pinned update is quarantined until you explicitly trust and validate it.");
+                else
+                    state.diagnostic = tr("The SHA-256-verified plugin is installed in quarantine and awaits explicit trust.");
+                m_catalogLedger.insert(m_currentCatalogEntry.id, state);
+
+                if (!saveCatalogLedger())
+                    failure = tr("The verified plugin was quarantined, but its trust ledger could not be persisted.");
+                else
+                {
+                    m_catalogPendingSeeded.append(m_currentCatalogEntry.id);
+                    m_catalogStatus[u"quarantined"_s] = m_catalogStatus.value(u"quarantined"_s).toInt() + 1;
+                    m_catalogStatus[u"awaitingTrust"_s] = m_catalogStatus.value(u"awaitingTrust"_s).toInt() + 1;
+                }
+            }
+        }
+    }
+
+    if (!failure.isEmpty())
+    {
+        qCWarning(lcSearch).noquote() << QStringLiteral("Verified source failed for search plugin \"%1\": %2")
+            .arg(m_currentCatalogEntry.id, failure);
+        m_currentCatalogFailure = failure;
+        ++m_currentCatalogSource;
+        downloadCurrentUnofficialSource();
+        return;
+    }
+
+    m_catalogStatus[u"completed"_s] = m_catalogStatus.value(u"completed"_s).toInt() + 1;
+    emit unofficialCatalogStatusChanged(m_catalogStatus);
+    downloadNextUnofficialPlugin();
+}
+
+void SearchPluginManager::finishUnofficialCatalogSync()
+{
+    if (!m_catalogSyncInProgress)
+        return;
+
+    m_catalogStatus[u"state"_s] = u"finalizing"_s;
+    emit unofficialCatalogStatusChanged(m_catalogStatus);
+
+    QStringList seeded = Preferences::instance()->getSeededSearchPlugins();
+    for (const QString &id : std::as_const(m_catalogPendingSeeded))
+    {
+        if (!seeded.contains(id))
+            seeded.append(id);
+    }
+    seeded.removeDuplicates();
+    seeded.sort();
+    Preferences::instance()->setSeededSearchPlugins(seeded);
+
+    const bool runtimeUnavailable = !runtimeReady();
+    int registered = 0;
+    int awaitingRuntime = 0;
+    int awaitingTrust = 0;
+    for (const QString &id : std::as_const(m_catalogCanonicalIDs))
+    {
+        const Path activePath = pluginPath(id);
+        const bool activeExists = activePath.exists();
+        if (runtimeUnavailable && activeExists)
+            ++awaitingRuntime;
+        else if (!runtimeUnavailable && activeExists && m_plugins.contains(id))
+            ++registered;
+
+        auto ledgerIt = m_catalogLedger.find(id);
+        if (ledgerIt == m_catalogLedger.end())
+            continue;
+
+        CatalogLedgerEntry &state = ledgerIt.value();
+        const Path candidatePath = catalogQuarantinePath(id, state.expectedHash);
+        const bool candidateVerified = !state.userRemoved && !candidatePath.isEmpty()
+            && candidatePath.exists() && (state.expectedHash == state.observedHash)
+            && (fileSha256(candidatePath) == state.expectedHash);
+        const QByteArray activeHash = activeExists ? fileSha256(activePath) : QByteArray {};
+        const bool activeOwned = activeExists && state.catalogOwned && state.trusted
+            && isSha256(state.activeHash) && (activeHash == state.activeHash);
+        const bool promotable = candidateVerified && (!activeExists || activeOwned);
+        if (promotable && (!state.trusted || (state.activeHash != state.expectedHash)))
+            ++awaitingTrust;
+
+        if (runtimeUnavailable && activeExists)
+        {
+            state.runtimeState = m_registrationStale ? u"stale-registration"_s : u"waiting-python"_s;
+            if (state.diagnostic.isEmpty())
+                state.diagnostic = m_runtimeError;
+        }
+        else if (!runtimeUnavailable && activeExists && m_plugins.contains(id))
+        {
+            state.runtimeState = u"ready"_s;
+        }
+        else if (!runtimeUnavailable && activeExists)
+        {
+            state.runtimeState = u"import-failed"_s;
+            const QString diagnostic = m_pluginImportErrors.value(id);
+            state.diagnostic = diagnostic.isEmpty()
+                ? tr("The active file is present, but the runtime did not register its matching engine class.")
+                : tr("The active plugin failed to import: %1").arg(diagnostic);
+            m_catalogFailures.append(u"%1: %2"_s.arg(id, state.diagnostic));
+            m_catalogStatus[u"failed"_s] = m_catalogStatus.value(u"failed"_s).toInt() + 1;
+        }
+    }
+    m_catalogStatus[u"registered"_s] = registered;
+    m_catalogStatus[u"runtimeUnavailable"_s] = runtimeUnavailable;
+    m_catalogStatus[u"runtimeError"_s] = runtimeUnavailable
+        ? (m_runtimeError.isEmpty() ? tr("Search plugin registration is stale.") : m_runtimeError)
+        : QString {};
+    m_catalogStatus[u"awaitingRuntime"_s] = awaitingRuntime;
+    m_catalogStatus[u"awaitingTrust"_s] = awaitingTrust;
+    m_catalogStatus[u"errors"_s] = m_catalogFailures;
+    m_catalogStatus[u"inProgress"_s] = false;
+    if (runtimeUnavailable && (awaitingRuntime > 0))
+        m_catalogStatus[u"state"_s] = u"waiting-runtime"_s;
+    else if (m_catalogStatus.value(u"failed"_s).toInt() > 0)
+        m_catalogStatus[u"state"_s] = u"partial"_s;
+    else if (awaitingTrust > 0)
+        m_catalogStatus[u"state"_s] = u"waiting-trust"_s;
+    else
+        m_catalogStatus[u"state"_s] = u"complete"_s;
+    saveCatalogLedger();
+    m_catalogSyncInProgress = false;
+
+    qCInfo(lcSearch) << "Verified unofficial search-plugin sync finished:" << m_catalogStatus;
+    emit pluginCatalogChanged();
+    emit unofficialCatalogStatusChanged(m_catalogStatus);
+    emit unofficialCatalogSyncFinished(m_catalogStatus);
+
+    const bool retryQueued = std::exchange(m_catalogRetryPending, false);
+    if (retryQueued)
+        QTimer::singleShot(0, this, &SearchPluginManager::retryUnofficialCatalogSync);
+}
+
+void SearchPluginManager::failUnofficialCatalogSync(const QString &reason)
+{
+    qCWarning(lcSearch).noquote() << reason;
+    m_catalogSyncInProgress = false;
+    m_catalogStatus = {
+        {u"state"_s, u"failed"_s},
+        {u"inProgress"_s, false},
+        {u"failed"_s, 1},
+        {u"errors"_s, QStringList {reason}}
+    };
+    emit unofficialCatalogStatusChanged(m_catalogStatus);
+    emit unofficialCatalogSyncFinished(m_catalogStatus);
+
+    const bool retryQueued = std::exchange(m_catalogRetryPending, false);
+    if (retryQueued)
+        QTimer::singleShot(0, this, &SearchPluginManager::retryUnofficialCatalogSync);
+}
+
+void SearchPluginManager::update(const bool suppressSignals, std::function<void()> completed)
+{
+    m_capabilityRequests.enqueue({suppressSignals, std::move(completed)});
+    startNextCapabilityProbe();
+}
+
+void SearchPluginManager::startNextCapabilityProbe()
+{
+    if (m_capabilityProbeRunning || m_capabilityRequests.isEmpty())
+        return;
+
+    m_capabilityProbeRunning = true;
+    if (!m_registrationStale)
+    {
+        m_registrationStale = true;
+        emit pluginCatalogChanged();
+    }
+    m_capabilityProbeStarted = false;
+    m_capabilityProbeTimedOut = false;
+    m_capabilityProbeCompleting = false;
+    m_capabilityStdOut.clear();
+    m_capabilityStdErr.clear();
+    m_capabilityOutputOverflow = false;
+    m_activeCapabilityRequest = m_capabilityRequests.dequeue();
+    m_pluginImportErrors.clear();
+    qCDebug(lcSearch) << "Refreshing search engine capabilities asynchronously via nova2.py --capabilities";
+
     const Utils::ForeignApps::PythonInfo pyInfo = Utils::ForeignApps::pythonInfo();
     if (!pyInfo.isValid())
     {
         const QString reason = tr("Python was not found. Search needs a Python %1 or later interpreter on PATH, or one selected in Options.")
             .arg(Utils::ForeignApps::PythonInfo::MINIMUM_SUPPORTED_VERSION.toString());
         qCWarning(lcSearch).noquote() << reason;
-        setRuntimeError(reason);
+        failCapabilityGeneration(reason);
+        const CapabilityRequest request = m_activeCapabilityRequest;
+        QTimer::singleShot(0, this, [this, request] { finishCapabilityRequest(request); });
         return;
     }
     if (!pyInfo.isSupportedVersion())
     {
-        // Not fatal — nova may still run — but record it so a later failure is
-        // attributable instead of looking like "no plugins installed".
-        qCWarning(lcSearch).noquote() << QStringLiteral("Python %1 is below the supported minimum %2")
+        const QString reason = tr("Python %1 is below the supported minimum %2.")
             .arg(pyInfo.version.toString(), Utils::ForeignApps::PythonInfo::MINIMUM_SUPPORTED_VERSION.toString());
+        qCWarning(lcSearch).noquote() << reason;
+        failCapabilityGeneration(reason);
+        const CapabilityRequest request = m_activeCapabilityRequest;
+        QTimer::singleShot(0, this, [this, request] { finishCapabilityRequest(request); });
+        return;
     }
-    const Path pythonPath = pyInfo.executablePath;
 
     const Path novaScript = engineLocation() / Path(u"nova2.py"_s);
     if (!novaScript.exists())
     {
         const QString reason = tr("The bundled search runtime is missing. Expected \"%1\".").arg(novaScript.toString());
         qCWarning(lcSearch).noquote() << reason;
-        setRuntimeError(reason);
+        failCapabilityGeneration(reason);
+        const CapabilityRequest request = m_activeCapabilityRequest;
+        QTimer::singleShot(0, this, [this, request] { finishCapabilityRequest(request); });
         return;
     }
 
-    QProcess nova;
-    nova.setProcessEnvironment(proxyEnvironment());
+    m_capabilityProcess = new QProcess(this);
+    m_capabilityProcess->setProcessEnvironment(proxyEnvironment());
 #ifdef Q_OS_UNIX
-    nova.setUnixProcessParameters(QProcess::UnixProcessFlag::CloseFileDescriptors);
+    m_capabilityProcess->setUnixProcessParameters(QProcess::UnixProcessFlag::CloseFileDescriptors);
 #endif
+
+    connect(m_capabilityProcess, &QProcess::started, this, [this]
+    {
+        m_capabilityProbeStarted = true;
+    });
+    connect(m_capabilityProcess, &QProcess::errorOccurred, this, [this](const QProcess::ProcessError error)
+    {
+        if (error == QProcess::FailedToStart)
+            QTimer::singleShot(0, this, &SearchPluginManager::completeCapabilityProbe);
+    });
+    connect(m_capabilityProcess, &QProcess::readyReadStandardOutput,
+            this, &SearchPluginManager::drainCapabilityOutput);
+    connect(m_capabilityProcess, &QProcess::readyReadStandardError,
+            this, &SearchPluginManager::drainCapabilityOutput);
+    connect(m_capabilityProcess, &QProcess::finished, this,
+            [this](int, QProcess::ExitStatus) { completeCapabilityProbe(); });
+
+    m_capabilityTimeout = new QTimer(this);
+    m_capabilityTimeout->setSingleShot(true);
+    m_capabilityTimeout->setInterval(10000);
+    connect(m_capabilityTimeout, &QTimer::timeout, this, [this]
+    {
+        if (!m_capabilityProcess || m_capabilityProbeCompleting)
+            return;
+        m_capabilityProbeTimedOut = true;
+        qCWarning(lcSearch) << "Timed out while fetching search engine capabilities";
+        m_capabilityProcess->kill();
+    });
 
     const QStringList params
     {
@@ -771,44 +2187,146 @@ void SearchPluginManager::update()
         novaScript.toString(),
         u"--capabilities"_s
     };
-    nova.start(pythonPath.data(), params, QIODevice::ReadOnly);
-    if (!nova.waitForFinished(10000))
+    m_capabilityTimeout->start();
+    m_capabilityProcess->start(pyInfo.executablePath.data(), params, QIODevice::ReadOnly);
+}
+
+void SearchPluginManager::drainCapabilityOutput()
+{
+    if (!m_capabilityProcess)
+        return;
+
+    const bool alreadyOverflowed = m_capabilityOutputOverflow;
+    const auto appendBounded = [this](QByteArray &buffer, const QByteArray &chunk, const qsizetype limit)
     {
-        qCWarning(lcSearch) << "Timed out while fetching search engine capabilities";
-        nova.kill();
-        nova.waitForFinished(1000);
-        setRuntimeError(tr("The search runtime did not respond within 10 seconds."));
+        const qsizetype remaining = std::max<qsizetype>(0, limit - buffer.size());
+        if (chunk.size() > remaining)
+        {
+            if (remaining > 0)
+                buffer.append(chunk.constData(), remaining);
+            m_capabilityOutputOverflow = true;
+            return;
+        }
+        buffer.append(chunk);
+    };
+
+    appendBounded(m_capabilityStdOut, m_capabilityProcess->readAllStandardOutput(), MAX_CAPABILITY_STDOUT_BYTES);
+    appendBounded(m_capabilityStdErr, m_capabilityProcess->readAllStandardError(), MAX_CAPABILITY_STDERR_BYTES);
+
+    if (!alreadyOverflowed && m_capabilityOutputOverflow
+        && !m_capabilityProbeCompleting && (m_capabilityProcess->state() != QProcess::NotRunning))
+    {
+        qCWarning(lcSearch) << "Search runtime exceeded its bounded capability-output allowance; terminating it";
+        m_capabilityProcess->kill();
+    }
+}
+
+void SearchPluginManager::completeCapabilityProbe()
+{
+    if (m_capabilityProbeCompleting || !m_capabilityProcess)
+        return;
+    m_capabilityProbeCompleting = true;
+
+    if (m_capabilityTimeout)
+        m_capabilityTimeout->stop();
+
+    drainCapabilityOutput();
+
+    CapabilityProbeResult result;
+    result.started = m_capabilityProbeStarted;
+    result.timedOut = m_capabilityProbeTimedOut;
+    result.outputOverflow = m_capabilityOutputOverflow;
+    result.standardOutput = QString::fromUtf8(m_capabilityStdOut);
+    result.standardError = QString::fromUtf8(m_capabilityStdErr).trimmed();
+    result.processError = m_capabilityProcess->errorString();
+
+    const CapabilityRequest request = m_activeCapabilityRequest;
+    m_capabilityProcess->deleteLater();
+    m_capabilityProcess = nullptr;
+    if (m_capabilityTimeout)
+    {
+        m_capabilityTimeout->deleteLater();
+        m_capabilityTimeout = nullptr;
+    }
+
+    applyCapabilityProbeResult(result, request.suppressSignals);
+    finishCapabilityRequest(request);
+}
+
+void SearchPluginManager::finishCapabilityRequest(const CapabilityRequest &request)
+{
+    if (request.completed)
+        request.completed();
+
+    m_activeCapabilityRequest = {};
+    m_capabilityProbeRunning = false;
+    m_capabilityProbeCompleting = false;
+    startNextCapabilityProbe();
+}
+
+void SearchPluginManager::applyCapabilityProbeResult(const CapabilityProbeResult &result, const bool suppressSignals)
+{
+    if (result.outputOverflow)
+    {
+        failCapabilityGeneration(tr("The search runtime exceeded its output safety limit."));
+        return;
+    }
+    if (result.timedOut)
+    {
+        failCapabilityGeneration(tr("The search runtime did not respond within 10 seconds."));
+        return;
+    }
+    if (!result.started)
+    {
+        failCapabilityGeneration(tr("The search runtime failed to start. Error: \"%1\".").arg(result.processError));
         return;
     }
 
-    const auto stdErrMsg = QString::fromUtf8(nova.readAllStandardError()).trimmed();
+    const QString stdErrMsg = result.standardError;
+    static const QString importErrorPrefix = u"PLUGIN_IMPORT_ERROR:"_s;
+    for (const QString &line : stdErrMsg.split(u'\n', Qt::SkipEmptyParts))
+    {
+        const QString diagnostic = line.trimmed();
+        if (!diagnostic.startsWith(importErrorPrefix))
+            continue;
+
+        const qsizetype nameStart = importErrorPrefix.size();
+        const qsizetype nameEnd = diagnostic.indexOf(u':', nameStart);
+        if (nameEnd <= nameStart)
+            continue;
+        const QString name = diagnostic.sliced(nameStart, nameEnd - nameStart);
+        if (isSafeCatalogID(name))
+            m_pluginImportErrors.insert(name, diagnostic.sliced(nameEnd + 1).left(2048));
+    }
     if (!stdErrMsg.isEmpty())
     {
-        qCWarning(lcSearch).noquote() << tr("Error occurred when fetching search engine capabilities. Error: \"%1\".").arg(stdErrMsg);
+        qCWarning(lcSearch).noquote() << tr("Error occurred when fetching search engine capabilities. Error: \"%1\".").arg(stdErrMsg.left(2048));
     }
 
-    const auto capabilities = QString::fromUtf8(nova.readAllStandardOutput());
+    const QString capabilities = result.standardOutput;
     QDomDocument xmlDoc;
     if (!xmlDoc.setContent(capabilities))
     {
         const QString reason = stdErrMsg.isEmpty()
             ? tr("The search runtime returned no usable plugin capabilities.")
-            : tr("The search runtime failed to start. Error: \"%1\".").arg(stdErrMsg);
-        qCWarning(lcSearch).noquote() << QStringLiteral("Could not parse nova search engine capabilities. Output: %1").arg(capabilities);
-        setRuntimeError(reason);
+            : tr("The search runtime failed to start. Error: \"%1\".").arg(stdErrMsg.left(2048));
+        qCWarning(lcSearch).noquote() << QStringLiteral("Could not parse nova search engine capabilities. Output excerpt: %1").arg(capabilities.left(2048));
+        failCapabilityGeneration(reason);
         return;
     }
 
     const QDomElement root = xmlDoc.documentElement();
     if (root.tagName() != u"capabilities")
     {
-        qCWarning(lcSearch).noquote() << QStringLiteral("Invalid XML for nova search engine capabilities. Output: %1").arg(capabilities);
-        setRuntimeError(tr("The search runtime reported malformed plugin capabilities."));
+        qCWarning(lcSearch).noquote() << QStringLiteral("Invalid XML for nova search engine capabilities. Output excerpt: %1").arg(capabilities.left(2048));
+        failCapabilityGeneration(tr("The search runtime reported malformed plugin capabilities."));
         return;
     }
 
-    setRuntimeError({});
-
+    QSet<QString> discoveredPlugins;
+    QSet<QString> caseFoldedPlugins;
+    QHash<QString, SearchPluginInfo> parsedPlugins;
+    const QStringList disabledEngines = Preferences::instance()->getSearchEngDisabled();
     for (QDomNode engineNode = root.firstChild(); !engineNode.isNull(); engineNode = engineNode.nextSibling())
     {
         const QDomElement engineElem = engineNode.toElement();
@@ -816,44 +2334,98 @@ void SearchPluginManager::update()
             continue;
 
         const QString pluginName = engineElem.tagName();
+        const QString foldedName = pluginName.toCaseFolded();
+        if (!isSafeCatalogID(pluginName) || discoveredPlugins.contains(pluginName)
+            || caseFoldedPlugins.contains(foldedName))
+        {
+            failCapabilityGeneration(tr("The search runtime reported a duplicate, ambiguous, or unsafe engine id: %1")
+                .arg(pluginName));
+            return;
+        }
 
-        auto plugin = std::make_unique<SearchPluginInfo>();
-        plugin->name = pluginName;
-        plugin->version = getPluginVersion(pluginPath(pluginName));
-        plugin->fullName = engineElem.elementsByTagName(u"name"_s).at(0).toElement().text();
-        plugin->url = engineElem.elementsByTagName(u"url"_s).at(0).toElement().text();
+        const QDomNodeList nameNodes = engineElem.elementsByTagName(u"name"_s);
+        const QDomNodeList urlNodes = engineElem.elementsByTagName(u"url"_s);
+        const QDomNodeList categoryNodes = engineElem.elementsByTagName(u"categories"_s);
+        if ((nameNodes.count() != 1) || (urlNodes.count() != 1) || (categoryNodes.count() != 1))
+        {
+            failCapabilityGeneration(tr("The search runtime reported incomplete capabilities for engine %1.")
+                .arg(pluginName));
+            return;
+        }
 
-        const QStringList categories = engineElem.elementsByTagName(u"categories"_s).at(0).toElement().text().split(u' ');
+        discoveredPlugins.insert(pluginName);
+        caseFoldedPlugins.insert(foldedName);
+
+        SearchPluginInfo plugin;
+        plugin.name = pluginName;
+        plugin.version = getPluginVersion(pluginPath(pluginName));
+        plugin.fullName = nameNodes.at(0).toElement().text().left(512);
+        plugin.url = urlNodes.at(0).toElement().text().left(4096);
+
+        const QStringList categories = categoryNodes.at(0).toElement().text().split(u' ');
         for (QString cat : categories)
         {
             cat = cat.trimmed();
             if (!cat.isEmpty())
-                plugin->supportedCategories << cat;
+                plugin.supportedCategories << cat.left(64);
         }
 
-        const QStringList disabledEngines = Preferences::instance()->getSearchEngDisabled();
-        plugin->enabled = !disabledEngines.contains(pluginName);
+        plugin.enabled = !disabledEngines.contains(pluginName);
+        updateIconPath(&plugin);
+        parsedPlugins.insert(pluginName, plugin);
+    }
 
-        updateIconPath(plugin.get());
+    // Publish only after the whole XML generation has passed structural and
+    // duplicate-id validation. A malformed late row cannot partially replace
+    // the last known registry.
+    m_registrationStale = false;
+    setRuntimeError({});
+    for (auto parsedIt = parsedPlugins.cbegin(); parsedIt != parsedPlugins.cend(); ++parsedIt)
+    {
+        const QString pluginName = parsedIt.key();
+        const SearchPluginInfo &plugin = parsedIt.value();
 
         if (!m_plugins.contains(pluginName))
         {
-            const SearchPluginVersion version = plugin->version;
-            m_plugins[pluginName] = plugin.release();
+            m_plugins[pluginName] = new SearchPluginInfo(plugin);
             qCInfo(lcSearch).noquote() << QStringLiteral("Search plugin discovered: \"%1\" version %2 (enabled: %3)")
-                .arg(pluginName, version.toString(), (m_plugins[pluginName]->enabled ? u"yes"_s : u"no"_s));
-            emit pluginInstalled(pluginName);
+                .arg(pluginName, plugin.version.toString(), (plugin.enabled ? u"yes"_s : u"no"_s));
+            if (!suppressSignals)
+                emit pluginInstalled(pluginName);
         }
-        else if (m_plugins[pluginName]->version != plugin->version)
+        else
         {
-            const SearchPluginVersion version = plugin->version;
-            delete m_plugins.take(pluginName);
-            m_plugins[pluginName] = plugin.release();
-            qCInfo(lcSearch).noquote() << QStringLiteral("Search plugin updated: \"%1\" now version %2")
-                .arg(pluginName, version.toString());
-            emit pluginUpdated(pluginName);
+            SearchPluginInfo *existing = m_plugins[pluginName];
+            const bool versionChanged = existing->version != plugin.version;
+            *existing = plugin;
+            if (versionChanged)
+            {
+                qCInfo(lcSearch).noquote() << QStringLiteral("Search plugin updated: \"%1\" now version %2")
+                    .arg(pluginName, plugin.version.toString());
+                if (!suppressSignals)
+                    emit pluginUpdated(pluginName);
+            }
         }
     }
+
+    // A failed import must remove an older in-memory entry. Without this
+    // reconciliation an update that replaced a working file with a broken one
+    // still looked successful merely because the previous capability object
+    // remained in m_plugins.
+    for (auto it = m_plugins.begin(); it != m_plugins.end();)
+    {
+        if (discoveredPlugins.contains(it.key()))
+        {
+            ++it;
+            continue;
+        }
+
+        qCWarning(lcSearch) << "Search plugin no longer registered by the runtime:" << it.key();
+        delete it.value();
+        it = m_plugins.erase(it);
+    }
+
+    emit pluginCatalogChanged();
 }
 
 void SearchPluginManager::parseVersionInfo(const QByteArray &info)
@@ -912,9 +2484,13 @@ void SearchPluginManager::parseVersionInfo(const QByteArray &info)
 
 bool SearchPluginManager::isUpdateNeeded(const QString &pluginName, const SearchPluginVersion &newVersion) const
 {
+    if (!isSafeCatalogID(pluginName) || !runtimeReady() || m_catalogEntries.contains(pluginName)
+        || !pluginPath(pluginName).exists())
+        return false;
+
     const SearchPluginInfo *plugin = pluginInfo(pluginName);
     if (!plugin)
-        return true;
+        return false;
 
     const SearchPluginVersion oldVersion = plugin->version;
     return (newVersion > oldVersion);

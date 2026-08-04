@@ -37,6 +37,10 @@ Flickable {
     component OptCheck: CheckBox {
         property string settingKey: ""
         property bool defaultValue: false
+        property string paletteSettingKey: settingKey
+        property string paletteSettingTitle: text
+        property string paletteSettingKind: "toggle"
+        property var paletteSettingDefault: defaultValue
         font: Typography.bodyMedium
         checked: (root.rev, OptionsController.value(settingKey, defaultValue))
         onToggled: {
@@ -79,6 +83,10 @@ Flickable {
                 labelWidth: 180
                 Layout.fillWidth: true
                 ComboBox {
+                    property string paletteSettingKey: "BitTorrent/Session/Encryption"
+                    property string paletteSettingTitle: qsTr("Encryption mode")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 0
                     Layout.fillWidth: true
                     model: [ qsTr("Allow encryption"), qsTr("Require encryption"), qsTr("Disable encryption") ]
                     currentIndex: (root.rev, OptionsController.value("BitTorrent/Session/Encryption", 0))
@@ -101,6 +109,10 @@ Flickable {
                 labelWidth: 260
                 Layout.fillWidth: true
                 SpinBox {
+                    property string paletteSettingKey: "BitTorrent/Session/MaxActiveCheckingTorrents"
+                    property string paletteSettingTitle: qsTr("Maximum active checking torrents")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 1
                     from: -1; to: 2147483647; editable: true
                     value: (root.rev, OptionsController.value("BitTorrent/Session/MaxActiveCheckingTorrents", 1))
                     textFromValue: (v, l) => v === -1 ? qsTr("∞") : Number(v).toLocaleString(l, 'f', 0)
@@ -112,6 +124,10 @@ Flickable {
 
         // ==== Torrent Queueing ================================================
         CheckableGroupBox {
+            property string paletteSettingKey: "BitTorrent/Session/QueueingSystemEnabled"
+            property string paletteSettingTitle: title
+            property string paletteSettingKind: "toggle"
+            property var paletteSettingDefault: false
             title: qsTr("Torrent Queueing")
             Layout.fillWidth: true
             checked: (root.rev, OptionsController.value("BitTorrent/Session/QueueingSystemEnabled", false))
@@ -122,6 +138,10 @@ Flickable {
                 labelWidth: 240
                 Layout.fillWidth: true
                 SpinBox {
+                    property string paletteSettingKey: "BitTorrent/Session/MaxActiveDownloads"
+                    property string paletteSettingTitle: qsTr("Maximum active downloads")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 3
                     from: -1; to: 2147483647; editable: true
                     value: (root.rev, OptionsController.value("BitTorrent/Session/MaxActiveDownloads", 3))
                     onValueModified: OptionsController.setValue("BitTorrent/Session/MaxActiveDownloads", value)
@@ -132,6 +152,10 @@ Flickable {
                 labelWidth: 240
                 Layout.fillWidth: true
                 SpinBox {
+                    property string paletteSettingKey: "BitTorrent/Session/MaxActiveUploads"
+                    property string paletteSettingTitle: qsTr("Maximum active uploads")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 3
                     from: -1; to: 2147483647; editable: true
                     value: (root.rev, OptionsController.value("BitTorrent/Session/MaxActiveUploads", 3))
                     onValueModified: OptionsController.setValue("BitTorrent/Session/MaxActiveUploads", value)
@@ -142,6 +166,10 @@ Flickable {
                 labelWidth: 240
                 Layout.fillWidth: true
                 SpinBox {
+                    property string paletteSettingKey: "BitTorrent/Session/MaxActiveTorrents"
+                    property string paletteSettingTitle: qsTr("Maximum active torrents")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 5
                     from: -1; to: 2147483647; editable: true
                     value: (root.rev, OptionsController.value("BitTorrent/Session/MaxActiveTorrents", 5))
                     onValueModified: OptionsController.setValue("BitTorrent/Session/MaxActiveTorrents", value)
@@ -149,6 +177,10 @@ Flickable {
             }
 
             CheckableGroupBox {
+                property string paletteSettingKey: "BitTorrent/Session/IgnoreSlowTorrentsForQueueing"
+                property string paletteSettingTitle: title
+                property string paletteSettingKind: "toggle"
+                property var paletteSettingDefault: false
                 title: qsTr("Do not count slow torrents in these limits")
                 Layout.fillWidth: true
                 checked: (root.rev, OptionsController.value("BitTorrent/Session/IgnoreSlowTorrentsForQueueing", false))
@@ -158,6 +190,10 @@ Flickable {
                     labelWidth: 220
                     Layout.fillWidth: true
                     SpinBox {
+                        property string paletteSettingKey: "BitTorrent/Session/SlowTorrentsDownloadRate"
+                        property string paletteSettingTitle: qsTr("Slow torrent download rate threshold")
+                        property string paletteSettingKind: "destination"
+                        property var paletteSettingDefault: 2
                         from: 0; to: 2000000; editable: true
                         value: (root.rev, OptionsController.value("BitTorrent/Session/SlowTorrentsDownloadRate", 2))
                         textFromValue: (v, l) => Number(v).toLocaleString(l, 'f', 0) + " " + qsTr("KiB/s")
@@ -170,6 +206,10 @@ Flickable {
                     labelWidth: 220
                     Layout.fillWidth: true
                     SpinBox {
+                        property string paletteSettingKey: "BitTorrent/Session/SlowTorrentsUploadRate"
+                        property string paletteSettingTitle: qsTr("Slow torrent upload rate threshold")
+                        property string paletteSettingKind: "destination"
+                        property var paletteSettingDefault: 2
                         from: 0; to: 2000000; editable: true
                         value: (root.rev, OptionsController.value("BitTorrent/Session/SlowTorrentsUploadRate", 2))
                         textFromValue: (v, l) => Number(v).toLocaleString(l, 'f', 0) + " " + qsTr("KiB/s")
@@ -182,6 +222,10 @@ Flickable {
                     labelWidth: 220
                     Layout.fillWidth: true
                     SpinBox {
+                        property string paletteSettingKey: "BitTorrent/Session/SlowTorrentsInactivityTimer"
+                        property string paletteSettingTitle: qsTr("Slow torrent inactivity timer")
+                        property string paletteSettingKind: "destination"
+                        property var paletteSettingDefault: 60
                         from: 1; to: 999999; editable: true
                         value: (root.rev, OptionsController.value("BitTorrent/Session/SlowTorrentsInactivityTimer", 60))
                         textFromValue: (v, l) => Number(v).toLocaleString(l, 'f', 0) + " " + qsTr("sec")
@@ -208,6 +252,10 @@ Flickable {
                 }
                 Item { Layout.fillWidth: true }
                 SpinBox {
+                    property string paletteSettingKey: "BitTorrent/Session/GlobalMaxRatio"
+                    property string paletteSettingTitle: qsTr("Global maximum share ratio")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 1.0
                     enabled: maxRatioCheck.checked
                     from: 0; to: 2147483647; editable: true; stepSize: 1
                     property real ratio: (root.rev, OptionsController.value("BitTorrent/Session/GlobalMaxRatio", 1.0))
@@ -228,6 +276,10 @@ Flickable {
                 }
                 Item { Layout.fillWidth: true }
                 SpinBox {
+                    property string paletteSettingKey: "BitTorrent/Session/GlobalMaxSeedingMinutes"
+                    property string paletteSettingTitle: qsTr("Global maximum seeding time")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 1440
                     enabled: maxSeedCheck.checked
                     from: 0; to: 9999999; editable: true
                     value: (root.rev, OptionsController.value("BitTorrent/Session/GlobalMaxSeedingMinutes", 1440))
@@ -247,6 +299,10 @@ Flickable {
                 }
                 Item { Layout.fillWidth: true }
                 SpinBox {
+                    property string paletteSettingKey: "BitTorrent/Session/GlobalMaxInactiveSeedingMinutes"
+                    property string paletteSettingTitle: qsTr("Global maximum inactive seeding time")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 1440
                     enabled: maxInactiveCheck.checked
                     from: 0; to: 9999999; editable: true
                     value: (root.rev, OptionsController.value("BitTorrent/Session/GlobalMaxInactiveSeedingMinutes", 1440))
@@ -260,6 +316,10 @@ Flickable {
                 Layout.fillWidth: true
                 spacing: Spacing.lg
                 RadioButton {
+                    property string paletteSettingKey: "BitTorrent/Session/ShareLimitsMode"
+                    property string paletteSettingTitle: qsTr("Seeding limits match mode")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 0
                     text: qsTr("Any of the above")
                     font: Typography.bodyMedium
                     checked: (root.rev, OptionsController.value("BitTorrent/Session/ShareLimitsMode", 0)) === 0
@@ -278,6 +338,10 @@ Flickable {
                 labelWidth: 60
                 Layout.fillWidth: true
                 ComboBox {
+                    property string paletteSettingKey: "BitTorrent/Session/ShareLimitAction"
+                    property string paletteSettingTitle: qsTr("Action when seeding limit is reached")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 0
                     Layout.fillWidth: true
                     enabled: maxRatioCheck.checked || maxSeedCheck.checked || maxInactiveCheck.checked
                     model: [ qsTr("Stop torrent"), qsTr("Remove torrent"),
@@ -291,6 +355,10 @@ Flickable {
 
         // ==== Auto-append trackers ============================================
         CheckableGroupBox {
+            property string paletteSettingKey: "BitTorrent/Session/AddTrackersEnabled"
+            property string paletteSettingTitle: title
+            property string paletteSettingKind: "toggle"
+            property var paletteSettingDefault: false
             title: qsTr("Automatically append these trackers to new downloads:")
             Layout.fillWidth: true
             checked: (root.rev, OptionsController.value("BitTorrent/Session/AddTrackersEnabled", false))
@@ -299,6 +367,10 @@ Flickable {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 120
                 TextArea {
+                    property string paletteSettingKey: "BitTorrent/Session/AdditionalTrackers"
+                    property string paletteSettingTitle: qsTr("Additional trackers for new downloads")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: ""
                     placeholderText: qsTr("One tracker URL per line")
                     font: Typography.mono
                     text: (root.rev, OptionsController.value("BitTorrent/Session/AdditionalTrackers", ""))
@@ -308,6 +380,10 @@ Flickable {
         }
 
         CheckableGroupBox {
+            property string paletteSettingKey: "BitTorrent/Session/AddTrackersFromURLEnabled"
+            property string paletteSettingTitle: title
+            property string paletteSettingKind: "toggle"
+            property var paletteSettingDefault: false
             title: qsTr("Automatically append trackers from URL to new downloads:")
             Layout.fillWidth: true
             checked: (root.rev, OptionsController.value("BitTorrent/Session/AddTrackersFromURLEnabled", false))
@@ -317,6 +393,10 @@ Flickable {
                 labelWidth: 80
                 Layout.fillWidth: true
                 TextField {
+                    property string paletteSettingKey: "BitTorrent/Session/AdditionalTrackersURL"
+                    property string paletteSettingTitle: qsTr("Additional trackers source URL")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: ""
                     Layout.fillWidth: true
                     text: (root.rev, OptionsController.value("BitTorrent/Session/AdditionalTrackersURL", ""))
                     onEditingFinished: OptionsController.setValue("BitTorrent/Session/AdditionalTrackersURL", text)
@@ -332,6 +412,10 @@ Flickable {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 100
                 TextArea {
+                    property string paletteSettingKey: "BitTorrent/Session/AdditionalTrackersFromURL"
+                    property string paletteSettingTitle: qsTr("Fetched additional trackers")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: ""
                     readOnly: true
                     font: Typography.mono
                     color: Theme.color("onSurfaceVariant")

@@ -113,10 +113,11 @@ qt_add_executable(qbittorrent WIN32 MACOSX_BUNDLE
 
 if (WIN32)
     # Embed the product mark in qbittorrent.exe so Explorer, shortcuts, file
-    # associations, and the NSIS installer all display the same identity.
+    # associations, and the Squirrel installer all display the same identity.
     target_sources(qbittorrent PRIVATE
         "${CMAKE_SOURCE_DIR}/resources/branding/qbittorrent-material.rc"
     )
+    target_link_libraries(qbittorrent PRIVATE Advapi32 Shell32)
 endif()
 
 target_include_directories(qbittorrent PRIVATE
@@ -250,7 +251,10 @@ else()
         "${QBT_RES_ROOT}/html/*.css"
         "${QBT_RES_ROOT}/i18n/*.json"
         "${QBT_RES_ROOT}/experience/*.json"
-        "${QBT_RES_ROOT}/dim-sum/*.png"
+        # SHA-256-pinned sources from the unofficial-plugin wiki. Only this
+        # metadata is bundled; third-party Python source is fetched over HTTPS
+        # and verified at first run instead of being redistributed here.
+        "${QBT_RES_ROOT}/searchengine/*.json"
         # The nova3 search runtime. SearchPluginManager::updateNova() extracts
         # these to <Data>/nova3 and then runs `python nova2.py --capabilities`;
         # without them every search and every plugin install fails.
@@ -309,3 +313,30 @@ qt_generate_deploy_qml_app_script(
     DEPLOY_TOOL_OPTIONS ${_qbt_qt_deploy_tool_options}
 )
 install(SCRIPT "${qbt_deploy_script}")
+
+# =============================================================================
+# 5) Opt-in non-GUI notification regression
+# =============================================================================
+# Keep this target outside the default build and packaging graph. It exercises
+# the authoritative history model without starting Qt Quick or reading/writing
+# the user's persisted preferences.
+if (QBT_BUILD_NOTIFICATION_TESTS)
+    add_executable(testnotificationcontroller EXCLUDE_FROM_ALL
+        "${CMAKE_SOURCE_DIR}/test/testnotificationcontroller.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/quick/controllers/notificationcontroller.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/quick/controllers/notificationcontroller.h"
+    )
+    target_compile_definitions(testnotificationcontroller PRIVATE
+        QBT_NOTIFICATION_TEST_NO_PREFERENCES
+    )
+    target_include_directories(testnotificationcontroller PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/quick/controllers"
+    )
+    target_compile_features(testnotificationcontroller PRIVATE cxx_std_20)
+    target_link_libraries(testnotificationcontroller PRIVATE
+        Qt6::Core
+        Qt6::Qml
+    )
+    add_test(NAME testnotificationcontroller COMMAND testnotificationcontroller)
+endif()

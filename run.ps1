@@ -8,7 +8,7 @@
   Usage:
       powershell -ExecutionPolicy Bypass -File run.ps1        # build + run
       ...-File run.ps1 -NoRun                                  # build only
-      ...-File run.ps1 -Package                                # build NSIS installer
+      ...-File run.ps1 -Package                                # build Squirrel installer/feed
       ...-File run.ps1 -Clean                                  # wipe build/ first
       ...-File run.ps1 -Jobs 8                                 # parallel build jobs
 
@@ -20,7 +20,7 @@
     - Python 3              -> used to fetch Qt (aqtinstall)
     - Qt 6.8.3 (msvc2022_64) -> fetched into .\.qt via aqtinstall
     - vcpkg + libtorrent/libgit2/zlib -> cloned into .\.vcpkg and built
-    - NSIS 3                -> installed via winget only when -Package is used
+    - Squirrel.Windows + NuGet CLI -> pinned and checksum-verified from NuGet
 #>
 [CmdletBinding()]
 param(
@@ -41,7 +41,7 @@ $QtRoot = Join-Path $Repo '.qt'
 $QtPrefix = Join-Path $QtRoot "$QtVersion\$QtDirName"
 $VcpkgRoot = Join-Path $Repo '.vcpkg'
 $BuildDir = Join-Path $Repo 'build'
-$PackageDir = Join-Path $BuildDir 'packages'
+$PackageDir = Join-Path $BuildDir 'squirrel-release'
 
 function Info($m) { Write-Host "==> $m" -ForegroundColor Cyan }
 function Warn($m) { Write-Host "!!  $m" -ForegroundColor Yellow }
@@ -162,29 +162,6 @@ function Ensure-Tool($cmd, $wingetId, $friendly) {
     if (-not (Have $cmd)) {
         Die "$friendly ($cmd) not found and could not be auto-installed. Install it and re-run."
     }
-}
-
-function Ensure-Nsis {
-    if (Have 'makensis') { return }
-
-    $candidates = @(
-        (Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'),
-        (Join-Path $env:ProgramFiles 'NSIS\makensis.exe')
-    )
-    $found = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-
-    if (-not $found -and (Have 'winget')) {
-        Info 'Installing NSIS via winget...'
-        winget install --id NSIS.NSIS --accept-source-agreements `
-            --accept-package-agreements -e --silent | Out-Host
-        $found = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-    }
-
-    if ($found) {
-        $env:PATH = "$(Split-Path $found);$env:PATH"
-        return
-    }
-    Die 'NSIS (makensis) was not found. Install NSIS 3 and re-run with -Package.'
 }
 
 # --- 1. Locate MSVC (vcvars64) -------------------------------------------------
@@ -368,21 +345,29 @@ if (-not $exe) { Die "Build succeeded but qbittorrent.exe not found." }
 Info "Build OK: $($exe.FullName)"
 
 if ($Package) {
-    Ensure-Nsis
-    Info 'Building the self-contained NSIS installer...'
-    cmake --build $BuildDir --target package
-    if ($LASTEXITCODE -ne 0) { Die 'Installer packaging failed.' }
-
+    $cacheVersion = Select-String -LiteralPath (Join-Path $BuildDir 'CMakeCache.txt') `
+        -Pattern '^QBT_PACKAGE_VERSION:STRING=([0-9]+\.[0-9]+\.[0-9]+)$' |
+        Select-Object -First 1
+    if (-not $cacheVersion) {
+        Die 'Configured Squirrel package version is missing from CMakeCache.txt.'
+    }
+    $packageVersion = $cacheVersion.Matches[0].Groups[1].Value
+    Info "Building the Squirrel installer and update feed ($packageVersion)..."
+    & (Join-Path $Repo 'scripts\build-squirrel-package.ps1') `
+        -PackageVersion $packageVersion `
+        -RepositoryRoot $Repo `
+        -BuildDirectory $BuildDir `
+        -OutputDirectory $PackageDir `
+        -CMakeExecutable $CMakeExe
     $installer = Get-ChildItem -Path $PackageDir `
-        -Filter 'qBittorrent-Material-*-windows-x64.exe' `
+        -Filter "qBittorrent-Material-$packageVersion-windows-x64-Setup.exe" `
         -File -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTime -Descending |
         Select-Object -First 1
     if (-not $installer) { Die "Packaging succeeded but no installer was found in $PackageDir." }
 
     Info "Installer OK: $($installer.FullName)"
-    $checksum = "$($installer.FullName).sha256"
-    if (Test-Path $checksum) { Info "Checksum: $checksum" }
+    Info "SHA256: $((Get-FileHash -Algorithm SHA256 -LiteralPath $installer.FullName).Hash.ToLowerInvariant())"
+    Info "Update feed: $(Join-Path $PackageDir 'RELEASES')"
     exit 0
 }
 

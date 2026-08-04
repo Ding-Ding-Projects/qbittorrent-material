@@ -94,8 +94,11 @@ public:
 
     /// QML singleton factory — returns the shared instance.
     static OptionsController *create(QQmlEngine *engine, QJSEngine *scriptEngine);
+    /// Return the live singleton for native restart preflight checks.
+    static OptionsController *existingInstance();
 
     explicit OptionsController(QObject *parent = nullptr);
+    ~OptionsController() override;
 
     bool isModified() const;
     bool isRestartRequired() const { return m_restartRequired; }
@@ -216,4 +219,6 @@ private:
     bool m_modified = false;
     bool m_restartRequired = false;
     int m_revision = 0;
+
+    static OptionsController *s_instance;
 };

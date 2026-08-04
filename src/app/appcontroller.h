@@ -74,8 +74,7 @@ public:
     /// Set (or, with an empty string, clear) the UI-lock password.
     Q_INVOKABLE void setLockPassword(const QString &password);
 
-    /// Kick off an asynchronous program-update check; result arrives via
-    /// updateCheckFinished().
+    /// Kick off the asynchronous Squirrel check/download/stage pipeline.
     Q_INVOKABLE void checkForUpdates();
 
     /// Read the clipboard; if it contains a magnet/URL/info-hash, forward it to
@@ -105,10 +104,6 @@ signals:
     /// A torrent add was requested from clipboard / another instance / CLI.
     void addTorrentRequested(const QString &source);
 
-    /// Program-update check finished. @p available true when a newer version
-    /// exists; @p latestVersion is the discovered version string (may be empty).
-    void updateCheckFinished(bool available, const QString &latestVersion);
-
     /// Non-blocking user feedback (shown via the Snackbar / tray).
     void notify(const QString &message);
 
@@ -123,5 +118,4 @@ private:
     [[nodiscard]] static QString storedPasswordHash();
 
     bool m_locked = false;
-    bool m_updateCheckInProgress = false;
 };

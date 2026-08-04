@@ -37,6 +37,10 @@ Flickable {
     component OptCheck: CheckBox {
         property string settingKey: ""
         property bool defaultValue: false
+        property string paletteSettingKey: settingKey
+        property string paletteSettingTitle: text
+        property string paletteSettingKind: "toggle"
+        property var paletteSettingDefault: defaultValue
         font: Typography.bodyMedium
         checked: (root.rev, OptionsController.value(settingKey, defaultValue))
         onToggled: {
@@ -60,6 +64,10 @@ Flickable {
             defaultValue: false
         }
         PathField {
+            property string paletteSettingKey: parent.pathKey
+            property string paletteSettingTitle: parent.caption
+            property string paletteSettingKind: "destination"
+            property var paletteSettingDefault: ""
             Layout.fillWidth: true
             enabled: en.checked
             title: parent.caption
@@ -85,6 +93,10 @@ Flickable {
 
             CheckableGroupBox {
                 id: additionDialog
+                property string paletteSettingKey: "AddNewTorrentDialog/Enabled"
+                property string paletteSettingTitle: title
+                property string paletteSettingKind: "toggle"
+                property var paletteSettingDefault: true
                 title: qsTr("Display torrent content and some options")
                 Layout.fillWidth: true
                 checked: (root.rev, OptionsController.value("AddNewTorrentDialog/Enabled", true))
@@ -101,6 +113,10 @@ Flickable {
                 labelWidth: 220
                 Layout.fillWidth: true
                 ComboBox {
+                    property string paletteSettingKey: "BitTorrent/Session/TorrentContentLayout"
+                    property string paletteSettingTitle: qsTr("Torrent content layout")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 0
                     Layout.fillWidth: true
                     model: [ qsTr("Original"), qsTr("Create subfolder"), qsTr("Don't create subfolder") ]
                     currentIndex: (root.rev, OptionsController.value("BitTorrent/Session/TorrentContentLayout", 0))
@@ -124,6 +140,10 @@ Flickable {
                 labelWidth: 220
                 Layout.fillWidth: true
                 ComboBox {
+                    property string paletteSettingKey: "BitTorrent/Session/TorrentStopCondition"
+                    property string paletteSettingTitle: qsTr("Torrent stop condition")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 0
                     Layout.fillWidth: true
                     enabled: !addStopped.checked
                     model: [ qsTr("None"), qsTr("Metadata received"), qsTr("Files checked") ]
@@ -150,6 +170,10 @@ Flickable {
             // Delete .torrent afterwards
             CheckableGroupBox {
                 id: deleteAfter
+                property string paletteSettingKey: "Downloads/DeleteTorrentAfter"
+                property string paletteSettingTitle: title
+                property string paletteSettingKind: "destination"
+                property var paletteSettingDefault: false
                 title: qsTr("Delete .torrent files afterwards")
                 Layout.fillWidth: true
                 checked: (root.rev, OptionsController.value("Downloads/DeleteTorrentAfter", false))
@@ -210,6 +234,10 @@ Flickable {
                 labelWidth: 300
                 Layout.fillWidth: true
                 ComboBox {
+                    property string paletteSettingKey: "Downloads/DefaultTMM"
+                    property string paletteSettingTitle: qsTr("Default Torrent Management Mode")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 0
                     Layout.fillWidth: true
                     model: [ qsTr("Manual"), qsTr("Automatic") ]
                     currentIndex: (root.rev, OptionsController.value("Downloads/DefaultTMM", 0))
@@ -221,6 +249,10 @@ Flickable {
                 labelWidth: 300
                 Layout.fillWidth: true
                 ComboBox {
+                    property string paletteSettingKey: "Downloads/OnCategoryChanged"
+                    property string paletteSettingTitle: qsTr("When Torrent Category changed")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 0
                     Layout.fillWidth: true
                     model: [ qsTr("Relocate torrent"), qsTr("Switch torrent to Manual Mode") ]
                     currentIndex: (root.rev, OptionsController.value("Downloads/OnCategoryChanged", 0))
@@ -232,6 +264,10 @@ Flickable {
                 labelWidth: 300
                 Layout.fillWidth: true
                 ComboBox {
+                    property string paletteSettingKey: "Downloads/OnDefaultSavePathChanged"
+                    property string paletteSettingTitle: qsTr("When Default Save or Incomplete Path changed")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 1
                     Layout.fillWidth: true
                     model: [ qsTr("Relocate affected torrents"), qsTr("Switch affected torrents to Manual Mode") ]
                     currentIndex: (root.rev, OptionsController.value("Downloads/OnDefaultSavePathChanged", 1))
@@ -243,6 +279,10 @@ Flickable {
                 labelWidth: 300
                 Layout.fillWidth: true
                 ComboBox {
+                    property string paletteSettingKey: "Downloads/OnCategorySavePathChanged"
+                    property string paletteSettingTitle: qsTr("When Category Save Path changed")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 1
                     Layout.fillWidth: true
                     model: [ qsTr("Relocate affected torrents"), qsTr("Switch affected torrents to Manual Mode") ]
                     currentIndex: (root.rev, OptionsController.value("Downloads/OnCategorySavePathChanged", 1))
@@ -260,6 +300,10 @@ Flickable {
                 orientation: Qt.Vertical
                 Layout.fillWidth: true
                 PathField {
+                    property string paletteSettingKey: "BitTorrent/Session/DefaultSavePath"
+                    property string paletteSettingTitle: qsTr("Default Save Path")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: ""
                     Layout.fillWidth: true
                     title: qsTr("Choose a save directory")
                     path: (root.rev, OptionsController.value("BitTorrent/Session/DefaultSavePath", ""))
@@ -314,6 +358,8 @@ Flickable {
                 Layout.fillWidth: true
                 spacing: Spacing.sm
                 Button {
+                    property string paletteActionKey: "watched-folder-add"
+                    property string paletteActionTitle: text
                     text: qsTr("Add...")
                     onClicked: {
                         Log.info("ui", "Watched folder Add clicked")
@@ -321,6 +367,8 @@ Flickable {
                     }
                 }
                 Button {
+                    property string paletteActionKey: "watched-folder-edit"
+                    property string paletteActionTitle: text
                     text: qsTr("Options...")
                     enabled: watchedTable.currentSelection >= 0
                     onClicked: {
@@ -329,6 +377,8 @@ Flickable {
                     }
                 }
                 Button {
+                    property string paletteActionKey: "watched-folder-remove"
+                    property string paletteActionTitle: text
                     text: qsTr("Remove")
                     enabled: watchedTable.currentSelection >= 0
                     onClicked: {
@@ -343,6 +393,10 @@ Flickable {
 
         // ==== Excluded file names =============================================
         CheckableGroupBox {
+            property string paletteSettingKey: "BitTorrent/ExcludedFileNamesEnabled"
+            property string paletteSettingTitle: title
+            property string paletteSettingKind: "destination"
+            property var paletteSettingDefault: false
             title: qsTr("Excluded file names")
             Layout.fillWidth: true
             checked: (root.rev, OptionsController.value("BitTorrent/ExcludedFileNamesEnabled", false))
@@ -351,6 +405,10 @@ Flickable {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 120
                 TextArea {
+                    property string paletteSettingKey: "BitTorrent/Session/ExcludedFileNames"
+                    property string paletteSettingTitle: qsTr("Excluded file name patterns")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: ""
                     wrapMode: TextEdit.NoWrap
                     placeholderText: qsTr("One name pattern per line (wildcards *, ?, [...] supported)")
                     font: Typography.mono
@@ -362,6 +420,10 @@ Flickable {
 
         // ==== Email notification ==============================================
         CheckableGroupBox {
+            property string paletteSettingKey: "Preferences/MailNotification/enabled"
+            property string paletteSettingTitle: title
+            property string paletteSettingKind: "destination"
+            property var paletteSettingDefault: false
             title: qsTr("Email notification upon download completion")
             Layout.fillWidth: true
             checked: (root.rev, OptionsController.value("Preferences/MailNotification/enabled", false))
@@ -372,6 +434,10 @@ Flickable {
                 labelWidth: 140
                 Layout.fillWidth: true
                 TextField {
+                    property string paletteSettingKey: "Preferences/MailNotification/sender"
+                    property string paletteSettingTitle: qsTr("Email notification sender")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: ""
                     Layout.fillWidth: true
                     placeholderText: "qBittorrent_notification@example.com"
                     text: (root.rev, OptionsController.value("Preferences/MailNotification/sender", ""))
@@ -383,6 +449,10 @@ Flickable {
                 labelWidth: 140
                 Layout.fillWidth: true
                 TextField {
+                    property string paletteSettingKey: "Preferences/MailNotification/email"
+                    property string paletteSettingTitle: qsTr("Email notification recipient")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: ""
                     Layout.fillWidth: true
                     text: (root.rev, OptionsController.value("Preferences/MailNotification/email", ""))
                     onEditingFinished: OptionsController.setValue("Preferences/MailNotification/email", text)
@@ -393,6 +463,10 @@ Flickable {
                 labelWidth: 140
                 Layout.fillWidth: true
                 TextField {
+                    property string paletteSettingKey: "Preferences/MailNotification/smtp_server"
+                    property string paletteSettingTitle: qsTr("SMTP server")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: ""
                     Layout.fillWidth: true
                     placeholderText: "smtp.example.com:465"
                     text: (root.rev, OptionsController.value("Preferences/MailNotification/smtp_server", ""))
@@ -404,6 +478,10 @@ Flickable {
                 labelWidth: 140
                 Layout.fillWidth: true
                 ComboBox {
+                    property string paletteSettingKey: "Preferences/MailNotification/SMTPEncryptionType"
+                    property string paletteSettingTitle: qsTr("SMTP encryption")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 2
                     Layout.fillWidth: true
                     model: [ qsTr("None"), qsTr("STARTTLS"), qsTr("SMTPS") ]
                     currentIndex: (root.rev, OptionsController.value("Preferences/MailNotification/SMTPEncryptionType", 2))
@@ -411,6 +489,10 @@ Flickable {
                 }
             }
             CheckableGroupBox {
+                property string paletteSettingKey: "Preferences/MailNotification/req_auth"
+                property string paletteSettingTitle: title
+                property string paletteSettingKind: "destination"
+                property var paletteSettingDefault: false
                 title: qsTr("Authentication")
                 Layout.fillWidth: true
                 checked: (root.rev, OptionsController.value("Preferences/MailNotification/req_auth", false))
@@ -420,6 +502,10 @@ Flickable {
                     labelWidth: 140
                     Layout.fillWidth: true
                     TextField {
+                        property string paletteSettingKey: "Preferences/MailNotification/username"
+                        property string paletteSettingTitle: qsTr("SMTP username")
+                        property string paletteSettingKind: "destination"
+                        property var paletteSettingDefault: ""
                         Layout.fillWidth: true
                         text: (root.rev, OptionsController.value("Preferences/MailNotification/username", ""))
                         onEditingFinished: OptionsController.setValue("Preferences/MailNotification/username", text)
@@ -430,6 +516,11 @@ Flickable {
                     labelWidth: 140
                     Layout.fillWidth: true
                     TextField {
+                        property string paletteSettingKey: "Preferences/MailNotification/password"
+                        property string paletteSettingTitle: qsTr("SMTP password")
+                        property string paletteSettingKind: "destination"
+                        property var paletteSettingDefault: ""
+                        property bool paletteSettingSensitive: true
                         Layout.fillWidth: true
                         echoMode: TextInput.Password
                         text: (root.rev, OptionsController.value("Preferences/MailNotification/password", ""))
@@ -438,6 +529,8 @@ Flickable {
                 }
             }
             Button {
+                property string paletteActionKey: "send-test-email"
+                property string paletteActionTitle: text
                 text: qsTr("Send test email")
                 onClicked: {
                     Log.info("ui", "Downloads: send test email")
@@ -452,11 +545,19 @@ Flickable {
             Layout.fillWidth: true
 
             CheckableGroupBox {
+                property string paletteSettingKey: "AutoRun/OnTorrentAdded/Enabled"
+                property string paletteSettingTitle: title
+                property string paletteSettingKind: "destination"
+                property var paletteSettingDefault: false
                 title: qsTr("Run on torrent added:")
                 Layout.fillWidth: true
                 checked: (root.rev, OptionsController.value("AutoRun/OnTorrentAdded/Enabled", false))
                 onToggled: (v) => OptionsController.setValue("AutoRun/OnTorrentAdded/Enabled", v)
                 TextField {
+                    property string paletteSettingKey: "AutoRun/OnTorrentAdded/Program"
+                    property string paletteSettingTitle: qsTr("Program to run when a torrent is added")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: ""
                     Layout.fillWidth: true
                     placeholderText: qsTr("Command line")
                     text: (root.rev, OptionsController.value("AutoRun/OnTorrentAdded/Program", ""))
@@ -464,11 +565,19 @@ Flickable {
                 }
             }
             CheckableGroupBox {
+                property string paletteSettingKey: "AutoRun/enabled"
+                property string paletteSettingTitle: title
+                property string paletteSettingKind: "destination"
+                property var paletteSettingDefault: false
                 title: qsTr("Run on torrent finished:")
                 Layout.fillWidth: true
                 checked: (root.rev, OptionsController.value("AutoRun/enabled", false))
                 onToggled: (v) => OptionsController.setValue("AutoRun/enabled", v)
                 TextField {
+                    property string paletteSettingKey: "AutoRun/program"
+                    property string paletteSettingTitle: qsTr("Program to run when a torrent finishes")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: ""
                     Layout.fillWidth: true
                     placeholderText: qsTr("Command line")
                     text: (root.rev, OptionsController.value("AutoRun/program", ""))

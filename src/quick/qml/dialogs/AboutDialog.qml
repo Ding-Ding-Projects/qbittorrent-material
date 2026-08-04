@@ -28,6 +28,16 @@ import qBittorrent
 Dialog {
     id: root
 
+    readonly property var releaseIdentity: Experience.currentReleaseIdentity || ({})
+    readonly property string releaseCodeName: String(releaseIdentity.codeName || "")
+    readonly property string releasePhotoUrl: String(releaseIdentity.photoUrl || "")
+    readonly property string releaseCatalogRevision: String(releaseIdentity.catalogRevision || "")
+    readonly property string releaseIdentityReason: String(releaseIdentity.reason || "")
+    readonly property bool releaseIdentityAvailable: releaseIdentity.available === true
+        && releaseCodeName.length > 0 && releasePhotoUrl.length > 0
+    readonly property string applicationVersion: Qt.application.version.length > 0
+        ? Qt.application.version : qsTr("unknown")
+
     // The C++ context loads the QRC once before Main.qml is instantiated. Keep
     // an explicit visible fallback if a packaging regression omits the asset.
     readonly property string licenseText: ApplicationInfo.licenseText.length > 0
@@ -161,8 +171,7 @@ Dialog {
                             }
 
                             Label {
-                                text: qsTr("Version %1").arg(Qt.application.version.length > 0
-                                        ? Qt.application.version : qsTr("unknown"))
+                                text: qsTr("Version %1").arg(root.applicationVersion)
                                 font: Typography.bodyMedium
                                 color: Theme.color("onSurfaceVariant")
                             }
@@ -183,6 +192,89 @@ Dialog {
                         text: qsTr("Copyright %1 2006-2026 The qBittorrent project").arg("©")
                         font: Typography.bodyMedium
                         color: Theme.color("onSurfaceVariant")
+                    }
+
+                    MaterialCard {
+                        Layout.fillWidth: true
+                        title: qsTr("Release code name")
+                        Accessible.name: title
+                        Accessible.description: root.releaseIdentityAvailable
+                            ? root.releaseCodeName
+                            : qsTr("Version-only release")
+
+                        Label {
+                            Layout.fillWidth: true
+                            visible: root.releaseIdentityAvailable
+                            text: root.releaseCodeName
+                            font: Typography.titleMedium
+                            color: Theme.color("onSurface")
+                            wrapMode: Text.WordWrap
+                        }
+
+                        Button {
+                            id: aboutPhotoLink
+                            Layout.fillWidth: true
+                            visible: root.releaseIdentityAvailable
+                            text: qsTr("Open public dim sum photo")
+                            flat: true
+                            focusPolicy: Qt.StrongFocus
+                            implicitHeight: Math.max(40,
+                                aboutPhotoLinkLabel.implicitHeight + topPadding + bottomPadding)
+                            Accessible.name: text
+                            Accessible.description: qsTr("Open the public catalog photo for %1")
+                                .arg(root.releaseCodeName)
+                            contentItem: Label {
+                                id: aboutPhotoLinkLabel
+                                text: aboutPhotoLink.text
+                                font: aboutPhotoLink.font
+                                color: aboutPhotoLink.enabled
+                                    ? Theme.color("primary") : Theme.color("onSurfaceVariant")
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                                wrapMode: Text.WordWrap
+                            }
+                            onClicked: Qt.openUrlExternally(root.releasePhotoUrl)
+                        }
+
+                        Label {
+                            Layout.fillWidth: true
+                            visible: root.releaseIdentityAvailable
+                                && root.releaseCatalogRevision.length > 0
+                            text: qsTr("Catalog revision %1")
+                                .arg(root.releaseCatalogRevision)
+                            font: Typography.bodySmall
+                            color: Theme.color("onSurfaceVariant")
+                            wrapMode: Text.WrapAnywhere
+                        }
+
+                        Label {
+                            Layout.fillWidth: true
+                            visible: !root.releaseIdentityAvailable
+                            text: qsTr("Version-only release")
+                            font: Typography.titleMedium
+                            color: Theme.color("onSurface")
+                            wrapMode: Text.WordWrap
+                        }
+
+                        Label {
+                            Layout.fillWidth: true
+                            visible: !root.releaseIdentityAvailable
+                            text: qsTr("No public dim sum code name is available for this release. Version %1 remains the release identity.")
+                                .arg(root.applicationVersion)
+                            font: Typography.bodyMedium
+                            color: Theme.color("onSurfaceVariant")
+                            wrapMode: Text.WordWrap
+                        }
+
+                        Label {
+                            Layout.fillWidth: true
+                            visible: !root.releaseIdentityAvailable
+                                && root.releaseIdentityReason.length > 0
+                            text: qsTr("Reason: %1").arg(root.releaseIdentityReason)
+                            font: Typography.bodySmall
+                            color: Theme.color("onSurfaceVariant")
+                            wrapMode: Text.WordWrap
+                        }
                     }
 
                     LinkRow { caption: qsTr("Home Page:"); url: "https://www.qbittorrent.org" }

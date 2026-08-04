@@ -59,18 +59,17 @@ Item {
         function onOperationFinished(success, message, location) {
             const target = (location && location.toString().length > 0)
                 ? location.toString() : ""
-            workspaceSnackbar.show(message,
-                success && target.length > 0 ? qsTr("Open") : "",
-                success && target.length > 0
-                    ? function() { Qt.openUrlExternally(location) } : null)
-
-            // Offer the editor route as well: "Open" hands the file to whatever
-            // the OS associates, which for an exported .json or .md is rarely
-            // the editor the user actually wants it in.
-            if (success && target.length > 0 && DesktopIntegration.externalEditorAvailable) {
-                NotificationCenter.notify(message, "success", "",
-                    qsTr("Open in editor"), "open-export:" + target)
-            }
+            const canOpen = success && target.length > 0
+            // Publish exactly one durable card. Prefer the configured editor so
+            // exported records satisfy the one-click editor path; otherwise the
+            // platform-open action remains available for a local URL.
+            const openInEditor = canOpen && DesktopIntegration.externalEditorAvailable
+            const actionLabel = openInEditor ? qsTr("Open in editor")
+                : (canOpen ? qsTr("Open") : "")
+            const actionId = openInEditor ? "open-export:" + target
+                : (canOpen ? "open-workspace-location:" + target : "")
+            NotificationCenter.notify(message, success ? "success" : "error", "",
+                actionLabel, actionId)
         }
     }
 
@@ -709,5 +708,4 @@ Item {
         onAccepted: WorkspaceManager.importRepository(selectedFolder)
     }
 
-    Snackbar { id: workspaceSnackbar }
 }

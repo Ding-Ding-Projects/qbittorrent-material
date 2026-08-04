@@ -55,6 +55,10 @@ Flickable {
     component OptCheck: CheckBox {
         property string settingKey: ""
         property bool defaultValue: false
+        property string paletteSettingKey: settingKey
+        property string paletteSettingTitle: text
+        property string paletteSettingKind: "toggle"
+        property var paletteSettingDefault: defaultValue
         font: Typography.bodyMedium
         checked: (root.rev, OptionsController.value(settingKey, defaultValue))
         onToggled: {
@@ -80,6 +84,10 @@ Flickable {
         }
         Item { Layout.fillWidth: true }
         SpinBox {
+            property string paletteSettingKey: parent.valueKey
+            property string paletteSettingTitle: parent.labelText + " " + qsTr("value")
+            property string paletteSettingKind: "destination"
+            property var paletteSettingDefault: parent.defaultValue
             enabled: en.checked
             editable: true
             from: parent.fromValue; to: 2147483647
@@ -107,6 +115,10 @@ Flickable {
                 labelWidth: 260
                 Layout.fillWidth: true
                 ComboBox {
+                    property string paletteSettingKey: "BitTorrent/Session/BTProtocol"
+                    property string paletteSettingTitle: qsTr("Peer connection protocol")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 0
                     Layout.fillWidth: true
                     model: [ qsTr("TCP and μTP"), qsTr("TCP"), qsTr("μTP") ]
                     currentIndex: (root.rev, OptionsController.value("BitTorrent/Session/BTProtocol", 0))
@@ -130,6 +142,10 @@ Flickable {
                 Item { Layout.fillWidth: true }
                 SpinBox {
                     id: portSpin
+                    property string paletteSettingKey: "BitTorrent/Session/Port"
+                    property string paletteSettingTitle: qsTr("Port used for incoming connections")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 0
                     editable: true
                     from: 0; to: 65535
                     value: (root.rev, OptionsController.value("BitTorrent/Session/Port", 0))
@@ -141,6 +157,8 @@ Flickable {
                     onValueModified: OptionsController.setValue("BitTorrent/Session/Port", value)
                 }
                 Button {
+                    property string paletteActionKey: "random-listening-port"
+                    property string paletteActionTitle: text
                     text: qsTr("Random")
                     onClicked: {
                         var p = 1024 + Math.floor(Math.random() * (65535 - 1024))
@@ -189,6 +207,10 @@ Flickable {
 
         // ==== I2P =============================================================
         CheckableGroupBox {
+            property string paletteSettingKey: "BitTorrent/Session/I2P/Enabled"
+            property string paletteSettingTitle: title
+            property string paletteSettingKind: "toggle"
+            property var paletteSettingDefault: false
             title: qsTr("I2P (experimental)")
             Layout.fillWidth: true
             checked: (root.rev, OptionsController.value("BitTorrent/Session/I2P/Enabled", false))
@@ -198,6 +220,10 @@ Flickable {
                 labelWidth: 100
                 Layout.fillWidth: true
                 TextField {
+                    property string paletteSettingKey: "BitTorrent/Session/I2P/Address"
+                    property string paletteSettingTitle: qsTr("I2P host")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: "127.0.0.1"
                     Layout.fillWidth: true
                     text: (root.rev, OptionsController.value("BitTorrent/Session/I2P/Address", "127.0.0.1"))
                     onEditingFinished: OptionsController.setValue("BitTorrent/Session/I2P/Address", text.trim())
@@ -208,6 +234,10 @@ Flickable {
                 labelWidth: 100
                 Layout.fillWidth: true
                 SpinBox {
+                    property string paletteSettingKey: "BitTorrent/Session/I2P/Port"
+                    property string paletteSettingTitle: qsTr("I2P port")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 7656
                     from: 1; to: 65535; editable: true
                     value: (root.rev, OptionsController.value("BitTorrent/Session/I2P/Port", 7656))
                     onValueModified: OptionsController.setValue("BitTorrent/Session/I2P/Port", value)
@@ -230,6 +260,10 @@ Flickable {
                 labelWidth: 120
                 Layout.fillWidth: true
                 ComboBox {
+                    property string paletteSettingKey: "Network/Proxy/Type"
+                    property string paletteSettingTitle: qsTr("Proxy type")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 0
                     Layout.fillWidth: true
                     model: [ qsTr("(None)"), qsTr("SOCKS4"), qsTr("SOCKS5"), qsTr("HTTP") ]
                     currentIndex: root.proxyComboIndex(root.proxyType)
@@ -242,6 +276,10 @@ Flickable {
                 labelWidth: 120
                 Layout.fillWidth: true
                 TextField {
+                    property string paletteSettingKey: "Network/Proxy/IP"
+                    property string paletteSettingTitle: qsTr("Proxy host")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: ""
                     Layout.fillWidth: true
                     enabled: !root.proxyNone
                     text: (root.rev, OptionsController.value("Network/Proxy/IP", ""))
@@ -253,6 +291,10 @@ Flickable {
                 labelWidth: 120
                 Layout.fillWidth: true
                 SpinBox {
+                    property string paletteSettingKey: "Network/Proxy/Port"
+                    property string paletteSettingTitle: qsTr("Proxy port")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 8080
                     enabled: !root.proxyNone
                     from: 1; to: 65535; editable: true
                     value: (root.rev, OptionsController.value("Network/Proxy/Port", 8080))
@@ -275,6 +317,10 @@ Flickable {
             }
 
             CheckableGroupBox {
+                property string paletteSettingKey: "Network/Proxy/AuthEnabled"
+                property string paletteSettingTitle: title
+                property string paletteSettingKind: "toggle"
+                property var paletteSettingDefault: false
                 title: qsTr("Authentication")
                 Layout.fillWidth: true
                 enabled: root.proxyAuthSupported
@@ -285,6 +331,10 @@ Flickable {
                     labelWidth: 120
                     Layout.fillWidth: true
                     TextField {
+                        property string paletteSettingKey: "Network/Proxy/Username"
+                        property string paletteSettingTitle: qsTr("Proxy username")
+                        property string paletteSettingKind: "destination"
+                        property var paletteSettingDefault: ""
                         Layout.fillWidth: true
                         text: (root.rev, OptionsController.value("Network/Proxy/Username", ""))
                         onEditingFinished: OptionsController.setValue("Network/Proxy/Username", text.trim())
@@ -295,6 +345,11 @@ Flickable {
                     labelWidth: 120
                     Layout.fillWidth: true
                     TextField {
+                        property string paletteSettingKey: "Network/Proxy/Password"
+                        property string paletteSettingTitle: qsTr("Proxy password")
+                        property string paletteSettingKind: "destination"
+                        property var paletteSettingDefault: ""
+                        property bool paletteSettingSensitive: true
                         Layout.fillWidth: true
                         echoMode: TextInput.Password
                         text: (root.rev, OptionsController.value("Network/Proxy/Password", ""))
@@ -310,6 +365,10 @@ Flickable {
             }
 
             CheckableGroupBox {
+                property string paletteSettingKey: "Network/Proxy/Profiles/BitTorrent"
+                property string paletteSettingTitle: title
+                property string paletteSettingKind: "toggle"
+                property var paletteSettingDefault: false
                 title: qsTr("Use proxy for BitTorrent purposes")
                 Layout.fillWidth: true
                 enabled: !root.proxyNone
@@ -354,6 +413,10 @@ Flickable {
                 Layout.fillWidth: true
                 spacing: Spacing.sm
                 PathField {
+                    property string paletteSettingKey: "BitTorrent/Session/IPFilter"
+                    property string paletteSettingTitle: qsTr("IP filter path")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: ""
                     Layout.fillWidth: true
                     enabled: ipFilterEnable.checked
                     pickFolder: false
@@ -362,6 +425,8 @@ Flickable {
                     onPathChanged: OptionsController.setValue("BitTorrent/Session/IPFilter", path)
                 }
                 IconButton {
+                    property string paletteActionKey: "reload-ip-filter"
+                    property string paletteActionTitle: tooltip
                     symbol: Icons.refresh
                     tooltip: qsTr("Reload the filter")
                     enabled: ipFilterEnable.checked
@@ -375,6 +440,8 @@ Flickable {
                 Layout.fillWidth: true
                 spacing: Spacing.sm
                 Button {
+                    property string paletteActionKey: "edit-banned-ip-addresses"
+                    property string paletteActionTitle: text
                     text: qsTr("Manually banned IP addresses...")
                     onClicked: {
                         Log.info("ui", "Connection: opening BanListOptionsDialog")

@@ -13,6 +13,12 @@ Popup {
 
     required property var commands
     signal commandInvoked(string commandId)
+    signal pluginEnabledChanged(string pluginId, bool enabled)
+    signal pluginRetryRequested(string pluginId)
+    signal pluginTrustRequested(string pluginId)
+    signal pluginManageRequested(string pluginId)
+    signal pluginSourceRequested(string pluginId, string sourceUrl)
+    signal settingValueChanged(string settingId, var value)
 
     parent: Overlay.overlay
     anchors.centerIn: parent
@@ -25,6 +31,10 @@ Popup {
     Material.elevation: 12
 
     property bool fullWindow: false
+    property string pendingCommandId: ""
+    property string pendingPluginManageId: ""
+    property string pendingSettingId: ""
+    property var pendingSettingValue
 
     function filteredCommands() {
         var query = search.text.trim()
@@ -34,7 +44,7 @@ Popup {
         for (var i = 0; i < commands.length; ++i) {
             var command = commands[i]
             var corpus = command.title + " " + command.group + " " + command.destination
-                + " " + (command.keywords || "")
+                + " " + (command.context || "") + " " + (command.keywords || "")
             if (search.regexEnabled) {
                 var result = WorkspaceManager.evaluateRegularExpression(
                     query, search.regexFlags, corpus)
@@ -55,16 +65,42 @@ Popup {
         search.forceActiveFocus(Qt.ShortcutFocusReason)
     }
 
+    function queueSettingValue(settingId, value) {
+        pendingSettingId = settingId
+        pendingSettingValue = value
+        close()
+    }
+
     function activateCurrent() {
         var rows = filteredCommands()
         if (!rows.length)
             return
         var index = Math.max(0, Math.min(results.currentIndex, rows.length - 1))
+        if (rows[index].enabled === false)
+            return
+        pendingCommandId = rows[index].id
         close()
-        commandInvoked(rows[index].id)
     }
 
     onOpened: results.currentIndex = 0
+    onClosed: {
+        var commandId = pendingCommandId
+        var pluginId = pendingPluginManageId
+        var settingId = pendingSettingId
+        var settingValue = pendingSettingValue
+        pendingCommandId = ""
+        pendingPluginManageId = ""
+        pendingSettingId = ""
+        pendingSettingValue = undefined
+        Qt.callLater(function() {
+            if (commandId.length)
+                root.commandInvoked(commandId)
+            else if (pluginId.length)
+                root.pluginManageRequested(pluginId)
+            else if (settingId.length)
+                root.settingValueChanged(settingId, settingValue)
+        })
+    }
 
     background: Rectangle {
         radius: root.fullWindow ? 0 : Spacing.radiusDialog
@@ -89,6 +125,12 @@ Popup {
                 text: qsTr("Command palette")
                 font: Typography.titleLarge
                 color: Theme.color("onSurface")
+            }
+            Label {
+                text: qsTr("%1 commands").arg(root.commands.length)
+                font: Typography.labelMedium
+                color: Theme.color("onSurfaceVariant")
+                Accessible.name: text
             }
             Button {
                 text: root.fullWindow ? qsTr("Card view") : qsTr("Full-window view")
@@ -148,6 +190,7 @@ Popup {
                 required property var modelData
                 required property int index
                 width: ListView.view.width
+                enabled: modelData.enabled !== false
                 highlighted: ListView.isCurrentItem
                 hoverEnabled: true
                 Accessible.name: modelData.title
@@ -160,21 +203,237 @@ Popup {
                     root.activateCurrent()
                 }
 
-                contentItem: ColumnLayout {
-                    spacing: 2
-                    Label {
-                        Layout.fillWidth: true
-                        text: modelData.title
-                        color: Theme.color("onSurface")
-                        font: Typography.bodyLarge
-                        elide: Text.ElideRight
+                contentItem: RowLayout {
+                    spacing: Spacing.sm
+
+                    MDIcon {
+                        visible: modelData.pluginId !== undefined
+                        icon: Icons.extension
+                        size: 20
+                        color: Theme.color("primary")
+                        Accessible.ignored: true
                     }
-                    Label {
+
+                    ColumnLayout {
                         Layout.fillWidth: true
-                        text: modelData.destination || modelData.group
+                        spacing: 2
+                        Label {
+                            Layout.fillWidth: true
+                            text: modelData.title
+                            color: Theme.color("onSurface")
+                            font: Typography.bodyLarge
+                            elide: Text.ElideRight
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: modelData.destination || modelData.group
+                            color: Theme.color("onSurfaceVariant")
+                            font: Typography.bodySmall
+                            elide: Text.ElideRight
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            visible: (modelData.context || "").length > 0
+                            text: modelData.context || ""
+                            color: Theme.color("onSurfaceVariant")
+                            font: Typography.labelSmall
+                            elide: Text.ElideRight
+                            Accessible.name: visible ? text : ""
+                        }
+                    }
+
+                    Switch {
+                        visible: modelData.kind === "action" && modelData.checkable === true
+                        checked: modelData.checked === true
+                        enabled: modelData.enabled !== false
+                        Accessible.name: modelData.title
+                        Accessible.description: modelData.destination || modelData.group
+                        onClicked: {
+                            results.currentIndex = index
+                            root.activateCurrent()
+                        }
+                    }
+
+                    Switch {
+                        visible: modelData.kind === "setting"
+                            && modelData.inlineControl === "toggle"
+                        checked: modelData.checked === true
+                        enabled: modelData.inlineEditable !== false
+                        Accessible.name: qsTr("Change %1").arg(modelData.title)
+                        Accessible.description: modelData.inlineEditable === false
+                            ? qsTr("Open the setting to edit it because Options has unapplied changes.")
+                            : (modelData.destination || modelData.group)
+                        onClicked: {
+                            results.currentIndex = index
+                            root.queueSettingValue(modelData.settingId, checked)
+                        }
+                    }
+
+                    ComboBox {
+                        visible: modelData.kind === "setting"
+                            && modelData.inlineControl === "select"
+                        Layout.preferredWidth: 180
+                        model: modelData.choices || []
+                        currentIndex: Number(modelData.value)
+                        enabled: modelData.inlineEditable !== false
+                        Accessible.name: qsTr("Change %1").arg(modelData.title)
+                        onActivated: (choiceIndex) =>
+                            root.queueSettingValue(modelData.settingId, choiceIndex)
+                    }
+
+                    Slider {
+                        property bool changedByUser: false
+                        visible: modelData.kind === "setting"
+                            && modelData.inlineControl === "slider"
+                        Layout.preferredWidth: 150
+                        from: Number(modelData.minimum)
+                        to: Number(modelData.maximum)
+                        stepSize: Number(modelData.step) || 1
+                        value: Number(modelData.value)
+                        enabled: modelData.inlineEditable !== false
+                        Accessible.name: qsTr("Change %1").arg(modelData.title)
+                        onMoved: changedByUser = true
+                        onPressedChanged: {
+                            if (!pressed && changedByUser) {
+                                changedByUser = false
+                                root.queueSettingValue(modelData.settingId, value)
+                            }
+                        }
+                    }
+
+                    SpinBox {
+                        visible: modelData.kind === "setting"
+                            && modelData.inlineControl === "spin"
+                        Layout.preferredWidth: 140
+                        from: Number(modelData.minimum)
+                        to: Number(modelData.maximum)
+                        stepSize: Number(modelData.step) || 1
+                        value: Number(modelData.value)
+                        editable: true
+                        enabled: modelData.inlineEditable !== false
+                        Accessible.name: qsTr("Change %1").arg(modelData.title)
+                        onValueModified: root.queueSettingValue(modelData.settingId, value)
+                    }
+
+                    TextField {
+                        visible: modelData.kind === "setting"
+                            && (modelData.inlineControl === "text"
+                                || modelData.inlineControl === "path")
+                            && modelData.sensitive !== true
+                        Layout.preferredWidth: 190
+                        text: modelData.valueText || ""
+                        enabled: modelData.inlineEditable !== false
+                        selectByMouse: true
+                        placeholderText: modelData.inlineControl === "path"
+                            ? qsTr("Enter a path") : qsTr("Enter a value")
+                        Accessible.name: qsTr("Change %1").arg(modelData.title)
+                        onAccepted: root.queueSettingValue(modelData.settingId, text)
+                    }
+
+                    Button {
+                        visible: modelData.kind === "setting"
+                            && modelData.inlineControl === "password"
+                        text: qsTr("Edit securely…")
+                        flat: true
+                        Accessible.name: qsTr("Open %1 without showing its value").arg(modelData.title)
+                        onClicked: {
+                            root.pendingCommandId = modelData.id
+                            root.close()
+                        }
+                    }
+
+                    Button {
+                        visible: modelData.kind === "setting"
+                            && (modelData.inlineControl === "action"
+                                || modelData.inlineControl === "color")
+                        text: modelData.inlineControl === "color"
+                            ? qsTr("Choose…") : (modelData.actionLabel || qsTr("Open…"))
+                        flat: true
+                        enabled: modelData.inlineEditable !== false
+                        Accessible.name: modelData.title
+                        onClicked: root.queueSettingValue(modelData.settingId, true)
+                    }
+
+                    Label {
+                        visible: modelData.kind === "setting"
+                            && modelData.inlineControl === "readonly"
+                        text: qsTr("Read only")
                         color: Theme.color("onSurfaceVariant")
-                        font: Typography.bodySmall
-                        elide: Text.ElideRight
+                        font: Typography.labelMedium
+                        Accessible.name: qsTr("%1 is read only").arg(modelData.title)
+                    }
+
+                    Switch {
+                        visible: modelData.kind === "plugin" && modelData.registered === true
+                        checked: modelData.pluginEnabled === true
+                        enabled: modelData.runtimeWaiting !== true
+                            && modelData.trusted !== false
+                            && (modelData.integrityState === undefined
+                                || String(modelData.integrityState).indexOf("verified-") === 0)
+                            && modelData.enabled !== false
+                        Accessible.name: qsTr("Enable %1 search plugin").arg(modelData.title)
+                        Accessible.description: modelData.runtimeWaiting === true
+                            ? qsTr("Python is not ready; the registered plugin cannot be changed yet.")
+                            : (modelData.destination || modelData.group)
+                        onClicked: {
+                            results.currentIndex = index
+                            root.pluginEnabledChanged(modelData.pluginId, checked)
+                        }
+                    }
+
+                    Button {
+                        visible: modelData.kind === "plugin" && modelData.canRetry === true
+                        text: qsTr("Retry setup")
+                        flat: true
+                        Accessible.name: qsTr("Retry verified catalog and runtime setup for %1").arg(modelData.title)
+                        onClicked: {
+                            results.currentIndex = index
+                            root.pluginRetryRequested(modelData.pluginId)
+                        }
+                    }
+
+                    Button {
+                        visible: modelData.kind === "plugin" && modelData.canTrust === true
+                        text: qsTr("Trust")
+                        flat: true
+                        Accessible.name: qsTr("Review and trust %1 search plugin").arg(modelData.title)
+                        onClicked: {
+                            results.currentIndex = index
+                            root.pluginTrustRequested(modelData.pluginId)
+                        }
+                    }
+
+                    Button {
+                        visible: modelData.kind === "plugin" && modelData.canManage === true
+                        text: qsTr("Manage")
+                        flat: true
+                        Accessible.name: qsTr("Manage %1 search plugin").arg(modelData.title)
+                        onClicked: {
+                            results.currentIndex = index
+                            root.pendingPluginManageId = modelData.pluginId
+                            root.close()
+                        }
+                    }
+
+                    IconButton {
+                        visible: modelData.kind === "plugin"
+                            && (modelData.pluginSource || "").length > 0
+                        symbol: Icons.open_in_new
+                        tooltip: qsTr("Open plugin source")
+                        Accessible.name: qsTr("Open source for %1").arg(modelData.title)
+                        onClicked: root.pluginSourceRequested(
+                            modelData.pluginId, modelData.pluginSource)
+                    }
+
+                    Label {
+                        visible: modelData.kind !== "plugin"
+                            && modelData.kind !== "setting"
+                            && !modelData.checkable
+                            && (modelData.shortcut || "").length > 0
+                        text: modelData.shortcut || ""
+                        color: Theme.color("onSurfaceVariant")
+                        font: Typography.labelMedium
+                        Accessible.name: visible ? qsTr("Keyboard shortcut %1").arg(text) : ""
                     }
                 }
             }
@@ -193,7 +452,7 @@ Popup {
         Label {
             Layout.fillWidth: true
             Layout.margins: Spacing.md
-            text: qsTr("↑/↓ Navigate   Enter Run   Esc Close   Ctrl+Shift+P Open")
+            text: qsTr("↑/↓ Navigate   Enter Run   Esc Close   Ctrl+Shift+F Open")
             horizontalAlignment: Text.AlignHCenter
             font: Typography.bodySmall
             color: Theme.color("onSurfaceVariant")

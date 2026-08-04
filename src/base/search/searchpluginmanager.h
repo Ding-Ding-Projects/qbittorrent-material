@@ -12,10 +12,17 @@
 
 #pragma once
 
+#include <functional>
+
+#include <QByteArray>
 #include <QHash>
+#include <QList>
 #include <QObject>
 #include <QPointer>
 #include <QProcessEnvironment>
+#include <QQueue>
+#include <QVariantList>
+#include <QVariantMap>
 
 #include "base/path.h"
 #include "base/utils/version.h"
@@ -27,6 +34,9 @@ namespace Net
 {
     struct DownloadResult;
 }
+
+class QProcess;
+class QTimer;
 
 /// Metadata describing an installed search engine plugin (the Python "nova" plugins).
 struct SearchPluginInfo
@@ -86,6 +96,27 @@ public:
     /// string when the last `nova2.py --capabilities` run succeeded. Lets the UI
     /// distinguish "no plugins installed yet" from "search cannot run at all".
     [[nodiscard]] QString runtimeError() const;
+    /// True only when the most recent capabilities generation completed and
+    /// the in-memory plugin registry belongs to that successful generation.
+    [[nodiscard]] bool runtimeReady() const;
+
+    /// Snapshot of the verified unofficial-plugin catalog bootstrap. The map
+    /// contains row/source/canonical counts plus live completed/installed/
+    /// failed/skipped counts, so the UI can report one honest aggregate state
+    /// instead of opening a notification for every third-party engine.
+    [[nodiscard]] QVariantMap unofficialCatalogStatus() const;
+    /// Palette-facing union of every validated canonical catalog entry, every
+    /// bundled default, and every runtime-registered custom plugin. Unlike
+    /// allPlugins(), this inventory remains useful while Python is unavailable.
+    /// Each map explicitly reports disk/registration/runtime state and which
+    /// recovery or management actions are currently meaningful.
+    [[nodiscard]] QVariantList palettePluginCatalog() const;
+    void retryUnofficialCatalogSync();
+    /// Promotes one SHA-256-verified catalog candidate out of quarantine and
+    /// validates it before it can remain in the active Python engine folder.
+    /// New and changed third-party bytes are never imported before this
+    /// explicit user action.
+    void trustUnofficialPlugin(const QString &id);
 
     /// Re-extracts the bundled runtime and re-runs the capabilities query. Used
     /// when the user fixes a prerequisite (installs Python, points Options at an
@@ -106,6 +137,10 @@ signals:
     void pluginUpdated(const QString &name);
     void pluginUpdateFailed(const QString &name, const QString &reason);
 
+    /// Emitted once after a successful full runtime reconciliation, including
+    /// silent startup/catalog probes where the per-plugin signals are suppressed.
+    void pluginCatalogChanged();
+
     void checkForUpdatesFinished(const QHash<QString, SearchPluginVersion> &updateInfo);
     void checkForUpdatesFailed(const QString &reason);
 
@@ -113,11 +148,76 @@ signals:
     /// @p reason is empty once the runtime works again.
     void runtimeErrorChanged(const QString &reason);
 
+    /// Aggregate lifecycle for the verified default unofficial catalog.
+    /// Individual bootstrap downloads deliberately do not emit the ordinary
+    /// install/update signals, preventing a 90-plus notification storm.
+    void unofficialCatalogStatusChanged(const QVariantMap &status);
+    void unofficialCatalogSyncFinished(const QVariantMap &status);
+    void unofficialPluginTrusted(const QString &id);
+    void unofficialPluginTrustFailed(const QString &id, const QString &reason);
+
 private:
+    struct CatalogSource
+    {
+        QString url;
+        QByteArray sha256;
+    };
+
+    struct CatalogEntry
+    {
+        QString id;
+        QList<CatalogSource> sources;
+    };
+
+    struct CapabilityRequest
+    {
+        bool suppressSignals = false;
+        std::function<void()> completed;
+    };
+
+    struct CapabilityProbeResult
+    {
+        QString standardOutput;
+        QString standardError;
+        QString processError;
+        bool started = false;
+        bool timedOut = false;
+        bool outputOverflow = false;
+    };
+
+    struct CatalogLedgerEntry
+    {
+        QByteArray expectedHash;
+        QByteArray observedHash;
+        QByteArray activeHash;
+        QString sourceUrl;
+        QString integrityState;
+        QString runtimeState;
+        QString diagnostic;
+        quint64 generation = 0;
+        bool catalogOwned = false;
+        bool trusted = false;
+        bool userRemoved = false;
+    };
+
     void applyProxySettings();
-    void update();
+    void update(bool suppressSignals = false, std::function<void()> completed = {});
+    void startNextCapabilityProbe();
+    void drainCapabilityOutput();
+    void completeCapabilityProbe();
+    void applyCapabilityProbeResult(const CapabilityProbeResult &result, bool suppressSignals);
+    void finishCapabilityRequest(const CapabilityRequest &request);
+    void failCapabilityGeneration(const QString &reason);
     void updateNova();
     void seedBundledPlugins();
+    void loadCatalogLedger();
+    bool saveCatalogLedger();
+    void startUnofficialCatalogSync();
+    void downloadNextUnofficialPlugin();
+    void downloadCurrentUnofficialSource();
+    void unofficialPluginDownloadFinished(const Net::DownloadResult &result);
+    void finishUnofficialCatalogSync();
+    void failUnofficialCatalogSync(const QString &reason);
     void parseVersionInfo(const QByteArray &info);
     void installPlugin_impl(const QString &name, const Path &srcPath);
     bool isUpdateNeeded(const QString &pluginName, const SearchPluginVersion &newVersion) const;
@@ -126,6 +226,9 @@ private:
     void pluginDownloadFinished(const Net::DownloadResult &result);
 
     static Path pluginPath(const QString &name);
+    static Path catalogQuarantineLocation();
+    static Path catalogQuarantinePath(const QString &name, const QByteArray &sha256);
+    static Path catalogLedgerPath();
 
     void setRuntimeError(const QString &reason);
 
@@ -136,4 +239,39 @@ private:
     QHash<QString, SearchPluginInfo *> m_plugins;
     QProcessEnvironment m_proxyEnv;
     QString m_runtimeError;
+    bool m_registrationStale = true;
+    QHash<QString, QString> m_pluginImportErrors;
+    QHash<QString, CatalogLedgerEntry> m_catalogLedger;
+
+    QQueue<CatalogEntry> m_catalogQueue;
+    /// Last completely validated manifest, retained across retries. Never fill
+    /// this map from a partial or failed parse: palette consumers must not turn
+    /// unvalidated JSON into commands.
+    QHash<QString, CatalogEntry> m_catalogEntries;
+    CatalogEntry m_currentCatalogEntry;
+    int m_currentCatalogSource = 0;
+    QStringList m_catalogPendingSeeded;
+    QStringList m_catalogCanonicalIDs;
+    QStringList m_bundledPluginIDs;
+    QStringList m_catalogFailures;
+    QString m_currentCatalogFailure;
+    QVariantMap m_catalogStatus;
+    // True when at least one catalog entry was already present on disk before
+    // this synchronization. Kept separately from the counters so the UI and
+    // diagnostics can distinguish a no-op bootstrap from a fresh install.
+    bool m_catalogPreexisting = false;
+    bool m_catalogSyncInProgress = false;
+    bool m_catalogRetryPending = false;
+
+    QQueue<CapabilityRequest> m_capabilityRequests;
+    CapabilityRequest m_activeCapabilityRequest;
+    QProcess *m_capabilityProcess = nullptr;
+    QTimer *m_capabilityTimeout = nullptr;
+    bool m_capabilityProbeRunning = false;
+    bool m_capabilityProbeStarted = false;
+    bool m_capabilityProbeTimedOut = false;
+    bool m_capabilityProbeCompleting = false;
+    QByteArray m_capabilityStdOut;
+    QByteArray m_capabilityStdErr;
+    bool m_capabilityOutputOverflow = false;
 };

@@ -12,11 +12,12 @@
 #include <QJsonObject>
 #include <QLocale>
 #include <QRegularExpression>
+#include <QQmlEngine>
 #include <QUuid>
 
 #include "base/logging.h"
 
-#if __has_include("base/preferences.h")
+#if !defined(QBT_NOTIFICATION_TEST_NO_PREFERENCES) && __has_include("base/preferences.h")
 #include "base/preferences.h"
 #define QBT_HAS_PREFERENCES 1
 #endif
@@ -28,6 +29,7 @@ namespace
     constexpr int kMaximumEntries = 200;
     constexpr int kMaximumTitleLength = 160;
     constexpr int kMaximumBodyLength = 4096;
+    constexpr int kMaximumActionIdLength = 4096;
     const QString kHistoryKey = u"GUI/Notifications/HistoryV1"_s;
     const QString kRegexSafetyPrefix = u"(*LIMIT_MATCH=100000)(*LIMIT_DEPTH=1000)(?:"_s;
 }
@@ -42,7 +44,11 @@ NotificationController *NotificationController::create(QQmlEngine *, QJSEngine *
 NotificationController *NotificationController::instance()
 {
     if (!s_instance)
+    {
         s_instance = new NotificationController;
+        s_instance->setParent(QCoreApplication::instance());
+        QQmlEngine::setObjectOwnership(s_instance, QQmlEngine::CppOwnership);
+    }
     return s_instance;
 }
 
@@ -98,6 +104,14 @@ int NotificationController::unreadCount() const
     return m_unreadCount;
 }
 
+int NotificationController::activeCount() const
+{
+    int active = 0;
+    for (const Entry &entry : m_entries)
+        active += entry.dismissed ? 0 : 1;
+    return active;
+}
+
 QString NotificationController::notify(const QString &body, const QString &severity,
     const QString &title, const QString &actionLabel, const QString &actionId)
 {
@@ -114,13 +128,24 @@ QString NotificationController::notify(const QString &body, const QString &sever
     entry.body = safeBody;
     entry.timestamp = QDateTime::currentDateTimeUtc();
     entry.actionLabel = actionLabel.trimmed().left(kMaximumTitleLength);
-    entry.actionId = actionId.trimmed().left(kMaximumTitleLength);
+    // Action identifiers may carry an encoded local export URL. Keep them
+    // bounded like the body, but do not truncate a valid Windows path at the
+    // much shorter human-title limit and leave a durable action that can never
+    // open its target.
+    entry.actionId = actionId.trimmed().left(kMaximumActionIdLength);
 
     beginInsertRows({}, 0, 0);
     m_entries.prepend(entry);
     endInsertRows();
+
+    QVector<QString> evictedActiveIds;
     if (m_entries.size() > kMaximumEntries)
     {
+        for (int row = kMaximumEntries; row < m_entries.size(); ++row)
+        {
+            if (!m_entries.at(row).dismissed)
+                evictedActiveIds.append(m_entries.at(row).id);
+        }
         beginRemoveRows({}, kMaximumEntries, m_entries.size() - 1);
         m_entries.resize(kMaximumEntries);
         endRemoveRows();
@@ -129,6 +154,13 @@ QString NotificationController::notify(const QString &body, const QString &sever
     updateUnreadCount();
     persist();
     emit countChanged();
+    emit activeCountChanged();
+    // Snackbar owns an intentionally lightweight presentation model rather
+    // than mirroring every history row. Tell it when the bounded history cap
+    // evicts an active entry, otherwise card 201 leaves a stale action whose
+    // identifier no longer exists in the authoritative controller.
+    for (const QString &evictedId : evictedActiveIds)
+        emit notificationDismissed(evictedId);
     emit notificationRaised(entry.id, entry.title, entry.body, entry.severity,
         entry.actionLabel, entry.actionId);
     qCInfo(lcUi) << "Notification recorded" << entry.severity << entry.title;
@@ -163,38 +195,129 @@ void NotificationController::dismiss(const QString &id)
     if (row < 0)
         return;
     Entry &entry = m_entries[row];
+    const bool wasActive = !entry.dismissed;
+    if (!wasActive && entry.read)
+        return;
     entry.dismissed = true;
     entry.read = true;
     emit dataChanged(index(row), index(row), {ReadRole, DismissedRole});
     updateUnreadCount();
     persist();
+    if (wasActive)
+    {
+        emit activeCountChanged();
+        emit notificationDismissed(id);
+    }
+}
+
+void NotificationController::dismissAll()
+{
+    if (activeCount() == 0)
+    {
+        // Keep live presentation recoverable even if a stale card somehow
+        // outlived its backing record (for example across an older build's
+        // controller/UI race).
+        emit allDismissed();
+        return;
+    }
+
+    for (Entry &entry : m_entries)
+    {
+        if (!entry.dismissed)
+        {
+            entry.dismissed = true;
+            entry.read = true;
+        }
+    }
+
+    emit dataChanged(index(0), index(m_entries.size() - 1), {ReadRole, DismissedRole});
+    updateUnreadCount();
+    persist();
+    emit activeCountChanged();
+    emit allDismissed();
 }
 
 void NotificationController::clearAll()
 {
     if (m_entries.isEmpty())
         return;
+    const bool hadActive = activeCount() > 0;
     beginResetModel();
     m_entries.clear();
     endResetModel();
     updateUnreadCount();
     persist();
     emit countChanged();
+    if (hadActive)
+    {
+        emit activeCountChanged();
+        // Snackbar keeps its own lightweight view of live cards. Clearing the
+        // persisted model must dismiss that view as well; otherwise its later
+        // Dismiss all request sees activeCount() == 0 and cannot recover.
+        emit allDismissed();
+    }
+}
+
+QVariantList NotificationController::activeEntries() const
+{
+    QVariantList result;
+    result.reserve(activeCount());
+
+    // History is stored newest-first. The corner stack reads oldest-to-newest
+    // so its newest card stays at the bottom, matching live notification order.
+    for (auto iterator = m_entries.crbegin(); iterator != m_entries.crend(); ++iterator)
+    {
+        const Entry &entry = *iterator;
+        if (entry.dismissed)
+            continue;
+
+        result.append(QVariantMap {
+            {u"notificationId"_s, entry.id},
+            {u"notificationTitle"_s, entry.title},
+            {u"notificationBody"_s, entry.body},
+            {u"notificationSeverity"_s, entry.severity},
+            {u"notificationActionLabel"_s, entry.actionLabel},
+            {u"notificationActionId"_s, entry.actionId}
+        });
+    }
+    return result;
 }
 
 void NotificationController::activateAction(const QString &id)
 {
     const int row = indexOf(id);
-    if (row < 0 || m_entries.at(row).actionId.isEmpty())
+    if (row < 0)
         return;
-    emit actionRequested(m_entries.at(row).actionId, id);
+
+    Entry &entry = m_entries[row];
+    if (entry.actionId.isEmpty())
+        return;
+
+    const bool oneShot = entry.actionId.startsWith(u"journal-undo:"_s);
+    if (oneShot && entry.dismissed)
+        return;
+
+    const QString actionId = entry.actionId;
+    if (oneShot)
+    {
+        // Consume undo before invoking QML. A second click or a restored stale
+        // surface can no longer replay the same history mutation, while file
+        // opening actions remain intentionally repeatable.
+        entry.actionLabel.clear();
+        entry.actionId.clear();
+        emit dataChanged(index(row), index(row), {ActionLabelRole, ActionIdRole});
+        persist();
+    }
+
+    emit actionRequested(actionId, id);
     markRead(id);
 }
 
 int NotificationController::matchingCount(const QString &query, const bool regex,
     const QString &flags, const QString &scope) const
 {
-    if (query.size() > 4096)
+    const QString effectiveQuery = query.trimmed();
+    if (effectiveQuery.size() > 4096)
         return 0;
     const QString normalizedFlags = flags.toLower();
     for (const QChar flag : normalizedFlags)
@@ -203,20 +326,21 @@ int NotificationController::matchingCount(const QString &query, const bool regex
             return 0;
     }
     QRegularExpression expression;
-    if (regex && !query.isEmpty())
+    if (regex && !effectiveQuery.isEmpty())
     {
         QRegularExpression::PatternOptions options;
         if (normalizedFlags.contains(u'i')) options |= QRegularExpression::CaseInsensitiveOption;
         if (normalizedFlags.contains(u'm')) options |= QRegularExpression::MultilineOption;
         if (normalizedFlags.contains(u's')) options |= QRegularExpression::DotMatchesEverythingOption;
         if (normalizedFlags.contains(u'u')) options |= QRegularExpression::UseUnicodePropertiesOption;
-        expression = QRegularExpression(kRegexSafetyPrefix + query + u')', options);
+        expression = QRegularExpression(kRegexSafetyPrefix + effectiveQuery + u')', options);
         if (!expression.isValid())
             return 0;
     }
 
-    const Qt::CaseSensitivity sensitivity = normalizedFlags.contains(u'i')
-        ? Qt::CaseInsensitive : Qt::CaseSensitive;
+    // Plain-text notification search is always case-insensitive in QML. Regex
+    // is the only mode whose case sensitivity is controlled by the i flag.
+    const Qt::CaseSensitivity sensitivity = Qt::CaseInsensitive;
     int count = 0;
     for (const Entry &entry : m_entries)
     {
@@ -224,8 +348,9 @@ int NotificationController::matchingCount(const QString &query, const bool regex
         if ((scope == u"warning"_s) && (entry.severity != u"warning"_s)) continue;
         if ((scope == u"error"_s) && (entry.severity != u"error"_s)) continue;
         const QString haystack = entry.title + u' ' + entry.body;
-        if (query.isEmpty() || (regex ? expression.match(haystack).hasMatch()
-                                      : haystack.contains(query, sensitivity)))
+        if (effectiveQuery.isEmpty()
+            || (regex ? expression.match(haystack).hasMatch()
+                      : haystack.contains(effectiveQuery, sensitivity)))
             ++count;
     }
     return count;

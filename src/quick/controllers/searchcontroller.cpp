@@ -67,28 +67,42 @@ SearchController::SearchController(QObject *parent)
     {
         // Keep the combos / empty-page in sync as plugins come and go.
         connect(mgr, &SearchPluginManager::pluginEnabled, this, [this] { emit pluginsChanged(); });
+        connect(mgr, &SearchPluginManager::pluginCatalogChanged, this, [this] {
+            finishRuntimeRecovery();
+            emit pluginsChanged();
+        });
 
         // Forward install/update/uninstall outcomes to QML (dialog feedback),
         // and refresh the scope/category combos.
         connect(mgr, &SearchPluginManager::pluginInstalled, this, [this](const QString &name) {
             qCInfo(lcSearch) << "Plugin installed:" << name;
+            setPluginDiagnostic(name, {});
+            recordPluginBatchOutcome(name, true);
             emit pluginInstalled(name);
             emit pluginsChanged();
         });
         connect(mgr, &SearchPluginManager::pluginInstallationFailed, this,
                 [this](const QString &name, const QString &reason) {
             qCWarning(lcSearch) << "Plugin install failed:" << name << reason;
+            setPluginDiagnostic(name, reason);
+            recordPluginBatchOutcome(name, false, reason);
             emit pluginInstallFailed(name, reason);
+            emit pluginsChanged();
         });
         connect(mgr, &SearchPluginManager::pluginUpdated, this, [this](const QString &name) {
             qCInfo(lcSearch) << "Plugin updated:" << name;
+            setPluginDiagnostic(name, {});
+            recordPluginBatchOutcome(name, true);
             emit pluginUpdated(name);
             emit pluginsChanged();
         });
         connect(mgr, &SearchPluginManager::pluginUpdateFailed, this,
                 [this](const QString &name, const QString &reason) {
             qCWarning(lcSearch) << "Plugin update failed:" << name << reason;
+            setPluginDiagnostic(name, reason);
+            recordPluginBatchOutcome(name, false, reason);
             emit pluginUpdateFailed(name, reason);
+            emit pluginsChanged();
         });
         connect(mgr, &SearchPluginManager::pluginUninstalled, this, [this](const QString &name) {
             qCInfo(lcSearch) << "Plugin uninstalled:" << name;
@@ -96,23 +110,107 @@ SearchController::SearchController(QObject *parent)
             emit pluginsChanged();
         });
         connect(mgr, &SearchPluginManager::checkForUpdatesFinished, this,
-                [this](const QHash<QString, SearchPluginVersion> &updateInfo) {
+                [this, mgr](const QHash<QString, SearchPluginVersion> &updateInfo) {
             qCInfo(lcSearch) << "Update check finished; outdated:" << updateInfo.size();
-            auto *m = SearchPluginManager::instance();
-            for (auto it = updateInfo.cbegin(); (m != nullptr) && (it != updateInfo.cend()); ++it)
-                m->updatePlugin(it.key());
-            emit pluginUpdatesChecked(!updateInfo.isEmpty());
+            if (!m_pluginBatch.active() || (m_pluginBatch.kind != u"update"_s)
+                || !m_pluginBatch.awaitingUpdateList)
+            {
+                return;
+            }
+
+            // versions.txt contains engines that are not installed. Updating
+            // those entries would reinstall user-removed defaults and used to
+            // generate one failure notification for every unknown engine.
+            QHash<QString, QVariantMap> inventory;
+            for (const QVariant &entry : mgr->palettePluginCatalog())
+            {
+                const QVariantMap row = entry.toMap();
+                inventory.insert(row.value(u"id"_s).toString(), row);
+            }
+
+            QStringList eligibleIDs;
+            for (auto it = updateInfo.cbegin(); it != updateInfo.cend(); ++it)
+            {
+                const QVariantMap row = inventory.value(it.key());
+                const bool installed = row.value(u"installedOnDisk"_s).toBool()
+                    || row.value(u"registered"_s).toBool();
+                if (installed && !row.value(u"userRemoved"_s).toBool())
+                    eligibleIDs.append(it.key());
+            }
+            eligibleIDs.removeDuplicates();
+            eligibleIDs.sort(Qt::CaseInsensitive);
+
+            m_pluginBatch.awaitingUpdateList = false;
+            m_pluginBatch.requested = eligibleIDs.size();
+            m_pluginBatch.skipped = updateInfo.size() - eligibleIDs.size();
+            m_pluginBatch.pending = QSet<QString>(eligibleIDs.cbegin(), eligibleIDs.cend());
+
+            emit pluginUpdatesChecked(!eligibleIDs.isEmpty());
+            if (eligibleIDs.isEmpty())
+            {
+                finishPluginBatch(u"no-updates"_s);
+                return;
+            }
+
+            for (const QString &id : std::as_const(eligibleIDs))
+                mgr->updatePlugin(id);
         });
         connect(mgr, &SearchPluginManager::checkForUpdatesFailed, this, [this](const QString &reason) {
             qCWarning(lcSearch) << "Update check failed:" << reason;
+            if (m_pluginBatch.active() && (m_pluginBatch.kind == u"update"_s)
+                && m_pluginBatch.awaitingUpdateList)
+            {
+                m_pluginBatch.awaitingUpdateList = false;
+                m_pluginBatch.requested = 1;
+                m_pluginBatch.failures.insert(u"update-check"_s, reason);
+                finishPluginBatch(u"failed"_s);
+            }
             emit pluginUpdateCheckFailed(reason);
         });
         // The nova runtime can only be probed once the manager exists, so the
         // empty state has to react to it rather than read it once at startup.
         connect(mgr, &SearchPluginManager::runtimeErrorChanged, this, [this](const QString &reason) {
             qCWarning(lcSearch) << "Search runtime state changed:" << (reason.isEmpty() ? u"ok"_s : reason);
+            if (!reason.isEmpty() && m_pluginBatch.active()
+                && (m_pluginBatch.kind == u"runtime-recovery"_s))
+            {
+                const QStringList pending = m_pluginBatch.pending.values();
+                for (const QString &id : pending)
+                {
+                    setPluginDiagnostic(id, reason);
+                    m_pluginBatch.failures.insert(id, reason);
+                }
+                m_pluginBatch.pending.clear();
+                finishPluginBatch(u"runtime-unavailable"_s, reason);
+            }
             emit unavailableReasonChanged();
+            emit pluginsChanged();
         });
+        connect(mgr, &SearchPluginManager::unofficialCatalogStatusChanged, this,
+                [this](const QVariantMap &)
+                {
+                    // The palette catalog contains disk/wait/retry state, so a
+                    // sync transition can change rows even before Python has
+                    // registered a plugin.
+                    emit pluginsChanged();
+                    emit unofficialPluginStatusChanged();
+                });
+        connect(mgr, &SearchPluginManager::unofficialCatalogSyncFinished, this,
+                [this](const QVariantMap &status) {
+            importCatalogDiagnostics(status);
+            emit pluginsChanged();
+            emit unofficialPluginStatusChanged();
+            emit unofficialPluginSyncFinished(status);
+            QVariantMap summary = status;
+            summary[u"kind"_s] = u"catalog"_s;
+            summary[u"requested"_s] = status.value(u"canonicalCount"_s);
+            summary[u"succeeded"_s] = status.value(u"registered"_s);
+            publishPluginOperationSummary(summary);
+        });
+        connect(mgr, &SearchPluginManager::unofficialPluginTrusted,
+                this, &SearchController::unofficialPluginTrusted);
+        connect(mgr, &SearchPluginManager::unofficialPluginTrustFailed,
+                this, &SearchController::unofficialPluginTrustFailed);
     }
 
     qCInfo(lcSearch) << "SearchController constructed; pythonAvailable=" << m_pythonAvailable
@@ -188,6 +286,77 @@ QVariantList SearchController::pluginScopes() const
     return list;
 }
 
+QVariantList SearchController::plugins() const
+{
+    if (auto *mgr = SearchPluginManager::instance())
+    {
+        QVariantList result = mgr->palettePluginCatalog();
+        for (QVariant &entry : result)
+        {
+            QVariantMap row = entry.toMap();
+            const QString id = row.value(u"id"_s).toString();
+
+            // Preserve richer manager/security fields when they exist, and
+            // overlay only the transient controller diagnostic otherwise.
+            if (row.value(u"diagnostic"_s).toString().isEmpty())
+            {
+                QString diagnostic = m_pluginDiagnostics.value(id);
+                if (diagnostic.isEmpty() && row.value(u"runtimeWaiting"_s).toBool())
+                    diagnostic = mgr->runtimeError();
+                row[u"diagnostic"_s] = diagnostic;
+            }
+            row[u"hasDiagnostic"_s] = !row.value(u"diagnostic"_s).toString().isEmpty();
+
+            // Main's rich palette names the verified source explicitly. Keep
+            // the older `url` field for compatibility while exposing the same
+            // value under the unambiguous catalog-source name.
+            if (!row.contains(u"catalogSourceUrl"_s))
+                row[u"catalogSourceUrl"_s] = row.value(u"url"_s);
+            entry = row;
+        }
+        return result;
+    }
+    return {};
+}
+
+QVariantMap SearchController::unofficialPluginStatus() const
+{
+    if (auto *mgr = SearchPluginManager::instance())
+        return mgr->unofficialCatalogStatus();
+    return {};
+}
+
+QVariantMap SearchController::pluginDiagnostics() const
+{
+    QVariantMap result;
+    for (auto it = m_pluginDiagnostics.cbegin(); it != m_pluginDiagnostics.cend(); ++it)
+        result.insert(it.key(), it.value());
+    return result;
+}
+
+bool SearchController::pluginOperationInProgress() const
+{
+    return m_pluginBatch.active();
+}
+
+QString SearchController::pluginDiagnostic(const QString &id) const
+{
+    return m_pluginDiagnostics.value(id);
+}
+
+void SearchController::acknowledgePluginOperationSummary(const qulonglong serial)
+{
+    for (qsizetype i = 0; i < m_pendingPluginOperationSummaries.size(); ++i)
+    {
+        if (m_pendingPluginOperationSummaries.at(i).toMap().value(u"serial"_s).toULongLong() != serial)
+            continue;
+
+        m_pendingPluginOperationSummaries.removeAt(i);
+        emit pendingPluginOperationSummariesChanged();
+        return;
+    }
+}
+
 QVariantList SearchController::categoriesForScope(const QString &scope) const
 {
     QVariantList list;
@@ -253,6 +422,7 @@ int SearchController::startSearch(const QString &pattern, const QString &categor
         emit notify(tr("Please install Python to use the Search Engine."));
         return -1;
     }
+
     if (trimmed.isEmpty())
     {
         qCWarning(lcSearch) << "startSearch blocked: empty pattern";
@@ -274,8 +444,18 @@ int SearchController::startSearch(const QString &pattern, const QString &categor
     }
 
     auto *mgr = SearchPluginManager::instance();
+    if (!mgr || !mgr->runtimeReady())
+    {
+        QString reason = unavailableReason();
+        if (reason.isEmpty())
+            reason = tr("The search plugin runtime is not ready yet.");
+        qCWarning(lcSearch) << "startSearch blocked: plugin runtime unavailable" << reason;
+        emit notify(reason);
+        return -1;
+    }
+
     const QStringList plugins = pluginsForScope(scope);
-    if (!mgr || plugins.isEmpty())
+    if (plugins.isEmpty())
     {
         qCWarning(lcSearch) << "startSearch blocked: no usable plugins";
         emit notify(tr("There aren't any search plugins installed."));
@@ -327,8 +507,15 @@ void SearchController::refreshTab(int tabId)
     }
 
     auto *mgr = SearchPluginManager::instance();
-    if (!mgr)
+    if (!mgr || !mgr->runtimeReady())
+    {
+        QString reason = unavailableReason();
+        if (reason.isEmpty())
+            reason = tr("The search plugin runtime is not ready yet.");
+        qCWarning(lcSearch) << "refreshTab blocked: plugin runtime unavailable" << reason;
+        emit notify(reason);
         return;
+    }
 
     tab->model->clearResults();
     tab->proxy->setQueryPattern(tab->pattern, tab->regexEnabled, tab->regexFlags);
@@ -610,10 +797,43 @@ void SearchController::uninstallPlugins(const QStringList &ids)
 void SearchController::installPluginsFromFiles(const QStringList &paths)
 {
     auto *mgr = SearchPluginManager::instance();
-    if (!mgr)
+    if (!mgr || paths.isEmpty())
         return;
+
+    if (m_pluginBatch.active())
+    {
+        emit notify(tr("A search-plugin operation is already in progress."));
+        return;
+    }
+    if (const QString reason = pluginRuntimeBlockReason(); !reason.isEmpty())
+    {
+        beginPluginBatch(u"install"_s, {});
+        m_pluginBatch.requested = paths.size();
+        finishPluginBatch(u"runtime-unavailable"_s, reason);
+        return;
+    }
+
+    QHash<QString, QString> sourcesByID;
     for (const QString &path : paths)
     {
+        const QFileInfo info {path};
+        if (info.suffix().compare(u"py"_s, Qt::CaseInsensitive) == 0)
+            sourcesByID.insert(info.completeBaseName(), path);
+    }
+
+    QStringList ids = sourcesByID.keys();
+    ids.sort(Qt::CaseInsensitive);
+    beginPluginBatch(u"install"_s, ids, false, paths.size() - ids.size());
+    if (ids.isEmpty())
+    {
+        m_pluginBatch.failures.insert(u"source"_s, tr("No valid .py plugin files were selected."));
+        finishPluginBatch(u"failed"_s);
+        return;
+    }
+
+    for (const QString &id : std::as_const(ids))
+    {
+        const QString path = sourcesByID.value(id);
         qCInfo(lcSearch) << "Installing plugin from file:" << path;
         mgr->installPlugin(path);
     }
@@ -624,12 +844,32 @@ void SearchController::installPluginFromUrl(const QString &url)
     auto *mgr = SearchPluginManager::instance();
     if (!mgr)
         return;
+    if (m_pluginBatch.active())
+    {
+        emit notify(tr("A search-plugin operation is already in progress."));
+        return;
+    }
     if (!url.endsWith(u".py"_s, Qt::CaseInsensitive))
     {
         qCWarning(lcSearch) << "Rejected plugin URL (not .py):" << url;
-        emit notify(tr("The link doesn't seem to point to a search engine plugin."));
+        beginPluginBatch(u"install"_s);
+        m_pluginBatch.requested = 1;
+        m_pluginBatch.failures.insert(u"source"_s, tr("The link doesn't seem to point to a search engine plugin."));
+        finishPluginBatch(u"failed"_s);
         return;
     }
+    if (const QString reason = pluginRuntimeBlockReason(); !reason.isEmpty())
+    {
+        beginPluginBatch(u"install"_s);
+        m_pluginBatch.requested = 1;
+        finishPluginBatch(u"runtime-unavailable"_s, reason);
+        return;
+    }
+
+    QString id = QFileInfo {QUrl(url).path()}.completeBaseName();
+    if (id.isEmpty())
+        id = u"download"_s;
+    beginPluginBatch(u"install"_s, {id});
     qCInfo(lcSearch) << "Installing plugin from URL:" << url;
     mgr->installPlugin(url);
 }
@@ -639,14 +879,286 @@ void SearchController::checkForPluginUpdates()
     auto *mgr = SearchPluginManager::instance();
     if (!mgr)
         return;
+    if (m_pluginBatch.active())
+    {
+        emit notify(tr("A search-plugin operation is already in progress."));
+        return;
+    }
+    if (const QString reason = pluginRuntimeBlockReason(); !reason.isEmpty())
+    {
+        beginPluginBatch(u"update"_s);
+        finishPluginBatch(u"runtime-unavailable"_s, reason);
+        return;
+    }
+
+    beginPluginBatch(u"update"_s, {}, true);
     qCInfo(lcSearch) << "Checking for plugin updates";
     mgr->checkForUpdates();
+}
+
+void SearchController::retryUnofficialPluginSync()
+{
+    if (auto *mgr = SearchPluginManager::instance())
+        mgr->retryUnofficialCatalogSync();
+}
+
+void SearchController::trustUnofficialPlugin(const QString &id)
+{
+    if (auto *mgr = SearchPluginManager::instance())
+        mgr->trustUnofficialPlugin(id);
 }
 
 QString SearchController::pluginFullName(const QString &id) const
 {
     auto *mgr = SearchPluginManager::instance();
     return mgr ? mgr->pluginFullName(id) : id;
+}
+
+QString SearchController::pluginRuntimeBlockReason() const
+{
+    if (!m_pythonAvailable)
+        return unavailableReason();
+    if (auto *mgr = SearchPluginManager::instance())
+        return mgr->runtimeError();
+    return tr("The search plugin manager is unavailable.");
+}
+
+QStringList SearchController::runtimeRecoveryPluginIDs() const
+{
+    QStringList result;
+    if (auto *mgr = SearchPluginManager::instance())
+    {
+        for (const QVariant &entry : mgr->palettePluginCatalog())
+        {
+            const QVariantMap row = entry.toMap();
+            if (row.value(u"installedOnDisk"_s).toBool()
+                && !row.value(u"registered"_s).toBool()
+                && !row.value(u"userRemoved"_s).toBool())
+            {
+                result.append(row.value(u"id"_s).toString());
+            }
+        }
+    }
+    result.removeAll(QString {});
+    result.removeDuplicates();
+    result.sort(Qt::CaseInsensitive);
+    return result;
+}
+
+void SearchController::beginPluginBatch(const QString &kind, const QStringList &ids,
+                                        const bool awaitingUpdateList, const int skipped)
+{
+    Q_ASSERT(!m_pluginBatch.active());
+
+    m_pluginBatch = {};
+    m_pluginBatch.kind = kind;
+    m_pluginBatch.pending = QSet<QString>(ids.cbegin(), ids.cend());
+    m_pluginBatch.requested = m_pluginBatch.pending.size();
+    m_pluginBatch.skipped = std::max(0, skipped);
+    m_pluginBatch.awaitingUpdateList = awaitingUpdateList;
+
+    bool diagnosticsChanged = false;
+    for (const QString &id : ids)
+        diagnosticsChanged = (m_pluginDiagnostics.remove(id) > 0) || diagnosticsChanged;
+    if (diagnosticsChanged)
+    {
+        emit pluginDiagnosticsChanged();
+        emit pluginsChanged();
+    }
+    emit pluginOperationInProgressChanged();
+}
+
+void SearchController::recordPluginBatchOutcome(const QString &id, const bool succeeded,
+                                                const QString &reason)
+{
+    if (!m_pluginBatch.active() || !m_pluginBatch.pending.remove(id))
+        return;
+
+    if (succeeded)
+        ++m_pluginBatch.succeeded;
+    else
+        m_pluginBatch.failures.insert(id, reason);
+
+    if (m_pluginBatch.pending.isEmpty() && !m_pluginBatch.awaitingUpdateList)
+        finishPluginBatch();
+}
+
+void SearchController::finishPluginBatch(const QString &forcedState, const QString &runtimeReason)
+{
+    if (!m_pluginBatch.active())
+        return;
+
+    QVariantList details;
+    QStringList failedIDs = m_pluginBatch.failures.keys();
+    failedIDs.sort(Qt::CaseInsensitive);
+    for (const QString &id : std::as_const(failedIDs))
+    {
+        details.append(QVariantMap {
+            {u"id"_s, id},
+            {u"reason"_s, m_pluginBatch.failures.value(id)}
+        });
+    }
+
+    QString state = forcedState;
+    if (state.isEmpty())
+    {
+        if (m_pluginBatch.failures.isEmpty())
+            state = u"success"_s;
+        else if (m_pluginBatch.succeeded == 0)
+            state = u"failed"_s;
+        else
+            state = u"partial"_s;
+    }
+
+    QVariantMap summary {
+        {u"kind"_s, m_pluginBatch.kind},
+        {u"state"_s, state},
+        {u"requested"_s, m_pluginBatch.requested},
+        {u"succeeded"_s, m_pluginBatch.succeeded},
+        {u"failed"_s, m_pluginBatch.failures.size()},
+        {u"skipped"_s, m_pluginBatch.skipped},
+        {u"details"_s, details}
+    };
+    if (!runtimeReason.isEmpty())
+        summary[u"runtimeError"_s] = runtimeReason;
+
+    m_pluginBatch = {};
+    emit pluginOperationInProgressChanged();
+    publishPluginOperationSummary(summary);
+}
+
+void SearchController::finishRuntimeRecovery()
+{
+    if (!m_pluginBatch.active() || (m_pluginBatch.kind != u"runtime-recovery"_s))
+        return;
+
+    auto *mgr = SearchPluginManager::instance();
+    if (!mgr)
+    {
+        finishPluginBatch(u"failed"_s);
+        return;
+    }
+
+    QHash<QString, QVariantMap> inventory;
+    for (const QVariant &entry : mgr->palettePluginCatalog())
+    {
+        const QVariantMap row = entry.toMap();
+        inventory.insert(row.value(u"id"_s).toString(), row);
+    }
+
+    bool diagnosticsChanged = false;
+    const QStringList pending = m_pluginBatch.pending.values();
+    for (const QString &id : pending)
+    {
+        const QVariantMap row = inventory.value(id);
+        if (row.value(u"registered"_s).toBool())
+        {
+            m_pluginBatch.pending.remove(id);
+            ++m_pluginBatch.succeeded;
+            diagnosticsChanged = (m_pluginDiagnostics.remove(id) > 0) || diagnosticsChanged;
+            continue;
+        }
+
+        QString reason = row.value(u"diagnostic"_s).toString();
+        if (reason.isEmpty())
+            reason = m_pluginDiagnostics.value(id);
+        if (reason.isEmpty())
+            reason = tr("The search runtime did not register this plugin.");
+        m_pluginBatch.pending.remove(id);
+        m_pluginBatch.failures.insert(id, reason);
+        if (m_pluginDiagnostics.value(id) != reason)
+        {
+            m_pluginDiagnostics.insert(id, reason);
+            diagnosticsChanged = true;
+        }
+    }
+
+    if (diagnosticsChanged)
+    {
+        emit pluginDiagnosticsChanged();
+        emit pluginsChanged();
+    }
+    finishPluginBatch();
+}
+
+void SearchController::publishPluginOperationSummary(QVariantMap summary)
+{
+    summary[u"serial"_s] = m_nextPluginOperationSerial++;
+    m_pendingPluginOperationSummaries.append(summary);
+    emit pendingPluginOperationSummariesChanged();
+    emit pluginOperationSummaryReady(summary);
+}
+
+void SearchController::setPluginDiagnostic(const QString &id, const QString &reason)
+{
+    if (id.isEmpty())
+        return;
+
+    if (reason.isEmpty())
+    {
+        if (m_pluginDiagnostics.remove(id) == 0)
+            return;
+    }
+    else
+    {
+        if (m_pluginDiagnostics.value(id) == reason)
+            return;
+        m_pluginDiagnostics.insert(id, reason);
+    }
+
+    emit pluginDiagnosticsChanged();
+    emit pluginsChanged();
+}
+
+void SearchController::importCatalogDiagnostics(const QVariantMap &status)
+{
+    auto *mgr = SearchPluginManager::instance();
+    if (!mgr)
+        return;
+
+    const QVariantList inventory = mgr->palettePluginCatalog();
+    QHash<QString, QString> newDiagnostics;
+    for (const QString &error : status.value(u"errors"_s).toStringList())
+    {
+        for (const QVariant &entry : inventory)
+        {
+            const QString id = entry.toMap().value(u"id"_s).toString();
+            const QString colonPrefix = id + u":"_s;
+            const QString spacePrefix = id + u" "_s;
+            if (!error.startsWith(colonPrefix) && !error.startsWith(spacePrefix))
+                continue;
+
+            QString reason = error.sliced(id.size()).trimmed();
+            if (reason.startsWith(u":"_s))
+                reason = reason.sliced(1).trimmed();
+            newDiagnostics.insert(id, reason);
+            break;
+        }
+    }
+
+    bool changed = false;
+    for (const QVariant &entry : inventory)
+    {
+        const QVariantMap row = entry.toMap();
+        if (!row.value(u"catalogDefault"_s).toBool())
+            continue;
+        const QString id = row.value(u"id"_s).toString();
+        if (newDiagnostics.contains(id))
+        {
+            if (m_pluginDiagnostics.value(id) != newDiagnostics.value(id))
+            {
+                m_pluginDiagnostics.insert(id, newDiagnostics.value(id));
+                changed = true;
+            }
+        }
+        else if (row.value(u"registered"_s).toBool())
+        {
+            changed = (m_pluginDiagnostics.remove(id) > 0) || changed;
+        }
+    }
+
+    if (changed)
+        emit pluginDiagnosticsChanged();
 }
 
 // ---- History ---------------------------------------------------------------
@@ -858,7 +1370,12 @@ void SearchController::refreshPythonDetection()
     if (m_pythonAvailable)
     {
         if (auto *mgr = SearchPluginManager::instance())
+        {
+            const QStringList recoveryIDs = runtimeRecoveryPluginIDs();
+            if (!m_pluginBatch.active() && !recoveryIDs.isEmpty())
+                beginPluginBatch(u"runtime-recovery"_s, recoveryIDs);
             mgr->reload();
+        }
     }
 
     emit unavailableReasonChanged();

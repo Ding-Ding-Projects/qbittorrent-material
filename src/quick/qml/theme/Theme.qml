@@ -44,6 +44,9 @@ QtObject {
     //! True when the effective color scheme (resolving System) is dark.
     readonly property bool isDark: ThemeManager.isDark
 
+    //! Changes whenever any palette input changes, even if the scheme does not.
+    readonly property int paletteRevision: ThemeManager.paletteRevision
+
     //! Material.theme value for the current scheme.
     readonly property int materialTheme: isDark ? Material.Dark : Material.Light
 
@@ -73,12 +76,10 @@ QtObject {
         map are applied. Always returns a valid color.
     */
     function color(id) {
-        // Reading isDark makes every binding that calls color() subscribe to
-        // ThemeManager.themeChanged. Without this explicit dependency, an
-        // invokable C++ lookup can retain colors from the previous scheme even
-        // while Material.theme has already switched.
-        if (isDark)
-            return ThemeManager.color(id);
+        // QML cannot discover changes hidden behind an invokable lookup. Read
+        // the revision explicitly so seed, style, override, and scheme changes
+        // all invalidate every binding that resolves a role through this facade.
+        const revision = paletteRevision
         return ThemeManager.color(id);
     }
 
@@ -88,7 +89,7 @@ QtObject {
         row-color policy stays data-driven and override-able.
     */
     function stateColor(state) {
-        return ThemeManager.color(_stateName(state));
+        return color(_stateName(state));
     }
 
     // Map a TorrentState int to its named-id (kept in sync with TransferState

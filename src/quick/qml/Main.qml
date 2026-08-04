@@ -212,6 +212,7 @@ ApplicationWindow {
     // Auto-shutdown-on-completion: 0 nothing, 1 exit qBt, 2 suspend, 3 hibernate,
     // 4 reboot, 5 shutdown.
     property int autoShutdownMode: 0
+    property var updateRestartReturnFocusItem: null
 
     // -- Live session state (bound from the engine bridge) --------------------
     readonly property bool sessionPaused: Session.paused || false
@@ -657,6 +658,13 @@ ApplicationWindow {
         shortcut: StandardKey.HelpContents
         onTriggered: root.openDocumentation()
     }
+    property alias actionCommandPalette: actionCommandPalette
+    Action {
+        id: actionCommandPalette
+        text: qsTr("Command palette")
+        shortcut: "Ctrl+Shift+F"
+        onTriggered: commandPalette.openPalette()
+    }
     property alias actionCheckForUpdates: actionCheckForUpdates
     Action {
         id: actionCheckForUpdates
@@ -728,6 +736,13 @@ ApplicationWindow {
             onPanelRequested: (panel) => root.togglePanel(panel)
             onRegexBuilderRequested: root.togglePanel("regex")
         }
+
+        UpdateReadyBanner {
+            id: updateReadyBanner
+            width: parent.width
+            onRestartRequested: (returnFocusItem) => root.requestUpdateRestart(returnFocusItem)
+            onLaterRequested: (returnFocusItem) => root.restoreUpdateRestartFocus(returnFocusItem)
+        }
     }
 
     footer: AppStatusBar {
@@ -753,7 +768,53 @@ ApplicationWindow {
     function togglePanel(panel) {
         root.activePanel = (root.activePanel === panel) ? "" : panel
     }
+    function openPanel(panel) {
+        root.activePanel = panel
+    }
     function closePanel() { root.activePanel = "" }
+
+    function restoreUpdateRestartFocus(returnFocusItem) {
+        var target = returnFocusItem ? returnFocusItem : centralTabs
+        Qt.callLater(function() {
+            if (target && target.visible !== false && target.enabled !== false)
+                target.forceActiveFocus()
+            else
+                centralTabs.forceActiveFocus()
+        })
+    }
+
+    function requestUpdateRestart(returnFocusItem) {
+        root.updateRestartReturnFocusItem = returnFocusItem ? returnFocusItem : root.activeFocusItem
+        updateRestartConfirmDialog.open()
+    }
+
+    function restartToInstallUpdate() {
+        // OptionsController owns staged settings independently of Preferences.
+        // Opening the dialog through its regular open() method would reload and
+        // silently discard those edits, so reveal the existing staging surface
+        // directly and leave the update ready for a later, deliberate restart.
+        if (OptionsController.modified) {
+            NotificationCenter.notify(
+                qsTr("Apply or cancel the pending Options changes before restarting to install version %1.")
+                    .arg(ProgramUpdater.availableVersion),
+                "warning", qsTr("Update restart paused"))
+            optionsDialog.visible = true
+            Qt.callLater(function() { optionsDialog.forceActiveFocus() })
+            return
+        }
+
+        // Workspace edits are the app-owned unsaved document state. A failed
+        // checkpoint vetoes the restart; the current process and staged update
+        // remain intact so the user can recover without losing text.
+        if (WorkspaceManager.dirty && !WorkspaceManager.syncNow()) {
+            root.restoreUpdateRestartFocus(root.updateRestartReturnFocusItem)
+            return
+        }
+
+        ProgramUpdater.restartToUpdate()
+        if (!ProgramUpdater.busy)
+            root.restoreUpdateRestartFocus(root.updateRestartReturnFocusItem)
+    }
 
     HistorySheet {
         id: historySheet
@@ -807,6 +868,18 @@ ApplicationWindow {
         onAccepted: JournalController.restoreTo(restoreConfirmDialog.commitId)
     }
 
+    ConfirmDialog {
+        id: updateRestartConfirmDialog
+        parent: Overlay.overlay
+        title: qsTr("Restart to install version %1?").arg(ProgramUpdater.availableVersion)
+        text: qsTr("qBittorrent will close and install version %1. Any pending Workspace changes will be saved first; finish or save work in open dialogs before continuing.")
+            .arg(ProgramUpdater.availableVersion)
+        acceptText: qsTr("Restart to install update")
+        rejectText: qsTr("Later")
+        onAccepted: root.restartToInstallUpdate()
+        onRejected: updateReadyBanner.postpone()
+    }
+
     // =========================================================================
     //  Overlays & dialogs
     // =========================================================================
@@ -814,6 +887,7 @@ ApplicationWindow {
     Snackbar {
         id: snackbar
         parent: root.contentItem
+        primaryHost: true
     }
 
     // Drag-and-drop adding. Dropping a .torrent file or a magnet link on the
@@ -931,21 +1005,40 @@ ApplicationWindow {
         shell: root
     }
 
-    // Shell dialogs (per-feature types, referenced by name in the single module).
-    OptionsDialog { id: optionsDialog; parent: Overlay.overlay }
-    CommandPalette {
-        id: commandPalette
-        commands: [
+    function paletteActionTitle(text) {
+        return String(text).replace(/&&/g, "\uE000")
+            .replace(/&/g, "").replace(/\uE000/g, "&")
+    }
+
+    function pluginPaletteState(plugin) {
+        if (plugin.userRemoved)
+            return qsTr("Removed by user")
+        if (plugin.runtimeState === "quarantined" || plugin.canTrust)
+            return qsTr("Installed in quarantine — trust required")
+        if (plugin.runtimeState === "stale-registration")
+            return qsTr("Registration is stale")
+        if (plugin.runtimeState === "import-failed")
+            return qsTr("Registration failed")
+        if (plugin.runtimeWaiting)
+            return qsTr("Waiting for Python")
+        if (!plugin.registered)
+            return plugin.installedOnDisk
+                ? qsTr("Installed, not registered")
+                : qsTr("Not installed")
+        return plugin.enabled ? qsTr("Enabled") : qsTr("Disabled")
+    }
+
+    function commandPaletteCommands() {
+        var commands = [
             { id: "tab.transfers", title: qsTr("Transfers"), group: qsTr("Navigate"), destination: qsTr("Main view · Transfers"), keywords: "torrents downloads" },
-            { id: "tab.search", title: qsTr("Search"), group: qsTr("Navigate"), destination: qsTr("Main view · Search"), keywords: "plugins results" },
+            { id: "tab.search", title: qsTr("Search"), group: qsTr("Navigate"), destination: qsTr("Main view · Search"), keywords: "plugins engines results" },
             { id: "tab.rss", title: qsTr("RSS"), group: qsTr("Navigate"), destination: qsTr("Main view · RSS"), keywords: "feeds rules" },
             { id: "tab.log", title: qsTr("Execution log"), group: qsTr("Navigate"), destination: qsTr("Main view · Log"), keywords: "messages blocked IP" },
             { id: "tab.workspace", title: qsTr("Workspace"), group: qsTr("Navigate"), destination: qsTr("Main view · Workspace"), keywords: "notes tabs" },
-            { id: "action.addFile", title: qsTr("Add torrent file"), group: qsTr("Action"), destination: qsTr("File picker"), keywords: "open torrent" },
-            { id: "action.addLink", title: qsTr("Add torrent link"), group: qsTr("Action"), destination: qsTr("Add link dialog"), keywords: "magnet URL clipboard" },
-            { id: "action.history", title: qsTr("History"), group: qsTr("Action"), destination: qsTr("History panel"), keywords: "undo journal" },
-            { id: "action.statistics", title: qsTr("Statistics"), group: qsTr("Action"), destination: qsTr("Statistics dialog"), keywords: "session totals" },
-            { id: "action.about", title: qsTr("About"), group: qsTr("Action"), destination: qsTr("About dialog"), keywords: "version changelog" },
+            { id: "panel.notifications", title: qsTr("Notifications"), group: qsTr("Navigate"), destination: qsTr("Notifications panel"), keywords: "alerts history errors" },
+            { id: "panel.history", title: qsTr("History"), group: qsTr("Navigate"), destination: qsTr("History panel"), keywords: "undo journal versions" },
+            { id: "panel.settings", title: qsTr("Settings"), group: qsTr("Navigate"), destination: qsTr("Settings panel"), keywords: "appearance language theme" },
+            { id: "panel.regex", title: qsTr("Regex Builder"), group: qsTr("Navigate"), destination: qsTr("Regex Builder panel"), keywords: "regular expression PCRE2" },
             { id: "options.0", title: qsTr("Options: Behavior"), group: qsTr("Settings"), destination: qsTr("Options · Behavior"), keywords: "language theme funny tray startup default apps" },
             { id: "options.1", title: qsTr("Options: Downloads"), group: qsTr("Settings"), destination: qsTr("Options · Downloads"), keywords: "save path incomplete watched folders" },
             { id: "options.2", title: qsTr("Options: Connection"), group: qsTr("Settings"), destination: qsTr("Options · Connection"), keywords: "port proxy UPnP IP filter" },
@@ -956,7 +1049,159 @@ ApplicationWindow {
             { id: "options.7", title: qsTr("Options: Web UI"), group: qsTr("Settings"), destination: qsTr("Options · Web UI"), keywords: "API key HTTPS authentication" },
             { id: "options.8", title: qsTr("Options: Advanced"), group: qsTr("Settings"), destination: qsTr("Options · Advanced"), keywords: "libtorrent cache network disk" }
         ]
+
+        var actionEntries = [
+            { id: "open", action: actionOpen, group: qsTr("File"), destination: qsTr("File picker"), keywords: "add torrent file" },
+            { id: "addLink", action: actionDownloadFromURL, group: qsTr("File"), destination: qsTr("Add link dialog"), keywords: "magnet URL clipboard" },
+            { id: "exit", action: actionExit, group: qsTr("File"), destination: qsTr("Application"), keywords: "quit close" },
+            { id: "undo", action: actionUndo, group: qsTr("Edit"), destination: qsTr("Local history"), keywords: "undo journal restore" },
+            { id: "history", action: actionShowHistory, group: qsTr("Edit"), destination: qsTr("History panel"), keywords: "versions journal" },
+            { id: "start", action: actionStart, group: qsTr("Transfers"), destination: qsTr("Selected transfers"), keywords: "resume selected torrents" },
+            { id: "stop", action: actionStop, group: qsTr("Transfers"), destination: qsTr("Selected transfers"), keywords: "pause selected torrents" },
+            { id: "remove", action: actionDelete, group: qsTr("Transfers"), destination: qsTr("Selected transfers"), keywords: "delete remove selected torrents" },
+            { id: "queueTop", action: actionTopQueuePos, group: qsTr("Transfers"), destination: qsTr("Selected transfers"), keywords: "queue first" },
+            { id: "queueUp", action: actionIncreaseQueuePos, group: qsTr("Transfers"), destination: qsTr("Selected transfers"), keywords: "queue up" },
+            { id: "queueDown", action: actionDecreaseQueuePos, group: qsTr("Transfers"), destination: qsTr("Selected transfers"), keywords: "queue down" },
+            { id: "queueBottom", action: actionBottomQueuePos, group: qsTr("Transfers"), destination: qsTr("Selected transfers"), keywords: "queue last" },
+            { id: "pauseSession", action: actionPauseSession, group: qsTr("Transfers"), destination: qsTr("Session"), keywords: "pause all" },
+            { id: "resumeSession", action: actionResumeSession, group: qsTr("Transfers"), destination: qsTr("Session"), keywords: "resume all" },
+            { id: "workspaceNew", action: actionWorkspaceNewTab, group: qsTr("Workspace"), destination: qsTr("Workspace tabs"), keywords: "new tab" },
+            { id: "workspaceClose", action: actionWorkspaceCloseTab, group: qsTr("Workspace"), destination: qsTr("Workspace tabs"), keywords: "close tab" },
+            { id: "workspaceAppearance", action: actionWorkspaceCustomizeTab, group: qsTr("Workspace"), destination: qsTr("Tab appearance editor"), keywords: "rename color font" },
+            { id: "workspaceRenameApp", action: actionWorkspaceRenameApp, group: qsTr("Workspace"), destination: qsTr("Application identity"), keywords: "rename app" },
+            { id: "workspaceSave", action: actionWorkspaceSync, group: qsTr("Workspace"), destination: qsTr("Managed repository"), keywords: "save commit" },
+            { id: "workspaceImport", action: actionWorkspaceImport, group: qsTr("Workspace"), destination: qsTr("Workspace import"), keywords: "JSON" },
+            { id: "workspaceExport", action: actionWorkspaceExport, group: qsTr("Workspace"), destination: qsTr("Workspace export"), keywords: "JSON" },
+            { id: "workspaceImportRepo", action: actionWorkspaceImportRepository, group: qsTr("Workspace"), destination: qsTr("Repository import"), keywords: "git archive" },
+            { id: "workspaceExportRepo", action: actionWorkspaceExportRepository, group: qsTr("Workspace"), destination: qsTr("Repository export"), keywords: "git archive" },
+            { id: "workspaceOpenRepo", action: actionWorkspaceOpenRepository, group: qsTr("Workspace"), destination: qsTr("Managed repository"), keywords: "folder editor" },
+            { id: "topToolbar", action: actionTopToolBar, group: qsTr("View"), destination: qsTr("Window chrome"), keywords: "toolbar toggle" },
+            { id: "statusBar", action: actionShowStatusbar, group: qsTr("View"), destination: qsTr("Window chrome"), keywords: "status toggle" },
+            { id: "filtersSidebar", action: actionShowFiltersSidebar, group: qsTr("View"), destination: qsTr("Transfers"), keywords: "filters sidebar toggle" },
+            { id: "speedTitle", action: actionSpeedInTitleBar, group: qsTr("View"), destination: qsTr("Title bar"), keywords: "speed toggle" },
+            { id: "searchEngine", action: actionSearchWidget, group: qsTr("View"), destination: qsTr("Search"), keywords: "search tab" },
+            { id: "rssReader", action: actionRSSReader, group: qsTr("View"), destination: qsTr("RSS"), keywords: "feed reader" },
+            { id: "logs", action: actionExecutionLogs, group: qsTr("View"), destination: qsTr("Execution log"), keywords: "messages" },
+            { id: "normalLogs", action: actionNormalMessages, group: qsTr("View"), destination: qsTr("Execution log"), keywords: "normal messages toggle" },
+            { id: "infoLogs", action: actionInformationMessages, group: qsTr("View"), destination: qsTr("Execution log"), keywords: "information messages toggle" },
+            { id: "warningLogs", action: actionWarningMessages, group: qsTr("View"), destination: qsTr("Execution log"), keywords: "warning messages toggle" },
+            { id: "criticalLogs", action: actionCriticalMessages, group: qsTr("View"), destination: qsTr("Execution log"), keywords: "critical messages toggle" },
+            { id: "statistics", action: actionStatistics, group: qsTr("View"), destination: qsTr("Statistics dialog"), keywords: "session totals" },
+            { id: "lock", action: actionLock, group: qsTr("Security"), destination: qsTr("Application lock"), keywords: "password privacy" },
+            { id: "setPassword", action: actionSetLockPassword, group: qsTr("Security"), destination: qsTr("Application lock"), keywords: "password set" },
+            { id: "clearPassword", action: actionClearLockPassword, group: qsTr("Security"), destination: qsTr("Application lock"), keywords: "password remove" },
+            { id: "createTorrent", action: actionCreateTorrent, group: qsTr("Tools"), destination: qsTr("Torrent Creator"), keywords: "create torrent" },
+            { id: "cookies", action: actionManageCookies, group: qsTr("Tools"), destination: qsTr("Cookie manager"), keywords: "HTTP cookies" },
+            { id: "options", action: actionOptions, group: qsTr("Tools"), destination: qsTr("Options"), keywords: "preferences settings" },
+            { id: "shutdownNone", action: actionAutoShutdownDisabled, group: qsTr("Downloads done"), destination: qsTr("Completion action"), keywords: "do nothing" },
+            { id: "shutdownExit", action: actionAutoExit, group: qsTr("Downloads done"), destination: qsTr("Completion action"), keywords: "exit" },
+            { id: "shutdownSuspend", action: actionAutoSuspend, group: qsTr("Downloads done"), destination: qsTr("Completion action"), keywords: "suspend" },
+            { id: "shutdownHibernate", action: actionAutoHibernate, group: qsTr("Downloads done"), destination: qsTr("Completion action"), keywords: "hibernate" },
+            { id: "shutdownReboot", action: actionAutoReboot, group: qsTr("Downloads done"), destination: qsTr("Completion action"), keywords: "reboot" },
+            { id: "shutdownPowerOff", action: actionAutoShutdown, group: qsTr("Downloads done"), destination: qsTr("Completion action"), keywords: "shutdown power off" },
+            { id: "plugins", action: actionManagePlugins, group: qsTr("Search"), destination: qsTr("Search plugins"), keywords: "install update engines providers" },
+            { id: "commandPalette", action: actionCommandPalette, group: qsTr("Help"), destination: qsTr("Command palette"), keywords: "commands settings destinations Ctrl Shift F" },
+            { id: "documentation", action: actionDocumentation, group: qsTr("Help"), destination: qsTr("Documentation"), keywords: "manual help" },
+            { id: "updates", action: actionCheckForUpdates, group: qsTr("Help"), destination: qsTr("Program updater"), keywords: "check download restart" },
+            { id: "donate", action: actionDonateMoney, group: qsTr("Help"), destination: qsTr("Donation page"), keywords: "support" },
+            { id: "about", action: actionAbout, group: qsTr("Help"), destination: qsTr("About dialog"), keywords: "version changelog" },
+            { id: "speedLimits", action: actionSetGlobalSpeedLimits, group: qsTr("Tools"), destination: qsTr("Global speed limits"), keywords: "bandwidth download upload" },
+            { id: "alternativeLimits", action: actionUseAlternativeSpeedLimits, group: qsTr("Tools"), destination: qsTr("Global speed limits"), keywords: "alternative turtle" },
+            { id: "openFolder", action: actionOpenDestinationFolder, group: qsTr("Transfers"), destination: qsTr("Selected transfer"), keywords: "open destination folder" }
+        ]
+        for (var i = 0; i < actionEntries.length; ++i) {
+            var item = actionEntries[i]
+            commands.push({
+                id: "action." + item.id,
+                title: paletteActionTitle(item.action.text),
+                group: item.group,
+                destination: item.destination,
+                keywords: item.keywords,
+                enabled: item.action.enabled,
+                checkable: item.action.checkable,
+                checked: item.action.checked,
+                shortcut: item.action.shortcut ? item.action.shortcut.toString() : "",
+                kind: "action",
+                action: item.action
+            })
+        }
+
+        var optionSettings = optionsDialog.paletteCommands()
+        for (var settingIndex = 0; settingIndex < optionSettings.length; ++settingIndex)
+            commands.push(optionSettings[settingIndex])
+
+        var quickSettings = settingsSheet.paletteCommands()
+        for (var quickIndex = 0; quickIndex < quickSettings.length; ++quickIndex)
+            commands.push(quickSettings[quickIndex])
+
+        var plugins = SearchController.plugins
+        for (var pluginIndex = 0; pluginIndex < plugins.length; ++pluginIndex) {
+            var plugin = plugins[pluginIndex]
+            var pluginState = pluginPaletteState(plugin)
+            commands.push({
+                id: "searchPlugin." + plugin.id,
+                title: plugin.label,
+                group: qsTr("Search plugin"),
+                destination: qsTr("Search plugins · %1").arg(pluginState),
+                context: (plugin.version ? qsTr("Version %1").arg(plugin.version) : qsTr("Version unavailable"))
+                    + (plugin.integrityState ? qsTr(" · Integrity: %1").arg(plugin.integrityState) : "")
+                    + (plugin.runtimeState ? qsTr(" · Runtime: %1").arg(plugin.runtimeState) : "")
+                    + (plugin.diagnostic ? qsTr(" · %1").arg(plugin.diagnostic) : ""),
+                keywords: "provider engine site plugin " + plugin.id + " "
+                    + plugin.version + " " + plugin.url + " "
+                    + pluginState + " " + (plugin.integrityState || "") + " "
+                    + (plugin.runtimeState || "") + " " + (plugin.diagnostic || ""),
+                kind: "plugin",
+                pluginId: plugin.id,
+                pluginEnabled: plugin.enabled,
+                registered: plugin.registered,
+                installedOnDisk: plugin.installedOnDisk,
+                runtimeWaiting: plugin.runtimeWaiting,
+                canRetry: plugin.canRetry,
+                canManage: plugin.canManage,
+                canTrust: plugin.canTrust,
+                trusted: plugin.trusted,
+                catalogOwned: plugin.catalogOwned,
+                integrityState: plugin.integrityState,
+                runtimeState: plugin.runtimeState,
+                pluginVersion: plugin.version,
+                pluginSource: plugin.catalogSourceUrl || "",
+                pluginDiagnostic: plugin.diagnostic || "",
+                enabled: true
+            })
+        }
+        return commands
+    }
+
+    // Shell dialogs (per-feature types, referenced by name in the single module).
+    OptionsDialog { id: optionsDialog; parent: Overlay.overlay }
+    CommandPalette {
+        id: commandPalette
+        commands: root.commandPaletteCommands()
         onCommandInvoked: (commandId) => root.invokePaletteCommand(commandId)
+        onPluginEnabledChanged: (pluginId, enabled) =>
+            SearchController.enablePlugin(pluginId, enabled)
+        onPluginRetryRequested: (pluginId) => {
+            Log.info("search", "Retry plugin setup from palette: " + pluginId)
+            SearchController.retryUnofficialPluginSync()
+        }
+        onPluginTrustRequested: (pluginId) => {
+            Log.info("search", "Trust quarantined plugin from palette: " + pluginId)
+            SearchController.trustUnofficialPlugin(pluginId)
+        }
+        onPluginManageRequested: (pluginId) => centralTabs.openSearchPlugins(pluginId)
+        onPluginSourceRequested: (pluginId, sourceUrl) => {
+            Log.info("search", "Open plugin source from palette: " + pluginId)
+            if (!/^https:\/\//i.test(sourceUrl)) {
+                NotificationCenter.notify(
+                    qsTr("The plugin catalog did not provide a safe HTTPS source URL."),
+                    "warning", qsTr("Plugin source blocked"))
+                return
+            }
+            Qt.openUrlExternally(sourceUrl)
+        }
+        onSettingValueChanged: (settingId, value) =>
+            root.setPaletteSettingValue(settingId, value)
     }
     StatisticsDialog { id: statisticsDialog; parent: Overlay.overlay }
     TorrentCreatorDialog { id: torrentCreatorDialog; parent: Overlay.overlay }
@@ -1005,7 +1250,6 @@ ApplicationWindow {
     Shortcut { sequences: ["Alt+3"]; onActivated: root.switchToTab(2) }
     Shortcut { sequences: ["Alt+4"]; onActivated: root.switchToTab(3) }
     Shortcut { sequences: ["Alt+5"]; onActivated: root.switchToTab(4) }
-    Shortcut { sequences: ["Ctrl+Shift+P"]; onActivated: commandPalette.openPalette() }
     Shortcut { sequences: ["Escape"]; enabled: root.activePanel.length > 0; onActivated: root.closePanel() }
     // Bulk selection on the transfer list. Both are gated on a focused text
     // editor so Ctrl+A still selects text while typing in a filter field.
@@ -1058,13 +1302,6 @@ ApplicationWindow {
             // here would re-emit this same signal — an infinite loop.
             GuiAddTorrentManager.addTorrent(source)
         }
-        function onUpdateCheckFinished(available, latestVersion) {
-            Log.info("ui", "Update check finished; available=" + available)
-            if (available)
-                snackbar.show(qsTr("A new version is available: %1").arg(latestVersion))
-            else
-                snackbar.show(qsTr("qBittorrent is up to date."))
-        }
         function onNotify(message) {
             snackbar.show(message)
         }
@@ -1088,6 +1325,13 @@ ApplicationWindow {
         function onOperationFinished(success, message) {
             if (message && message.length > 0)
                 snackbar.show(message)
+        }
+    }
+
+    Connections {
+        target: ProgramUpdater
+        function onNotificationRequested(body, severity, title) {
+            NotificationCenter.notify(body, severity, title)
         }
     }
 
@@ -1119,6 +1363,18 @@ ApplicationWindow {
                 if (!DesktopIntegration.openInExternalEditor(target)) {
                     NotificationCenter.notify(
                         qsTr("No external editor is configured. Choose one in Settings."),
+                        "warning")
+                }
+                NotificationCenter.dismiss(notificationId)
+            }
+            else if (actionId.startsWith("open-workspace-location:")) {
+                const target = actionId.slice("open-workspace-location:".length)
+                if (target.startsWith("file:")) {
+                    Log.info("ui", "Opening Workspace operation location")
+                    Qt.openUrlExternally(target)
+                } else {
+                    NotificationCenter.notify(
+                        qsTr("The Workspace location could not be opened because it is not a local file URL."),
                         "warning")
                 }
                 NotificationCenter.dismiss(notificationId)
@@ -1192,8 +1448,45 @@ ApplicationWindow {
         else
             optionsDialog.open()
     }
+    function setPaletteSettingValue(settingId, value) {
+        if (settingId.indexOf("options.") === 0)
+            optionsDialog.setPaletteSetting(settingId, value)
+        else if (settingId.indexOf("settings.") === 0)
+            settingsSheet.setPaletteSetting(settingId, value)
+    }
     function invokePaletteCommand(commandId) {
         Log.info("ui", "Command palette: " + commandId)
+        var paletteCommands = commandPaletteCommands()
+        for (var commandIndex = 0; commandIndex < paletteCommands.length; ++commandIndex) {
+            var command = paletteCommands[commandIndex]
+            if (command.id !== commandId)
+                continue
+            if (command.action !== undefined) {
+                if (command.action.enabled)
+                    command.action.trigger()
+                return
+            }
+            if (command.settingId !== undefined) {
+                if (command.settingScope === "quick") {
+                    openPanel("settings")
+                    settingsSheet.revealPaletteSetting(command.settingId)
+                }
+                else {
+                    optionsDialog.showSetting(command.settingId)
+                }
+                return
+            }
+            if (command.pluginId !== undefined) {
+                if (command.registered && command.pluginEnabled
+                        && !command.runtimeWaiting)
+                    centralTabs.openSearchPlugin(command.pluginId)
+                else
+                    centralTabs.openSearchPlugins(command.pluginId)
+                return
+            }
+            break
+        }
+
         if (commandId.indexOf("tab.") === 0) {
             var tabs = { "tab.transfers": 0, "tab.search": 1, "tab.rss": 2,
                 "tab.log": 3, "tab.workspace": 4 }
@@ -1201,11 +1494,8 @@ ApplicationWindow {
         }
         else if (commandId.indexOf("options.") === 0)
             optionsDialog.showPage(parseInt(commandId.slice(8)))
-        else if (commandId === "action.addFile") addTorrentFile()
-        else if (commandId === "action.addLink") addTorrentLink()
-        else if (commandId === "action.history") togglePanel("history")
-        else if (commandId === "action.statistics") showStatistics()
-        else if (commandId === "action.about") showAbout()
+        else if (commandId.indexOf("panel.") === 0)
+            openPanel(commandId.slice(6))
     }
     function exitApp() {
         Log.info("ui", "Action: Exit")

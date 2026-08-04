@@ -69,6 +69,9 @@ public:
         return new WorkspaceManager;
     }
 
+    /// Return the live singleton for native restart preflight checks.
+    static WorkspaceManager *existingInstance();
+
     explicit WorkspaceManager(QObject *parent = nullptr);
     ~WorkspaceManager() override;
 
@@ -276,4 +279,6 @@ private:
     bool m_loading = false;
     bool m_initializationBlocked = false;
     QTimer m_saveTimer;
+
+    static WorkspaceManager *s_instance;
 };

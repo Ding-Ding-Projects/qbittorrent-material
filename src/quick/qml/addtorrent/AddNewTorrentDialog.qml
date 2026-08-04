@@ -129,9 +129,6 @@ Dialog {
         }
     }
 
-    // Local transient notifications for in-dialog actions (e.g. .torrent export).
-    Snackbar { id: localSnackbar }
-
     function loadFromController() {
         _loading = true
         Log.debug("ui", "AddNewTorrentDialog: loading fields from controller")
@@ -707,9 +704,9 @@ Dialog {
         onAccepted: {
             var path = decodeURIComponent(("" + file).replace(/^file:\/\/\//, ""))
             if (AddTorrentController.saveTorrentFile(path))
-                localSnackbar.show(qsTr("Torrent file exported."))
+                NotificationCenter.notify(qsTr("Torrent file exported."), "success")
             else
-                localSnackbar.show(qsTr("Could not export the torrent file."))
+                NotificationCenter.notify(qsTr("Could not export the torrent file."), "error")
         }
     }
 }

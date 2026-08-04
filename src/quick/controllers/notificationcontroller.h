@@ -9,6 +9,7 @@
 #include <QAbstractListModel>
 #include <QDateTime>
 #include <QString>
+#include <QVariant>
 #include <QVector>
 
 #include <qqmlintegration.h>
@@ -32,6 +33,7 @@ class NotificationController final : public QAbstractListModel
 
     Q_PROPERTY(int count READ count NOTIFY countChanged)
     Q_PROPERTY(int unreadCount READ unreadCount NOTIFY unreadCountChanged)
+    Q_PROPERTY(int activeCount READ activeCount NOTIFY activeCountChanged)
 
 public:
     enum Roles
@@ -56,13 +58,18 @@ public:
     [[nodiscard]] QVariant data(const QModelIndex &index, int role) const override;
     [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
     [[nodiscard]] int unreadCount() const;
+    [[nodiscard]] int activeCount() const;
 
     Q_INVOKABLE QString notify(const QString &body, const QString &severity = QStringLiteral("info"),
         const QString &title = {}, const QString &actionLabel = {}, const QString &actionId = {});
     Q_INVOKABLE void markRead(const QString &id);
     Q_INVOKABLE void markAllRead();
     Q_INVOKABLE void dismiss(const QString &id);
+    Q_INVOKABLE void dismissAll();
     Q_INVOKABLE void clearAll();
+    /// Snapshot undismissed entries in visual order (oldest first) so the
+    /// primary corner host can restore persisted cards when QML is created.
+    Q_INVOKABLE QVariantList activeEntries() const;
     Q_INVOKABLE void activateAction(const QString &id);
     Q_INVOKABLE int matchingCount(const QString &query, bool regex,
         const QString &flags, const QString &scope) const;
@@ -70,6 +77,9 @@ public:
 signals:
     void countChanged();
     void unreadCountChanged();
+    void activeCountChanged();
+    void allDismissed();
+    void notificationDismissed(const QString &id);
     void notificationRaised(const QString &id, const QString &title, const QString &body,
         const QString &severity, const QString &actionLabel, const QString &actionId);
     void actionRequested(const QString &actionId, const QString &notificationId);

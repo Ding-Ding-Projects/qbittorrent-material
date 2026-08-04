@@ -41,13 +41,14 @@ class ThemeManager final : public QObject
     Q_DISABLE_COPY_MOVE(ThemeManager)
 
     Q_PROPERTY(ColorScheme colorScheme READ colorScheme WRITE setColorScheme NOTIFY themeChanged)
+    Q_PROPERTY(int paletteRevision READ paletteRevision NOTIFY themeChanged)
     Q_PROPERTY(TrayIconStyle trayIconStyle READ trayIconStyle WRITE setTrayIconStyle NOTIFY trayIconStyleChanged)
     Q_PROPERTY(bool isDark READ isDark NOTIFY themeChanged)
     Q_PROPERTY(UiStyle uiStyle READ uiStyle WRITE setUiStyle NOTIFY themeChanged)
     Q_PROPERTY(QString styleName READ styleName NOTIFY themeChanged)
     Q_PROPERTY(QString styleLetter READ styleLetter NOTIFY themeChanged)
     Q_PROPERTY(qreal densityScale READ densityScale WRITE setDensityScale NOTIFY appearanceChanged)
-    Q_PROPERTY(QColor seedColor READ seedColor WRITE setSeedColor NOTIFY appearanceChanged)
+    Q_PROPERTY(QColor seedColor READ seedColor WRITE setSeedColor NOTIFY themeChanged)
     Q_PROPERTY(QString uiFontFamily READ uiFontFamily WRITE setUiFontFamily NOTIFY appearanceChanged)
     Q_PROPERTY(qreal uiFontScale READ uiFontScale WRITE setUiFontScale NOTIFY appearanceChanged)
     Q_PROPERTY(int uiFontWeight READ uiFontWeight WRITE setUiFontWeight NOTIFY appearanceChanged)
@@ -88,6 +89,9 @@ public:
 
     ColorScheme colorScheme() const;
     void setColorScheme(ColorScheme value);
+    /// Monotonic invalidation token for QML bindings that resolve palette roles
+    /// through the invokable color() function.
+    int paletteRevision() const;
 
     TrayIconStyle trayIconStyle() const;
     void setTrayIconStyle(TrayIconStyle value);
@@ -103,6 +107,9 @@ public:
     void setDensityScale(qreal value);
     QColor seedColor() const;
     void setSeedColor(const QColor &value);
+    Q_INVOKABLE bool isValidColor(const QString &value) const;
+    Q_INVOKABLE QColor parseColorValue(const QString &value) const;
+    Q_INVOKABLE QString nameForColor(const QColor &value) const;
     QString uiFontFamily() const;
     void setUiFontFamily(const QString &value);
     qreal uiFontScale() const;
@@ -149,10 +156,12 @@ private:
     void applySeedColor();
     void persistAppearance() const;
     void onSystemColorSchemeChanged();
+    void notifyThemeChanged();
 
     static ThemeManager *m_instance;
 
     ColorScheme m_colorScheme = System;
+    int m_paletteRevision = 0;
     TrayIconStyle m_trayIconStyle = Normal;
     UiStyle m_uiStyle = TonalRail;
     qreal m_densityScale = 1.0;

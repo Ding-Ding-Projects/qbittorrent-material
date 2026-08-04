@@ -9,6 +9,7 @@ on:
 # One run creates one immutable, full release for the commit that triggered it.
 # Branch filtering excludes tag pushes, so the release tag cannot start a loop.
 permissions:
+  actions: read
   contents: write
 
 concurrency:
@@ -73,9 +74,24 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.ORG_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           $shortSha = $env:GITHUB_SHA.Substring(0, 8)
-          $tag = "build-$env:GITHUB_RUN_NUMBER-$shortSha"
-          $title = "qBittorrent Material build #$env:GITHUB_RUN_NUMBER ($shortSha)"
           $buildId = "build.$env:GITHUB_RUN_NUMBER.$shortSha"
+          $projectDeclaration = Get-Content -Raw -LiteralPath CMakeLists.txt
+          if ($projectDeclaration -notmatch '(?s)project\(qbittorrent-material\s+VERSION\s+([0-9]+)\.([0-9]+)\.[0-9]+') {
+            throw "Could not derive the Squirrel package version from project()."
+          }
+          $packageVersion = "$($Matches[1]).$($Matches[2]).$env:GITHUB_RUN_NUMBER"
+          $tag = if ($env:GITHUB_REF_NAME -eq 'master') {
+            "v$packageVersion"
+          }
+          else {
+            "build-$env:GITHUB_RUN_NUMBER-$shortSha"
+          }
+          $title = if ($env:GITHUB_REF_NAME -eq 'master') {
+            "qBittorrent Material $packageVersion ($shortSha)"
+          }
+          else {
+            "qBittorrent Material preview #$env:GITHUB_RUN_NUMBER ($shortSha)"
+          }
 
           $tagRefs = @(& git ls-remote --tags origin "refs/tags/$tag")
           $tagLookupExitCode = $LASTEXITCODE
@@ -111,8 +127,124 @@ jobs:
 
           "tag=$tag" >> $env:GITHUB_OUTPUT
           "title=$title" >> $env:GITHUB_OUTPUT
+          "packageVersion=$packageVersion" >> $env:GITHUB_OUTPUT
           "QBT_BUILD_ID=$buildId" >> $env:GITHUB_ENV
-          Write-Host "Reserved release identity $tag for $env:GITHUB_SHA."
+          "QBT_PACKAGE_VERSION=$packageVersion" >> $env:GITHUB_ENV
+          Write-Host "Reserved release identity $tag and Squirrel package $packageVersion for $env:GITHUB_SHA."
+
+      - name: Download the previous Squirrel feed when available
+        id: previous
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.ORG_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          $previousRoot = Join-Path $env:RUNNER_TEMP "qbt-material-previous-squirrel"
+          New-Item -ItemType Directory -Force -Path $previousRoot | Out-Null
+
+          # `gh release view` alone does not distinguish an expected first
+          # release from authentication, transport, and API failures. Probe the
+          # REST endpoint with response headers and permit only a proven 404.
+          $latestProbe = @(
+            & gh api --include `
+              -H "Accept: application/vnd.github+json" `
+              -H "X-GitHub-Api-Version: 2026-03-10" `
+              "repos/$env:GITHUB_REPOSITORY/releases/latest" 2>&1 |
+              ForEach-Object { $_.ToString() }
+          )
+          $latestProbeExitCode = $LASTEXITCODE
+          $statusLine = @(
+            $latestProbe |
+              Where-Object { $_ -match '^HTTP/\S+\s+[0-9]{3}\b' } |
+              Select-Object -Last 1
+          )
+          if ($statusLine.Count -ne 1 `
+              -or $statusLine[0] -notmatch '^HTTP/\S+\s+(?<status>[0-9]{3})\b') {
+            throw "Could not determine the HTTP status of the latest-release probe."
+          }
+          $latestStatus = [int]$Matches.status
+          if ($latestStatus -eq 404) {
+            Write-Host "GitHub proved that no latest release is available; this is the first feed migration."
+            "directory=" >> $env:GITHUB_OUTPUT
+            "installer=" >> $env:GITHUB_OUTPUT
+            "hasFeed=false" >> $env:GITHUB_OUTPUT
+            "packageVersion=" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+          if ($latestProbeExitCode -ne 0 -or $latestStatus -lt 200 -or $latestStatus -ge 300) {
+            throw "Latest-release discovery failed closed (HTTP $latestStatus, gh exit $latestProbeExitCode)."
+          }
+
+          $latestJson = gh release view --repo $env:GITHUB_REPOSITORY `
+            --json tagName,assets
+          if ($LASTEXITCODE -ne 0) {
+            throw "The latest release was proven present but could not be read."
+          }
+          $latest = $latestJson | ConvertFrom-Json
+          $assetNames = @($latest.assets | ForEach-Object { $_.name })
+          $manifestName = @($assetNames | Where-Object { $_ -eq "RELEASES" })
+          $fullPackageNames = @($assetNames | Where-Object {
+            $_ -match '^qBittorrentMaterial-[0-9]+\.[0-9]+\.[0-9]+-full\.nupkg$'
+          })
+          $installerNames = @($assetNames | Where-Object {
+            $_ -match '^qBittorrent-Material-[0-9]+\.[0-9]+\.[0-9]+-windows-x64-Setup\.exe$'
+          })
+          if ($manifestName.Count -eq 0 -and $fullPackageNames.Count -eq 0) {
+            Write-Host "Latest release $($latest.tagName) predates the Squirrel feed; delta/upgrade smoke is not applicable."
+            "directory=" >> $env:GITHUB_OUTPUT
+            "installer=" >> $env:GITHUB_OUTPUT
+            "hasFeed=false" >> $env:GITHUB_OUTPUT
+            "packageVersion=" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+          if ($manifestName.Count -ne 1 -or $fullPackageNames.Count -ne 1) {
+            throw "Latest release $($latest.tagName) has a partial or ambiguous Squirrel feed."
+          }
+          if ($installerNames.Count -ne 1) {
+            throw "Latest Squirrel feed $($latest.tagName) must carry exactly one matching Setup installer."
+          }
+
+          $fullMatch = [regex]::Match(
+            $fullPackageNames[0],
+            '^qBittorrentMaterial-(?<version>[0-9]+\.[0-9]+\.[0-9]+)-full\.nupkg$')
+          $installerMatch = [regex]::Match(
+            $installerNames[0],
+            '^qBittorrent-Material-(?<version>[0-9]+\.[0-9]+\.[0-9]+)-windows-x64-Setup\.exe$')
+          if (-not $fullMatch.Success -or -not $installerMatch.Success `
+              -or $fullMatch.Groups['version'].Value -ne $installerMatch.Groups['version'].Value) {
+            throw "Latest Squirrel feed $($latest.tagName) has mismatched full-package and Setup versions."
+          }
+          $previousVersion = $fullMatch.Groups['version'].Value
+
+          foreach ($assetName in @($manifestName[0], $fullPackageNames[0], $installerNames[0])) {
+            gh release download $latest.tagName --repo $env:GITHUB_REPOSITORY `
+              --pattern $assetName --dir $previousRoot
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not download prior Squirrel asset $assetName."
+            }
+          }
+          $previousManifest = Join-Path $previousRoot $manifestName[0]
+          $previousFullPackage = Join-Path $previousRoot $fullPackageNames[0]
+          $previousInstaller = Join-Path $previousRoot $installerNames[0]
+          foreach ($requiredPreviousAsset in @(
+            $previousManifest,
+            $previousFullPackage,
+            $previousInstaller
+          )) {
+            if (-not (Test-Path -LiteralPath $requiredPreviousAsset -PathType Leaf) `
+                -or (Get-Item -LiteralPath $requiredPreviousAsset).Length -le 0) {
+              throw "Downloaded prior Squirrel asset is missing or empty: $requiredPreviousAsset"
+            }
+          }
+          if (-not (Get-Content -Raw -LiteralPath $previousManifest).Contains(
+              "qBittorrentMaterial-$previousVersion-full.nupkg")) {
+            throw "Prior RELEASES does not reference the required full package for $previousVersion."
+          }
+
+          "directory=$previousRoot" >> $env:GITHUB_OUTPUT
+          "installer=$previousInstaller" >> $env:GITHUB_OUTPUT
+          "hasFeed=true" >> $env:GITHUB_OUTPUT
+          "packageVersion=$previousVersion" >> $env:GITHUB_OUTPUT
+          Write-Host "Recovered complete Squirrel feed $previousVersion from $($latest.tagName)."
 
       - name: Count project lines for the release record
         id: lines
@@ -133,13 +265,74 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.ORG_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
-          # The selector validates resources/dim-sum/index.json and every PNG
-          # before allocating a photo or code name.
+          # The selector resolves only the authoritative public catalog and its
+          # published catalog-v1* assets. Unavailability is a version-only
+          # result, not a release failure and never triggers a local download.
           & ./scripts/select-release-dim-sum.ps1 `
             -RepositoryRoot $env:GITHUB_WORKSPACE `
             -OutputPath $env:GITHUB_OUTPUT
           if ($LASTEXITCODE -ne 0) {
             throw "The verified dim-sum release selection failed."
+          }
+
+      - name: Stamp the selected public release identity into the desktop build
+        shell: pwsh
+        env:
+          DIM_SUM_AVAILABLE: ${{ steps.dimsum.outputs.available }}
+          DIM_SUM_ID: ${{ steps.dimsum.outputs.id }}
+          DIM_SUM_CODE_NAME: ${{ steps.dimsum.outputs.codeName }}
+          DIM_SUM_ENGLISH: ${{ steps.dimsum.outputs.english }}
+          DIM_SUM_ZH_HANT: ${{ steps.dimsum.outputs.zhHant }}
+          DIM_SUM_PHOTO_URL: ${{ steps.dimsum.outputs.photoUrl }}
+          DIM_SUM_PHOTO_ASSET_NAME: ${{ steps.dimsum.outputs.photoAssetName }}
+          DIM_SUM_PHOTO_DIGEST: ${{ steps.dimsum.outputs.photoDigest }}
+          DIM_SUM_PHOTO_TAG: ${{ steps.dimsum.outputs.photoTag }}
+          DIM_SUM_CATALOG_SOURCE_URL: ${{ steps.dimsum.outputs.catalogSourceUrl }}
+          DIM_SUM_CATALOG_REVISION: ${{ steps.dimsum.outputs.catalogRevision }}
+          DIM_SUM_CATALOG_BLOB_SHA: ${{ steps.dimsum.outputs.catalogBlobSha }}
+          DIM_SUM_REASON: ${{ steps.dimsum.outputs.reason }}
+        run: |
+          if ($env:DIM_SUM_AVAILABLE -notin @('true', 'false')) {
+            throw "Dim-sum release availability output is missing or invalid."
+          }
+          $identity = [ordered]@{
+            schemaVersion = 1
+            available = $env:DIM_SUM_AVAILABLE -eq 'true'
+            id = $env:DIM_SUM_ID
+            codeName = $env:DIM_SUM_CODE_NAME
+            english = $env:DIM_SUM_ENGLISH
+            zhHant = $env:DIM_SUM_ZH_HANT
+            photoUrl = $env:DIM_SUM_PHOTO_URL
+            photoAssetName = $env:DIM_SUM_PHOTO_ASSET_NAME
+            photoDigest = $env:DIM_SUM_PHOTO_DIGEST
+            photoTag = $env:DIM_SUM_PHOTO_TAG
+            catalogSourceUrl = $env:DIM_SUM_CATALOG_SOURCE_URL
+            catalogRevision = $env:DIM_SUM_CATALOG_REVISION
+            catalogBlobSha = $env:DIM_SUM_CATALOG_BLOB_SHA
+            reason = $env:DIM_SUM_REASON
+          }
+          $escapedPhotoTag = [regex]::Escape([string]$identity.photoTag)
+          $escapedPhotoAssetName = [regex]::Escape([string]$identity.photoAssetName)
+          if ($identity.available `
+              -and ([string]::IsNullOrWhiteSpace($identity.id) `
+                -or $identity.codeName -cne "$($identity.english) · $($identity.zhHant)" `
+                -or $identity.photoAssetName -notmatch '^hk-dish-[0-9]{4}-[a-z0-9-]+\.png$' `
+                -or $identity.photoTag -notmatch '^catalog-v1(?:-part-[0-9]{3})?$' `
+                -or $identity.photoUrl -notmatch "^https://github\.com/Ding-Ding-Projects/dim-sum-photos/releases/download/$escapedPhotoTag/$escapedPhotoAssetName$" `
+                -or $identity.photoDigest -notmatch '^sha256:[0-9a-f]{64}$' `
+                -or $identity.catalogRevision -notmatch '^[0-9a-f]{40}$' `
+                -or $identity.catalogBlobSha -notmatch '^[0-9a-f]{40}$')) {
+            throw "Available dim-sum identity is not a complete authoritative published catalog-v1 record."
+          }
+          $identityPath = Join-Path $env:GITHUB_WORKSPACE `
+            'resources/experience/release-identity.json'
+          $identity | ConvertTo-Json -Depth 4 |
+            Set-Content -LiteralPath $identityPath -Encoding utf8NoBOM
+          $verifiedIdentity = Get-Content -Raw -LiteralPath $identityPath | ConvertFrom-Json
+          if ([bool]$verifiedIdentity.available -ne $identity.available `
+              -or [string]$verifiedIdentity.catalogRevision -ne $identity.catalogRevision `
+              -or [string]$verifiedIdentity.photoUrl -ne $identity.photoUrl) {
+            throw "The build-specific release identity did not round-trip exactly."
           }
 
       - name: Run desktop policy and content-integrity tests
@@ -182,7 +375,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release `
             "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=x64-windows-static-md `
-            "-DQBT_BUILD_ID=$env:QBT_BUILD_ID"
+            "-DQBT_BUILD_ID=$env:QBT_BUILD_ID" `
+            "-DQBT_PACKAGE_VERSION=$env:QBT_PACKAGE_VERSION"
 
       - name: Build
         shell: pwsh
@@ -218,253 +412,323 @@ jobs:
             -PlatformPluginPath $qmlSmokePlugin `
             -TimeoutSeconds 60
 
-      - name: Build and verify the NSIS installer
+      - name: Build and verify the Squirrel installer and update feed
         id: package
         shell: pwsh
+        env:
+          PREVIOUS_RELEASE_DIRECTORY: ${{ steps.previous.outputs.directory }}
+          PREVIOUS_INSTALLER_PATH: ${{ steps.previous.outputs.installer }}
+          PREVIOUS_FEED_AVAILABLE: ${{ steps.previous.outputs.hasFeed }}
+          SQUIRREL_SIGN_WITH_PARAMS: ${{ secrets.SQUIRREL_SIGN_WITH_PARAMS }}
         run: |
-          cpack --config build/CPackConfig.cmake -G NSIS -C Release
-          $cpackExitCode = $LASTEXITCODE
-
-          $nsisLog = "build/packages/_CPack_Packages/win64/NSIS/NSISOutput.log"
-          if (Test-Path -LiteralPath $nsisLog) {
-            Write-Host "----- NSISOutput.log -----"
-            Get-Content -LiteralPath $nsisLog
-            Write-Host "----- end NSISOutput.log -----"
+          $releaseDirectory = Join-Path $env:GITHUB_WORKSPACE "build/squirrel-release"
+          $packageArguments = @{
+            PackageVersion = $env:QBT_PACKAGE_VERSION
+            RepositoryRoot = $env:GITHUB_WORKSPACE
+            BuildDirectory = "build"
+            OutputDirectory = "build/squirrel-release"
+            GitHubOutputPath = $env:GITHUB_OUTPUT
           }
-          if ($cpackExitCode -ne 0) {
-            throw "cpack exited with code $cpackExitCode."
+          if (-not [string]::IsNullOrWhiteSpace($env:PREVIOUS_RELEASE_DIRECTORY)) {
+            $packageArguments.PreviousReleaseDirectory = $env:PREVIOUS_RELEASE_DIRECTORY
           }
-
-          $installers = @(
-            Get-ChildItem -Path "build/packages" -File `
-              -Filter "qBittorrent-Material-*-$env:QBT_BUILD_ID-windows-x64.exe"
-          )
-          if ($installers.Count -ne 1) {
-            throw "Expected exactly one NSIS installer, found $($installers.Count)."
+          if (-not [string]::IsNullOrWhiteSpace($env:SQUIRREL_SIGN_WITH_PARAMS)) {
+            # Squirrel 2.0.1 records raw releasify arguments in its local log.
+            # This value may therefore contain only non-secret certificate-store
+            # or HSM selectors; the packaging helper rejects password/PIN/token
+            # flags rather than pretending Actions masking protects tool logs.
+            $packageArguments.SignWithParams = $env:SQUIRREL_SIGN_WITH_PARAMS
           }
-          $installer = $installers[0]
-          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer.FullName).Hash.ToLowerInvariant()
-
-          $smokeRoot = Join-Path $env:RUNNER_TEMP "qbt-material-smoke"
-          if (Test-Path -LiteralPath $smokeRoot) {
-            Remove-Item -Recurse -Force -LiteralPath $smokeRoot
-          }
-          $installProcess = Start-Process -FilePath $installer.FullName `
-            -ArgumentList @("/S", "/D=$smokeRoot") `
-            -PassThru -Wait
-          if ($installProcess.ExitCode -ne 0) {
-            throw "Silent installer returned exit code $($installProcess.ExitCode)."
-          }
-
-          $installedExe = Join-Path $smokeRoot "bin/qbittorrent.exe"
-          # Qt's CMake deployment API keeps plugins at the install prefix,
-          # beside bin/, rather than nesting them under the executable folder.
-          $platformPluginRoot = Join-Path $smokeRoot "plugins/platforms"
-          $windowsPlatformPlugin = Join-Path $platformPluginRoot "qwindows.dll"
-          $offscreenPlatformPlugin = Join-Path $platformPluginRoot "qoffscreen.dll"
-          $debugPlatformPlugins = @(
-            Join-Path $platformPluginRoot "qwindowsd.dll"
-            Join-Path $platformPluginRoot "qoffscreend.dll"
-          )
-          if (-not (Test-Path -LiteralPath $installedExe)) {
-            throw "Installed executable is missing: $installedExe"
-          }
-          foreach ($platformPlugin in @($windowsPlatformPlugin, $offscreenPlatformPlugin)) {
-            if (-not (Test-Path -LiteralPath $platformPlugin)) {
-              throw "Qt platform plugin is missing: $platformPlugin"
-            }
-          }
-          foreach ($debugPlatformPlugin in $debugPlatformPlugins) {
-            if (Test-Path -LiteralPath $debugPlatformPlugin) {
-              throw "Debug Qt platform plugin leaked into Release package: $debugPlatformPlugin"
-            }
-          }
-
-          $gitExecutable = (Get-Command git.exe -CommandType Application -ErrorAction Stop `
-            | Select-Object -First 1).Source
-          $originalPath = $env:PATH
-          $env:PATH = (@($originalPath -split ";" | Where-Object {
-            $segment = $_.Trim()
-            if ([string]::IsNullOrWhiteSpace($segment)) { return $false }
-            -not (Test-Path -LiteralPath (Join-Path $segment "git.exe")) `
-              -and -not (Test-Path -LiteralPath (Join-Path $segment "git.cmd"))
-          }) -join ";")
-          $gitOnPath = @($env:PATH -split ";" | Where-Object {
-            $segment = $_.Trim()
-            $segment -and ((Test-Path -LiteralPath (Join-Path $segment "git.exe")) `
-              -or (Test-Path -LiteralPath (Join-Path $segment "git.cmd")))
-          })
-          if ($gitOnPath.Count -ne 0) {
-            throw "Git must be absent from PATH during the installed-app smoke test."
-          }
-
-          $workspaceRoot = Join-Path $env:RUNNER_TEMP "qbt-material-workspace-smoke"
-          if (Test-Path -LiteralPath $workspaceRoot) {
-            Remove-Item -Recurse -Force -LiteralPath $workspaceRoot
-          }
-          $env:QBT_WORKSPACE_ROOT = $workspaceRoot
-          $env:QT_QPA_PLATFORM = "offscreen"
-
-          $smokeLogRoot = Join-Path $env:RUNNER_TEMP "qbt-material-smoke-logs"
-          New-Item -ItemType Directory -Force -Path $smokeLogRoot | Out-Null
-          function Write-SmokeOutput($launch) {
-            foreach ($stream in @(
-              @{ Name = "stdout"; Path = $launch.Stdout },
-              @{ Name = "stderr"; Path = $launch.Stderr }
-            )) {
-              Write-Host "::group::$($launch.Label) $($stream.Name)"
-              if (Test-Path -LiteralPath $stream.Path) {
-                $content = Get-Content -Raw -LiteralPath $stream.Path
-                if ([string]::IsNullOrEmpty($content)) { Write-Host "<empty>" }
-                else { Write-Host $content }
-              }
-              else { Write-Host "<missing>" }
-              Write-Host "::endgroup::"
-            }
-          }
-          function Start-SmokeApplication([string] $label) {
-            $safeLabel = $label -replace '[^A-Za-z0-9_-]', '-'
-            $stdout = Join-Path $smokeLogRoot "$safeLabel.stdout.log"
-            $stderr = Join-Path $smokeLogRoot "$safeLabel.stderr.log"
-            Remove-Item -Force -LiteralPath $stdout, $stderr -ErrorAction SilentlyContinue
-            $process = Start-Process -FilePath $installedExe -PassThru `
-              -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-            Start-Sleep -Seconds 10
-            $launch = [pscustomobject]@{
-              Label = $label
-              Process = $process
-              Stdout = $stdout
-              Stderr = $stderr
-            }
-            if ($process.HasExited) {
-              Write-SmokeOutput $launch
-              throw "$label exited during smoke test with code $($process.ExitCode)."
-            }
-            return $launch
-          }
-          function Stop-SmokeApplication($launch) {
-            Stop-Process -Id $launch.Process.Id -Force
-            $launch.Process.WaitForExit()
-            Write-SmokeOutput $launch
-          }
-
-          $initialLaunch = Start-SmokeApplication "Installed application"
-          Stop-SmokeApplication $initialLaunch
-
-          $workspaceJson = Join-Path $workspaceRoot "workspace.json"
-          $workspaceGit = Join-Path $workspaceRoot ".git"
-          $workspaceTabs = @(Get-ChildItem -LiteralPath (Join-Path $workspaceRoot "tabs") `
-            -Filter "*.md" -File -ErrorAction SilentlyContinue)
-          if (-not (Test-Path -LiteralPath $workspaceJson)) {
-            throw "Installed application did not persist workspace.json."
-          }
-          if (-not (Test-Path -LiteralPath $workspaceGit)) {
-            throw "Installed application did not initialize its embedded local Git repository."
-          }
-          if ($workspaceTabs.Count -ne 1) {
-            throw "Expected one persisted welcome tab, found $($workspaceTabs.Count)."
-          }
-
-          $workspaceState = Get-Content -Raw -LiteralPath $workspaceJson | ConvertFrom-Json
-          if ($workspaceState.type -ne "qbt-material-workspace" `
-              -or $workspaceState.schemaVersion -ne 2 `
-              -or @($workspaceState.tabs).Count -ne 1) {
-            throw "Persisted workspace metadata failed schema validation."
-          }
-
-          # Simulate a crash after a new tab body was atomically written but
-          # before workspace.json was replaced. The next launch must adopt the
-          # orphan as a recovered tab instead of deleting the only copy.
-          $orphanId = [guid]::NewGuid().ToString()
-          $orphanContent = "Recovered after interrupted metadata save"
-          $orphanPath = Join-Path $workspaceRoot "tabs/$orphanId.md"
-          [IO.File]::WriteAllText($orphanPath, $orphanContent, [Text.UTF8Encoding]::new($false))
-
-          $recoveryLaunch = Start-SmokeApplication "Crash-recovery application"
-          Stop-SmokeApplication $recoveryLaunch
-
-          $recoveredState = Get-Content -Raw -LiteralPath $workspaceJson | ConvertFrom-Json
-          $recoveredTabs = @($recoveredState.tabs)
-          $recoveredRecord = @($recoveredTabs | Where-Object { $_.id -eq $orphanId })
-          if ($recoveredTabs.Count -ne 2 -or $recoveredRecord.Count -ne 1 `
-              -or $recoveredRecord[0].name -notlike "Recovered tab *" `
-              -or (Get-Content -Raw -LiteralPath $orphanPath) -ne $orphanContent) {
-            throw "Interrupted tab body was not recovered without data loss."
-          }
-
-          $recoveryHeadFiles = @(& $gitExecutable -C $workspaceRoot ls-tree -r --name-only HEAD)
-          if ($recoveryHeadFiles -notcontains "tabs/$orphanId.md") {
-            throw "Recovered tab was not committed by embedded libgit2."
-          }
-
-          # Simulate the opposite crash window: workspace.json recorded a close,
-          # but the previously tracked body still exists. It must be cleaned up
-          # without resurrecting the intentionally closed tab.
-          $remainingTabs = @($recoveredTabs | Where-Object { $_.id -ne $orphanId })
-          $recoveredState.tabs = $remainingTabs
-          $recoveredState.activeTabId = $remainingTabs[0].id
-          $closedMetadata = $recoveredState | ConvertTo-Json -Depth 20
-          [IO.File]::WriteAllText($workspaceJson, $closedMetadata, [Text.UTF8Encoding]::new($false))
-
-          $closeRecoveryLaunch = Start-SmokeApplication "Interrupted-close application"
-          Stop-SmokeApplication $closeRecoveryLaunch
-
-          $closedState = Get-Content -Raw -LiteralPath $workspaceJson | ConvertFrom-Json
-          if (@($closedState.tabs).Count -ne 1 `
-              -or @($closedState.tabs | Where-Object { $_.id -eq $orphanId }).Count -ne 0 `
-              -or (Test-Path -LiteralPath $orphanPath)) {
-            throw "Interrupted close was resurrected instead of completed."
-          }
-
-          $env:PATH = $originalPath
-          & $gitExecutable -C $workspaceRoot rev-parse --verify HEAD | Out-Null
+          & ./scripts/build-squirrel-package.ps1 @packageArguments
           if ($LASTEXITCODE -ne 0) {
-            throw "Embedded libgit2 did not create the initial workspace commit."
+            throw "Squirrel package generation failed."
           }
-          & $gitExecutable -C $workspaceRoot fsck --strict
+
+          $installer = Join-Path $releaseDirectory "qBittorrent-Material-$env:QBT_PACKAGE_VERSION-windows-x64-Setup.exe"
+          $smokeArguments = @{
+            InstallerPath = $installer
+            PackageVersion = $env:QBT_PACKAGE_VERSION
+            ReleaseDirectory = $releaseDirectory
+          }
+          if (-not [string]::IsNullOrWhiteSpace($env:PREVIOUS_INSTALLER_PATH)) {
+            $smokeArguments.PreviousInstallerPath = $env:PREVIOUS_INSTALLER_PATH
+          }
+          if ($env:PREVIOUS_FEED_AVAILABLE -eq "true" `
+              -and [string]::IsNullOrWhiteSpace($env:PREVIOUS_INSTALLER_PATH)) {
+            throw "A validated prior Squirrel feed cannot skip the released-Setup upgrade smoke."
+          }
+          & ./scripts/test-squirrel-package.ps1 @smokeArguments
           if ($LASTEXITCODE -ne 0) {
-            throw "Workspace repository failed git fsck."
-          }
-          $headFiles = @(& $gitExecutable -C $workspaceRoot ls-tree -r --name-only HEAD)
-          if ($headFiles -contains "tabs/$orphanId.md") {
-            throw "Closed tab remains in the final embedded Git commit."
-          }
-          $workspaceStatus = @(& $gitExecutable -C $workspaceRoot status --porcelain)
-          if ($workspaceStatus.Count -ne 0) {
-            throw "Recovered workspace repository is not clean."
+            throw "The installed Squirrel application smoke test failed."
           }
 
-          $uninstaller = Join-Path $smokeRoot "Uninstall.exe"
-          if (-not (Test-Path -LiteralPath $uninstaller)) {
-            throw "NSIS uninstaller is missing: $uninstaller"
+      - name: Sign and verify the exact Squirrel feed manifest
+        id: feed_signature
+        shell: pwsh
+        env:
+          RELEASES_PATH: ${{ steps.package.outputs.releases }}
+          SQUIRREL_FEED_SIGNING_PRIVATE_KEY_B64: ${{ secrets.SQUIRREL_FEED_SIGNING_PRIVATE_KEY_B64 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $publicKeyPath = Join-Path $env:GITHUB_WORKSPACE `
+            'resources/updates/squirrel-feed-public-key.json'
+          if (-not (Test-Path -LiteralPath $env:RELEASES_PATH -PathType Leaf)) {
+            throw "The exact RELEASES manifest to sign is missing."
           }
-          $uninstallProcess = Start-Process -FilePath $uninstaller -ArgumentList "/S" -PassThru -Wait
-          if ($uninstallProcess.ExitCode -ne 0) {
-            throw "Silent uninstaller returned exit code $($uninstallProcess.ExitCode)."
+          if (-not (Test-Path -LiteralPath $publicKeyPath -PathType Leaf)) {
+            throw "The committed Squirrel feed public key is missing."
+          }
+          if ([string]::IsNullOrWhiteSpace($env:SQUIRREL_FEED_SIGNING_PRIVATE_KEY_B64)) {
+            throw "SQUIRREL_FEED_SIGNING_PRIVATE_KEY_B64 is required; unsigned feed publication is forbidden."
           }
 
-          "installer=$($installer.FullName)" >> $env:GITHUB_OUTPUT
-          "sha256=$hash" >> $env:GITHUB_OUTPUT
-          "Installer: $($installer.Name)"
-          "SHA256: $hash"
+          $keyRecord = Get-Content -Raw -LiteralPath $publicKeyPath | ConvertFrom-Json
+          if ($keyRecord.schemaVersion -ne 1 `
+              -or $keyRecord.algorithm -ne 'RSASSA-PKCS1-v1_5-SHA256' `
+              -or [string]$keyRecord.spkiSha256 -notmatch '^[0-9a-f]{64}$') {
+            throw "The committed Squirrel feed public-key record has an unsupported schema or algorithm."
+          }
+          try {
+            $publicDer = [Convert]::FromBase64String([string]$keyRecord.spkiDerBase64)
+          }
+          catch {
+            throw "The committed Squirrel feed SPKI is not standard base64."
+          }
+          $calculatedFingerprint = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData($publicDer)).ToLowerInvariant()
+          if ($calculatedFingerprint -ne [string]$keyRecord.spkiSha256 `
+              -or $calculatedFingerprint -ne '4479439dfb5bce538ab92e492dd677628060c8558d4c49ac7b253f3eeb4f36e8') {
+            throw "The committed Squirrel feed SPKI fingerprint is invalid."
+          }
+
+          $privateDer = $null
+          $privateRsa = $null
+          $publicRsa = $null
+          try {
+            try {
+              $privateDer = [Convert]::FromBase64String(
+                $env:SQUIRREL_FEED_SIGNING_PRIVATE_KEY_B64)
+              $env:SQUIRREL_FEED_SIGNING_PRIVATE_KEY_B64 = ''
+            }
+            catch {
+              throw "The Squirrel feed signing key is not PKCS#8 DER encoded as standard base64."
+            }
+            $privateRsa = [Security.Cryptography.RSA]::Create()
+            $privateBytesRead = 0
+            $privateRsa.ImportPkcs8PrivateKey($privateDer, [ref]$privateBytesRead)
+            if ($privateBytesRead -ne $privateDer.Length -or $privateRsa.KeySize -ne 3072) {
+              throw "The feed signing key must be exactly one RSA-3072 PKCS#8 DER value."
+            }
+
+            $publicRsa = [Security.Cryptography.RSA]::Create()
+            $publicBytesRead = 0
+            $publicRsa.ImportSubjectPublicKeyInfo($publicDer, [ref]$publicBytesRead)
+            if ($publicBytesRead -ne $publicDer.Length -or $publicRsa.KeySize -ne 3072) {
+              throw "The committed feed verification key must be RSA-3072 SPKI DER."
+            }
+            $privatePublicDer = $privateRsa.ExportSubjectPublicKeyInfo()
+            if ([Convert]::ToBase64String($privatePublicDer) `
+                -ne [Convert]::ToBase64String($publicDer)) {
+              throw "The secret feed signing key does not match the committed public key."
+            }
+
+            # Read once and write no normalized copy: these exact bytes are the
+            # bytes uploaded as RELEASES and covered by the detached signature.
+            $releaseBytes = [IO.File]::ReadAllBytes($env:RELEASES_PATH)
+            if ($releaseBytes.Length -le 0) {
+              throw "The exact RELEASES manifest is empty."
+            }
+            $signatureBytes = $privateRsa.SignData(
+              $releaseBytes,
+              [Security.Cryptography.HashAlgorithmName]::SHA256,
+              [Security.Cryptography.RSASignaturePadding]::Pkcs1)
+            if ($signatureBytes.Length -ne ($privateRsa.KeySize / 8) `
+                -or $signatureBytes.Length -gt 1024 `
+                -or -not $publicRsa.VerifyData(
+                  $releaseBytes,
+                  $signatureBytes,
+                  [Security.Cryptography.HashAlgorithmName]::SHA256,
+                  [Security.Cryptography.RSASignaturePadding]::Pkcs1)) {
+              throw "The detached RELEASES signature failed local public-key verification."
+            }
+            $signaturePath = Join-Path `
+              (Split-Path -Parent $env:RELEASES_PATH) 'RELEASES.sig'
+            if (Test-Path -LiteralPath $signaturePath) {
+              throw "Refusing to overwrite a stale RELEASES.sig."
+            }
+            [IO.File]::WriteAllBytes($signaturePath, $signatureBytes)
+            $signatureSha256 = [Convert]::ToHexString(
+              [Security.Cryptography.SHA256]::HashData($signatureBytes)).ToLowerInvariant()
+
+            "path=$signaturePath" >> $env:GITHUB_OUTPUT
+            "sha256=$signatureSha256" >> $env:GITHUB_OUTPUT
+            "size=$($signatureBytes.Length)" >> $env:GITHUB_OUTPUT
+            "algorithm=$($keyRecord.algorithm)" >> $env:GITHUB_OUTPUT
+            "publicKeyFingerprint=$calculatedFingerprint" >> $env:GITHUB_OUTPUT
+            Write-Host "Verified detached RELEASES signature with committed RSA-3072 public key $calculatedFingerprint."
+          }
+          finally {
+            if ($null -ne $privateDer) {
+              [Security.Cryptography.CryptographicOperations]::ZeroMemory($privateDer)
+            }
+            if ($null -ne $privateRsa) { $privateRsa.Dispose() }
+            if ($null -ne $publicRsa) { $publicRsa.Dispose() }
+          }
 
       - name: Publish one immutable non-draft release
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.ORG_TOKEN || secrets.GITHUB_TOKEN }}
           INSTALLER_PATH: ${{ steps.package.outputs.installer }}
-          INSTALLER_SHA256: ${{ steps.package.outputs.sha256 }}
+          INSTALLER_SHA256: ${{ steps.package.outputs.installerSha256 }}
+          RELEASES_PATH: ${{ steps.package.outputs.releases }}
+          FULL_PACKAGE_PATH: ${{ steps.package.outputs.fullPackage }}
+          FULL_PACKAGE_SHA256: ${{ steps.package.outputs.fullPackageSha256 }}
+          DELTA_PACKAGE_PATH: ${{ steps.package.outputs.deltaPackage }}
+          DELTA_PACKAGE_SHA256: ${{ steps.package.outputs.deltaPackageSha256 }}
+          PACKAGE_VERSION: ${{ steps.package.outputs.packageVersion }}
+          PACKAGE_SIGNED: ${{ steps.package.outputs.signed }}
+          PREVIOUS_FEED_AVAILABLE: ${{ steps.previous.outputs.hasFeed }}
+          FEED_SIGNATURE_PATH: ${{ steps.feed_signature.outputs.path }}
+          FEED_SIGNATURE_SHA256: ${{ steps.feed_signature.outputs.sha256 }}
+          FEED_SIGNATURE_SIZE: ${{ steps.feed_signature.outputs.size }}
+          FEED_SIGNATURE_ALGORITHM: ${{ steps.feed_signature.outputs.algorithm }}
+          FEED_PUBLIC_KEY_FINGERPRINT: ${{ steps.feed_signature.outputs.publicKeyFingerprint }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
           RELEASE_TITLE: ${{ steps.release.outputs.title }}
+          DIM_SUM_AVAILABLE: ${{ steps.dimsum.outputs.available }}
           DIM_SUM_ID: ${{ steps.dimsum.outputs.id }}
           DIM_SUM_CODE_NAME: ${{ steps.dimsum.outputs.codeName }}
-          DIM_SUM_PATH: ${{ steps.dimsum.outputs.path }}
+          DIM_SUM_ENGLISH: ${{ steps.dimsum.outputs.english }}
+          DIM_SUM_ZH_HANT: ${{ steps.dimsum.outputs.zhHant }}
+          DIM_SUM_PHOTO_URL: ${{ steps.dimsum.outputs.photoUrl }}
+          DIM_SUM_PHOTO_ASSET_NAME: ${{ steps.dimsum.outputs.photoAssetName }}
+          DIM_SUM_PHOTO_DIGEST: ${{ steps.dimsum.outputs.photoDigest }}
+          DIM_SUM_PHOTO_TAG: ${{ steps.dimsum.outputs.photoTag }}
+          DIM_SUM_CATALOG_SOURCE_URL: ${{ steps.dimsum.outputs.catalogSourceUrl }}
+          DIM_SUM_CATALOG_REVISION: ${{ steps.dimsum.outputs.catalogRevision }}
+          DIM_SUM_CATALOG_BLOB_SHA: ${{ steps.dimsum.outputs.catalogBlobSha }}
+          DIM_SUM_REASON: ${{ steps.dimsum.outputs.reason }}
           LINE_COUNT_PATH: ${{ steps.lines.outputs.path }}
         run: |
-          foreach ($requiredPath in @($env:INSTALLER_PATH, $env:DIM_SUM_PATH)) {
+          function Get-PublishedMasterSquirrelReleases {
+            $inventoryJson = gh api --paginate --slurp `
+              -H "Accept: application/vnd.github+json" `
+              -H "X-GitHub-Api-Version: 2026-03-10" `
+              "repos/$env:GITHUB_REPOSITORY/releases?per_page=100"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not enumerate published releases for latest-channel arbitration."
+            }
+            $parsedInventory = ($inventoryJson -join [Environment]::NewLine) |
+              ConvertFrom-Json
+            $inventory = @($parsedInventory)
+            $records = @(
+              foreach ($candidate in $inventory) {
+                if ($candidate.draft -or $candidate.prerelease) { continue }
+                $body = [string]$candidate.body
+                $packageMatch = [regex]::Match(
+                  $body,
+                  '(?m)^- Squirrel package: ``(?<version>[0-9]+\.[0-9]+\.[0-9]+)``\s*$')
+                $branchMatch = [regex]::Match(
+                  $body,
+                  '(?m)^- Branch: ``(?<branch>[^`]+)``\s*$')
+                if (-not $packageMatch.Success -or -not $branchMatch.Success `
+                    -or $branchMatch.Groups['branch'].Value -ne 'master') {
+                  continue
+                }
+                [pscustomobject]@{
+                  TagName = [string]$candidate.tag_name
+                  PackageVersion = [version]::Parse(
+                    $packageMatch.Groups['version'].Value)
+                  PackageVersionText = $packageMatch.Groups['version'].Value
+                }
+              }
+            )
+            $duplicateVersions = @(
+              $records | Group-Object PackageVersionText |
+                Where-Object { $_.Count -gt 1 }
+            )
+            if ($duplicateVersions.Count -ne 0) {
+              throw "Published master-channel Squirrel versions are not unique: $($duplicateVersions.Name -join ', ')."
+            }
+            return $records
+          }
+
+          function Get-LocalReleaseAsset([string]$Path) {
+            $item = Get-Item -LiteralPath $Path
+            return [pscustomobject]@{
+              Path = $item.FullName
+              Name = $item.Name
+              Size = [int64]$item.Length
+              Sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $item.FullName).Hash.ToLowerInvariant()
+            }
+          }
+
+          $releaseAssets = @(
+            $env:INSTALLER_PATH,
+            $env:RELEASES_PATH,
+            $env:FEED_SIGNATURE_PATH,
+            $env:FULL_PACKAGE_PATH
+          )
+          foreach ($requiredPath in $releaseAssets) {
             if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
               throw "Required release asset is missing: $requiredPath"
             }
+          }
+          if (-not [string]::IsNullOrWhiteSpace($env:DELTA_PACKAGE_PATH)) {
+            if (-not (Test-Path -LiteralPath $env:DELTA_PACKAGE_PATH -PathType Leaf)) {
+              throw "Declared delta package is missing: $env:DELTA_PACKAGE_PATH"
+            }
+            $releaseAssets += $env:DELTA_PACKAGE_PATH
+          }
+
+          if ($env:PREVIOUS_FEED_AVAILABLE -notin @('true', 'false')) {
+            throw "Prior-feed availability output is missing or invalid."
+          }
+          if ($env:PREVIOUS_FEED_AVAILABLE -eq 'true' `
+              -and [string]::IsNullOrWhiteSpace($env:DELTA_PACKAGE_PATH)) {
+            throw "A validated prior Squirrel feed requires a real current delta package."
+          }
+          if ($env:PREVIOUS_FEED_AVAILABLE -eq 'false' `
+              -and -not [string]::IsNullOrWhiteSpace($env:DELTA_PACKAGE_PATH)) {
+            throw "A first-feed build unexpectedly declared a delta package."
+          }
+
+          if ($env:PACKAGE_SIGNED -notin @('true', 'false')) {
+            throw "Squirrel signing verification output is missing or invalid."
+          }
+          $authenticodeState = if ($env:PACKAGE_SIGNED -eq 'true') {
+            "Verified Authenticode signing on the emitted Squirrel executables."
+          }
+          else {
+            "Not applied; update authenticity is enforced by the mandatory detached RELEASES signature."
+          }
+          if ($env:FEED_SIGNATURE_ALGORITHM -ne 'RSASSA-PKCS1-v1_5-SHA256' `
+              -or $env:FEED_PUBLIC_KEY_FINGERPRINT -ne '4479439dfb5bce538ab92e492dd677628060c8558d4c49ac7b253f3eeb4f36e8' `
+              -or $env:FEED_SIGNATURE_SHA256 -notmatch '^[0-9a-f]{64}$' `
+              -or $env:FEED_SIGNATURE_SIZE -notmatch '^[0-9]+$' `
+              -or [int]$env:FEED_SIGNATURE_SIZE -le 0 `
+              -or [int]$env:FEED_SIGNATURE_SIZE -gt 1024) {
+            throw "Mandatory detached Squirrel feed-signature evidence is missing or invalid."
+          }
+
+          $localAssets = @($releaseAssets | ForEach-Object { Get-LocalReleaseAsset $_ })
+          $localInstaller = @($localAssets | Where-Object { $_.Path -eq $env:INSTALLER_PATH })
+          $localReleases = @($localAssets | Where-Object { $_.Path -eq $env:RELEASES_PATH })
+          $localFeedSignature = @($localAssets | Where-Object { $_.Path -eq $env:FEED_SIGNATURE_PATH })
+          $localFullPackage = @($localAssets | Where-Object { $_.Path -eq $env:FULL_PACKAGE_PATH })
+          $localDeltaPackage = @($localAssets | Where-Object { $_.Path -eq $env:DELTA_PACKAGE_PATH })
+          if ($localInstaller.Count -ne 1 `
+              -or $localInstaller[0].Sha256 -ne $env:INSTALLER_SHA256.ToLowerInvariant() `
+              -or $localReleases.Count -ne 1 `
+              -or $localFeedSignature.Count -ne 1 `
+              -or $localFeedSignature[0].Sha256 -ne $env:FEED_SIGNATURE_SHA256 `
+              -or $localFeedSignature[0].Size -ne [int64]$env:FEED_SIGNATURE_SIZE `
+              -or $localFullPackage.Count -ne 1 `
+              -or $localFullPackage[0].Sha256 -ne $env:FULL_PACKAGE_SHA256.ToLowerInvariant() `
+              -or ($localDeltaPackage.Count -eq 1 `
+                -and $localDeltaPackage[0].Sha256 -ne $env:DELTA_PACKAGE_SHA256.ToLowerInvariant())) {
+            throw "Packaging outputs do not match the tested local release-asset bytes."
           }
 
           $tagRefs = @(& git ls-remote --tags origin "refs/tags/$env:RELEASE_TAG")
@@ -488,28 +752,102 @@ jobs:
             throw "Refusing to mutate existing release $env:RELEASE_TAG."
           }
 
-          $notesPath = Join-Path $env:RUNNER_TEMP "release-notes.md"
-          $codeName = if ([string]::IsNullOrWhiteSpace($env:DIM_SUM_CODE_NAME)) {
-            "Unavailable — all verified catalog dishes have already been used by an earlier release."
-          } else {
-            $env:DIM_SUM_CODE_NAME
+          $runJson = gh run view $env:GITHUB_RUN_ID `
+            --repo $env:GITHUB_REPOSITORY `
+            --json jobs
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not read first-job timing for workflow run $env:GITHUB_RUN_ID."
           }
-          $codeNameMarker = if ([string]::IsNullOrWhiteSpace($env:DIM_SUM_ID)) {
-            ""
-          } else {
-            "<!-- dim-sum-id: $env:DIM_SUM_ID -->"
+          $jobStarts = @(
+            ($runJson | ConvertFrom-Json).jobs |
+              Where-Object { -not [string]::IsNullOrWhiteSpace($_.startedAt) } |
+              ForEach-Object {
+                [DateTimeOffset]::Parse(
+                  $_.startedAt,
+                  [Globalization.CultureInfo]::InvariantCulture,
+                  [Globalization.DateTimeStyles]::AssumeUniversal
+                ).ToUniversalTime()
+              }
+          )
+          if ($jobStarts.Count -eq 0) {
+            throw "Workflow run $env:GITHUB_RUN_ID did not report a first-job startedAt value."
+          }
+          $workflowStarted = @($jobStarts | Sort-Object)[0]
+          $workflowStarted = [DateTimeOffset]::FromUnixTimeSeconds(
+            $workflowStarted.ToUnixTimeSeconds())
+          $workflowStartedText = $workflowStarted.ToString(
+            "yyyy-MM-dd'T'HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture)
+
+          $notesPath = Join-Path $env:RUNNER_TEMP "release-notes.md"
+          if ($env:DIM_SUM_AVAILABLE -notin @('true', 'false')) {
+            throw "Dim-sum release availability evidence is invalid."
+          }
+          if ($env:DIM_SUM_AVAILABLE -eq 'true') {
+            $escapedPhotoTag = [regex]::Escape($env:DIM_SUM_PHOTO_TAG)
+            $escapedPhotoAssetName = [regex]::Escape($env:DIM_SUM_PHOTO_ASSET_NAME)
+            if ([string]::IsNullOrWhiteSpace($env:DIM_SUM_ID) `
+                -or $env:DIM_SUM_CODE_NAME -cne "$env:DIM_SUM_ENGLISH · $env:DIM_SUM_ZH_HANT" `
+                -or $env:DIM_SUM_PHOTO_ASSET_NAME -notmatch '^hk-dish-[0-9]{4}-[a-z0-9-]+\.png$' `
+                -or $env:DIM_SUM_PHOTO_TAG -notmatch '^catalog-v1(?:-part-[0-9]{3})?$' `
+                -or $env:DIM_SUM_PHOTO_URL -notmatch "^https://github\.com/Ding-Ding-Projects/dim-sum-photos/releases/download/$escapedPhotoTag/$escapedPhotoAssetName$" `
+                -or $env:DIM_SUM_PHOTO_DIGEST -notmatch '^sha256:[0-9a-f]{64}$' `
+                -or $env:DIM_SUM_CATALOG_REVISION -notmatch '^[0-9a-f]{40}$' `
+                -or $env:DIM_SUM_CATALOG_BLOB_SHA -notmatch '^[0-9a-f]{40}$') {
+              throw "Available dim-sum release identity is incomplete or not from a published public catalog-v1 asset."
+            }
+            $codeName = "[$env:DIM_SUM_CODE_NAME]($env:DIM_SUM_PHOTO_URL)"
+            $photoEvidence = "[$env:DIM_SUM_PHOTO_ASSET_NAME]($env:DIM_SUM_PHOTO_URL) (``$env:DIM_SUM_PHOTO_DIGEST``, release ``$env:DIM_SUM_PHOTO_TAG``)"
+            $catalogEvidence = "[$env:DIM_SUM_CATALOG_REVISION]($env:DIM_SUM_CATALOG_SOURCE_URL) (catalog blob ``$env:DIM_SUM_CATALOG_BLOB_SHA``)"
+            $codeNameMarker = "<!-- dim-sum-id: $env:DIM_SUM_ID -->"
+          }
+          else {
+            $unavailableReason = if ([string]::IsNullOrWhiteSpace($env:DIM_SUM_REASON)) {
+              'No unused dish with a published public photo could be resolved.'
+            }
+            else { $env:DIM_SUM_REASON }
+            $codeName = "Not assigned — $unavailableReason"
+            $photoEvidence = "Not attached; this version-only release carries no copied consumer-repository photo."
+            $catalogEvidence = "Public catalog unavailable for identity allocation."
+            $codeNameMarker = ""
           }
           $lineCount = Get-Content -Raw -LiteralPath $env:LINE_COUNT_PATH
+          $deltaHashState = if ($env:PREVIOUS_FEED_AVAILABLE -eq 'true') {
+            $env:DELTA_PACKAGE_SHA256
+          }
+          else {
+            'Not applicable to the first Squirrel feed build.'
+          }
+          $releaseChannel = if ($env:GITHUB_REF_NAME -eq 'master') {
+            'master-updater'
+          }
+          else {
+            'feature-preview'
+          }
 
-          @"
+          $releaseNotesTemplate = @"
           Automated Windows desktop release for commit ``$env:GITHUB_SHA``.
 
           - Build: ``$env:QBT_BUILD_ID``
+          - Squirrel package: ``$env:PACKAGE_VERSION``
           - Branch: ``$env:GITHUB_REF_NAME``
+          - Release channel: ``$releaseChannel``
           - Installer SHA256: ``$env:INSTALLER_SHA256``
+          - Full update package SHA256: ``$env:FULL_PACKAGE_SHA256``
+          - Delta update package SHA256: ``$deltaHashState``
+          - Authenticode signature: $authenticodeState
+          - Feed signature: ``$env:FEED_SIGNATURE_ALGORITHM`` over the exact ``RELEASES`` bytes
+          - Feed public-key SPKI SHA256: ``$env:FEED_PUBLIC_KEY_FINGERPRINT``
+          - ``RELEASES.sig`` SHA256: ``$env:FEED_SIGNATURE_SHA256``
           - Dim-sum code name: $codeName
-          - Dim-sum photo: ``$(Split-Path -Leaf $env:DIM_SUM_PATH)``
+          - Public dim-sum photo: $photoEvidence
+          - Dim-sum catalog evidence: $catalogEvidence
           $codeNameMarker
+
+          ## Workflow timing
+
+          - Workflow started: ``@@WORKFLOW_STARTED@@``
+          - Workflow completed: ``@@WORKFLOW_COMPLETED@@``
+          - Workflow duration: ``@@WORKFLOW_DURATION@@``
 
           ## Project line count
 
@@ -517,15 +855,42 @@ jobs:
 
           $lineCount
 
-          The desktop policy checks, release build, silent installation, offscreen
-          launch, workspace recovery checks, Git integrity check, and silent
-          uninstall all completed before this release was published.
-          "@ | Set-Content -LiteralPath $notesPath -Encoding utf8NoBOM
+          The desktop policy checks, release build, normal and silent Squirrel
+          installation, generated shortcut launches, stable-stub ``.torrent``
+          and ``magnet:`` ownership, exact restoration of seeded per-user
+          association values, offscreen launch, workspace recovery, Git
+          integrity, and Update.exe uninstall all completed before this release
+          was published. When a previous Squirrel Setup was available, the local
+          update-feed upgrade smoke completed as well.
+          "@
+          $pendingNotes = $releaseNotesTemplate.Replace(
+            "@@WORKFLOW_STARTED@@", $workflowStartedText)
+          $pendingNotes = $pendingNotes.Replace(
+            "@@WORKFLOW_COMPLETED@@", "Pending exact publication completion evidence")
+          $pendingNotes = $pendingNotes.Replace(
+            "@@WORKFLOW_DURATION@@", "Pending exact publication completion evidence")
+          $pendingNotes | Set-Content -LiteralPath $notesPath -Encoding utf8NoBOM
 
-          $latestOption = if ($env:GITHUB_REF_NAME -eq "master") { "--latest" } else { "--latest=false" }
+          $currentPackageVersion = [version]::Parse($env:PACKAGE_VERSION)
+          $masterReleasesBeforePublish = @(Get-PublishedMasterSquirrelReleases)
+          $highestMasterBeforePublish = @(
+            $masterReleasesBeforePublish |
+              Sort-Object PackageVersion -Descending |
+              Select-Object -First 1
+          )
+          $isNewestMasterPackage = $env:GITHUB_REF_NAME -eq 'master' `
+            -and ($highestMasterBeforePublish.Count -eq 0 `
+              -or $currentPackageVersion -gt $highestMasterBeforePublish[0].PackageVersion)
+          $latestOption = if ($isNewestMasterPackage) { '--latest' } else { '--latest=false' }
+          if ($highestMasterBeforePublish.Count -eq 0) {
+            Write-Host "No earlier master-channel Squirrel release participates in latest arbitration."
+          }
+          else {
+            Write-Host "Highest master-channel package before publication: $($highestMasterBeforePublish[0].PackageVersionText) ($($highestMasterBeforePublish[0].TagName))."
+          }
+          Write-Host "Publishing $env:PACKAGE_VERSION on $releaseChannel with $latestOption."
           gh release create $env:RELEASE_TAG `
-            $env:INSTALLER_PATH `
-            $env:DIM_SUM_PATH `
+            $releaseAssets `
             --repo $env:GITHUB_REPOSITORY `
             --target $env:GITHUB_SHA `
             --title $env:RELEASE_TITLE `
@@ -535,11 +900,203 @@ jobs:
             throw "GitHub did not create release $env:RELEASE_TAG."
           }
 
+          # `gh release create` with assets creates a draft, uploads every asset,
+          # then publishes it. Capture completion only after that command returns
+          # so this duration covers the full release-publication operation rather
+          # than estimating from the release's server-side publishedAt alone.
+          $workflowCompleted = [DateTimeOffset]::FromUnixTimeSeconds(
+            [DateTimeOffset]::UtcNow.ToUnixTimeSeconds())
+          if ($workflowCompleted -lt $workflowStarted) {
+            throw "Workflow completion preceded its first-job start; timing evidence is invalid."
+          }
+          $workflowCompletedText = $workflowCompleted.ToString(
+            "yyyy-MM-dd'T'HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture)
+          $workflowElapsed = $workflowCompleted - $workflowStarted
+          $workflowDuration = "{0:D2}:{1:D2}:{2:D2}" -f `
+            [int][Math]::Floor($workflowElapsed.TotalHours), `
+            [int]$workflowElapsed.Minutes, `
+            [int]$workflowElapsed.Seconds
+          $finalNotes = $releaseNotesTemplate.Replace(
+            "@@WORKFLOW_STARTED@@", $workflowStartedText)
+          $finalNotes = $finalNotes.Replace(
+            "@@WORKFLOW_COMPLETED@@", $workflowCompletedText)
+          $finalNotes = $finalNotes.Replace(
+            "@@WORKFLOW_DURATION@@", $workflowDuration)
+          $finalNotes | Set-Content -LiteralPath $notesPath -Encoding utf8NoBOM
+
+          # Immutable releases protect tags and assets while still allowing the
+          # title and notes to receive this post-publication timing evidence.
+          gh release edit $env:RELEASE_TAG `
+            --repo $env:GITHUB_REPOSITORY `
+            --notes-file $notesPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release $env:RELEASE_TAG was published, but its verified workflow timing could not be recorded."
+          }
+
+          # A per-SHA concurrency group prevents cancellation but does not order
+          # completion. Stabilize the master updater pointer after publication
+          # so an older, slower run cannot make latest/download regress.
+          $latestChannelStable = $false
+          foreach ($latestAttempt in 1..6) {
+            $masterSnapshotBefore = @(
+              Get-PublishedMasterSquirrelReleases |
+                Sort-Object PackageVersion -Descending
+            )
+            if ($masterSnapshotBefore.Count -eq 0) {
+              if ($env:GITHUB_REF_NAME -eq 'master') {
+                throw "The published master release was missing from channel arbitration."
+              }
+              Write-Host "No master-channel Squirrel release exists; feature release remains non-latest."
+              $latestChannelStable = $true
+              break
+            }
+            $expectedLatest = $masterSnapshotBefore[0]
+            gh release edit $expectedLatest.TagName `
+              --repo $env:GITHUB_REPOSITORY `
+              --latest
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not point latest at highest master package $($expectedLatest.PackageVersionText)."
+            }
+
+            $masterSnapshotAfter = @(
+              Get-PublishedMasterSquirrelReleases |
+                Sort-Object PackageVersion -Descending
+            )
+            if ($masterSnapshotAfter.Count -eq 0 `
+                -or $masterSnapshotAfter[0].TagName -ne $expectedLatest.TagName) {
+              Write-Host "Master release inventory changed during latest arbitration ($latestAttempt/6); retrying."
+              Start-Sleep -Seconds 2
+              continue
+            }
+            $latestReleaseJson = gh api `
+              -H "Accept: application/vnd.github+json" `
+              -H "X-GitHub-Api-Version: 2026-03-10" `
+              "repos/$env:GITHUB_REPOSITORY/releases/latest"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not resolve /releases/latest after channel arbitration."
+            }
+            $latestRelease = $latestReleaseJson | ConvertFrom-Json
+            if ([string]$latestRelease.tag_name -ne $expectedLatest.TagName) {
+              Write-Host "Latest pointer did not settle on $($expectedLatest.TagName) ($latestAttempt/6); retrying."
+              Start-Sleep -Seconds 2
+              continue
+            }
+            Write-Host "Verified latest master package $($expectedLatest.PackageVersionText) at $($expectedLatest.TagName)."
+            $latestChannelStable = $true
+            break
+          }
+          if (-not $latestChannelStable) {
+            throw "The master updater channel did not stabilize on its highest published package version."
+          }
+
+          $releaseApiJson = gh api `
+            -H "Accept: application/vnd.github+json" `
+            -H "X-GitHub-Api-Version: 2026-03-10" `
+            "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not read published asset integrity metadata for $env:RELEASE_TAG."
+          }
+          $releaseApi = $releaseApiJson | ConvertFrom-Json
+          $publishedAssets = @($releaseApi.assets)
+          $verifiedDigestCount = 0
+          foreach ($localAsset in $localAssets) {
+            $publishedMatch = @(
+              $publishedAssets | Where-Object { $_.name -eq $localAsset.Name }
+            )
+            if ($publishedMatch.Count -ne 1) {
+              throw "Published release does not contain exactly one $($localAsset.Name) asset."
+            }
+            $publishedAsset = $publishedMatch[0]
+            if ([int64]$publishedAsset.size -ne $localAsset.Size `
+                -or [string]$publishedAsset.state -ne 'uploaded') {
+              throw "Published asset size/state differs from tested local asset $($localAsset.Name)."
+            }
+            $publishedDigest = [string]$publishedAsset.digest
+            if (-not [string]::IsNullOrWhiteSpace($publishedDigest)) {
+              if ($publishedDigest -notmatch '^sha256:(?<sha>[0-9a-fA-F]{64})$' `
+                  -or $Matches.sha.ToLowerInvariant() -ne $localAsset.Sha256) {
+                throw "Published SHA-256 digest differs from tested local asset $($localAsset.Name)."
+              }
+              $verifiedDigestCount++
+            }
+          }
+          Write-Host "Verified size/state for $($localAssets.Count) published assets and API SHA-256 evidence for $verifiedDigestCount."
+
+          $publishedSetupRoot = Join-Path $env:RUNNER_TEMP `
+            "qbt-material-published-setup-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          if (Test-Path -LiteralPath $publishedSetupRoot) {
+            throw "Published-Setup verification directory unexpectedly exists: $publishedSetupRoot"
+          }
+          New-Item -ItemType Directory -Path $publishedSetupRoot | Out-Null
+          gh release download $env:RELEASE_TAG `
+            --repo $env:GITHUB_REPOSITORY `
+            --pattern $localInstaller[0].Name `
+            --pattern $localReleases[0].Name `
+            --pattern $localFeedSignature[0].Name `
+            --dir $publishedSetupRoot
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not redownload the published Squirrel Setup for byte verification."
+          }
+          $publishedSetupPath = Join-Path $publishedSetupRoot $localInstaller[0].Name
+          if (-not (Test-Path -LiteralPath $publishedSetupPath -PathType Leaf)) {
+            throw "Redownloaded Squirrel Setup is missing: $publishedSetupPath"
+          }
+          $publishedSetupItem = Get-Item -LiteralPath $publishedSetupPath
+          $publishedSetupSha256 = (Get-FileHash -Algorithm SHA256 `
+            -LiteralPath $publishedSetupPath).Hash.ToLowerInvariant()
+          if ([int64]$publishedSetupItem.Length -ne $localInstaller[0].Size `
+              -or $publishedSetupSha256 -ne $localInstaller[0].Sha256) {
+            throw "Redownloaded Squirrel Setup differs from the exact locally tested bytes."
+          }
+          $publishedReleasesPath = Join-Path $publishedSetupRoot $localReleases[0].Name
+          $publishedSignaturePath = Join-Path $publishedSetupRoot $localFeedSignature[0].Name
+          foreach ($downloadedFeedPath in @($publishedReleasesPath, $publishedSignaturePath)) {
+            if (-not (Test-Path -LiteralPath $downloadedFeedPath -PathType Leaf)) {
+              throw "Redownloaded signed-feed asset is missing: $downloadedFeedPath"
+            }
+          }
+          $publishedReleasesBytes = [IO.File]::ReadAllBytes($publishedReleasesPath)
+          $publishedSignatureBytes = [IO.File]::ReadAllBytes($publishedSignaturePath)
+          $publishedReleasesSha256 = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData($publishedReleasesBytes)).ToLowerInvariant()
+          $publishedSignatureSha256 = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData($publishedSignatureBytes)).ToLowerInvariant()
+          if ($publishedReleasesBytes.Length -ne $localReleases[0].Size `
+              -or $publishedReleasesSha256 -ne $localReleases[0].Sha256 `
+              -or $publishedSignatureBytes.Length -ne $localFeedSignature[0].Size `
+              -or $publishedSignatureBytes.Length -gt 1024 `
+              -or $publishedSignatureSha256 -ne $localFeedSignature[0].Sha256) {
+            throw "Redownloaded RELEASES/signature bytes differ from the exact locally verified feed."
+          }
+          $publishedKeyRecord = Get-Content -Raw -LiteralPath `
+            (Join-Path $env:GITHUB_WORKSPACE 'resources/updates/squirrel-feed-public-key.json') |
+            ConvertFrom-Json
+          $publishedPublicDer = [Convert]::FromBase64String(
+            [string]$publishedKeyRecord.spkiDerBase64)
+          $publishedPublicRsa = [Security.Cryptography.RSA]::Create()
+          try {
+            $publishedPublicBytesRead = 0
+            $publishedPublicRsa.ImportSubjectPublicKeyInfo(
+              $publishedPublicDer, [ref]$publishedPublicBytesRead)
+            if ($publishedPublicBytesRead -ne $publishedPublicDer.Length `
+                -or -not $publishedPublicRsa.VerifyData(
+                  $publishedReleasesBytes,
+                  $publishedSignatureBytes,
+                  [Security.Cryptography.HashAlgorithmName]::SHA256,
+                  [Security.Cryptography.RSASignaturePadding]::Pkcs1)) {
+              throw "Redownloaded RELEASES.sig failed committed-public-key verification."
+            }
+          }
+          finally {
+            $publishedPublicRsa.Dispose()
+          }
+          Write-Host "Verified redownloaded Setup and exact signed RELEASES assets against local SHA-256, size, and RSA evidence."
+
           $release = $null
           foreach ($attempt in 1..6) {
             $release = gh release view $env:RELEASE_TAG `
               --repo $env:GITHUB_REPOSITORY `
-              --json isDraft,isImmutable,isPrerelease,tagName,targetCommitish,assets | ConvertFrom-Json
+              --json body,isDraft,isImmutable,isPrerelease,tagName,targetCommitish,assets | ConvertFrom-Json
             if ($LASTEXITCODE -ne 0) {
               throw "Could not verify release $env:RELEASE_TAG."
             }
@@ -548,14 +1105,36 @@ jobs:
             Start-Sleep -Seconds 5
           }
           $assetNames = @($release.assets | ForEach-Object { $_.name })
-          $installerName = Split-Path -Leaf $env:INSTALLER_PATH
-          $dimSumAssetName = Split-Path -Leaf $env:DIM_SUM_PATH
+          $requiredAssetNames = @($releaseAssets | ForEach-Object { Split-Path -Leaf $_ })
+          $missingAssetNames = @($requiredAssetNames | Where-Object { $assetNames -notcontains $_ })
+          $timingLines = @(
+            "- Workflow started: ``$workflowStartedText``",
+            "- Workflow completed: ``$workflowCompletedText``",
+            "- Workflow duration: ``$workflowDuration``"
+          )
+          $missingTimingLines = @($timingLines | Where-Object { -not $release.body.Contains($_) })
+          $releaseEvidenceLines = @(
+            "- Squirrel package: ``$env:PACKAGE_VERSION``",
+            "- Branch: ``$env:GITHUB_REF_NAME``",
+            "- Release channel: ``$releaseChannel``",
+            "- Authenticode signature: $authenticodeState",
+            "- Feed signature: ``$env:FEED_SIGNATURE_ALGORITHM`` over the exact ``RELEASES`` bytes",
+            "- Feed public-key SPKI SHA256: ``$env:FEED_PUBLIC_KEY_FINGERPRINT``",
+            "- ``RELEASES.sig`` SHA256: ``$env:FEED_SIGNATURE_SHA256``",
+            "- Dim-sum code name: $codeName",
+            "- Public dim-sum photo: $photoEvidence",
+            "- Dim-sum catalog evidence: $catalogEvidence"
+          )
+          $missingReleaseEvidence = @(
+            $releaseEvidenceLines | Where-Object { -not $release.body.Contains($_) }
+          )
           if ($release.isDraft -or -not $release.isImmutable -or $release.isPrerelease `
               -or $release.tagName -ne $env:RELEASE_TAG `
               -or $release.targetCommitish -ne $env:GITHUB_SHA `
-              -or $assetNames -notcontains $installerName `
-              -or $assetNames -notcontains $dimSumAssetName) {
-            throw "Published release failed immutability, status, or asset verification."
+              -or $missingAssetNames.Count -ne 0 `
+              -or $missingTimingLines.Count -ne 0 `
+              -or $missingReleaseEvidence.Count -ne 0) {
+            throw "Published release failed immutability, status, asset, signature, channel, or workflow-timing verification."
           }
 
-          Write-Host "Verified full release $env:RELEASE_TAG with installer and $dimSumAssetName."
+          Write-Host "Verified full release $env:RELEASE_TAG with assets: $($requiredAssetNames -join ', ')."

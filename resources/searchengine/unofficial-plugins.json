@@ -1,0 +1,618 @@
+{
+  "schema": 2,
+  "source": "https://github.com/qbittorrent/search-plugins/wiki/Unofficial-search-plugins",
+  "sourceRevision": "abcd21ccc800d8554cc1971b79179198eae5d079",
+  "verifiedAt": "2026-08-03",
+  "plugins": [
+    {
+      "id": "academictorrents",
+      "url": "https://raw.githubusercontent.com/LightDestory/qBittorrent-Search-Plugins/master/src/engines/academictorrents.py",
+      "sha256": "5a4e025814e1fc8ae97a6c267fb706e03976fef1b629cb63eeb9944ebd9b49d3",
+      "available": true
+    },
+    {
+      "id": "acgrip",
+      "url": "https://raw.githubusercontent.com/Cc050511/qBit-search-plugins/main/acgrip.py",
+      "sha256": "f7df6d770895c73c6603618a147bf6223a7ee9d0a708cd83ae7ea550cc9c7387",
+      "available": true
+    },
+    {
+      "id": "ali213",
+      "url": "https://raw.githubusercontent.com/hannsen/qbittorrent_search_plugins/master/ali213.py",
+      "sha256": "ca6167e6717896f4034fa14b1ad773b3ab613a643a6bd435b664788ab5a8022b",
+      "available": true
+    },
+    {
+      "id": "anidex",
+      "url": "https://raw.githubusercontent.com/nindogo/qbtSearchScripts/master/anidex.py",
+      "sha256": "79a66e01e573e2df4d5511f09c67ec3b341f47cd8aa2926b5adfa698562ab02e",
+      "available": true
+    },
+    {
+      "id": "animetosho",
+      "url": "https://raw.githubusercontent.com/AlaaBrahim/qBitTorrent-animetosho-search-plugin/main/animetosho.py",
+      "sha256": "00f041833a06de3f32821101b06535f2bd2255f228a8aa40e0f8e91850bd73c9",
+      "available": true
+    },
+    {
+      "id": "apachetorrent",
+      "url": "https://gist.githubusercontent.com/bebetoh/3bb49cdf2b3718937b5446db1e4a4915/raw/1819e3ed75faa0da1571173a677081dc107054aa/apachetorrent.py",
+      "sha256": "528566aa9144ccfec70e862e0af9ebc51c794979f181ae7146b04bca9b5ec105",
+      "available": true
+    },
+    {
+      "id": "audiobookbay",
+      "url": "https://raw.githubusercontent.com/nklido/qBittorrent_search_engines/master/engines/audiobookbay.py",
+      "sha256": "a815c16da570e58b1eba211d4bd1fbee835dddcd9e7f9a1ac63d7becbf41cb5e",
+      "available": true
+    },
+    {
+      "id": "bakabt",
+      "url": "https://raw.githubusercontent.com/MadeOfMagicAndWires/qBit-plugins/master/engines/bakabt.py",
+      "sha256": "628c516fbb9cfa78ff50ffbce0b0b5680a1d5a9fc892ee85ba3d8b52cf9ff56e",
+      "available": true
+    },
+    {
+      "id": "bitsearch",
+      "url": "https://raw.githubusercontent.com/BurningMop/qBittorrent-Search-Plugins/refs/heads/main/bitsearch.py",
+      "sha256": "21b856f02ebcc28497a020539e80d347d5df5b6e2d6997d42cb5f9d90ab2a895",
+      "available": true
+    },
+    {
+      "id": "bt4gprx",
+      "url": "https://raw.githubusercontent.com/TuckerWarlock/qbittorrent-search-plugins/main/bt4gprx.com/bt4gprx.py",
+      "sha256": "9c6cc2672592239c18f75d9c3c939d1f3e3b952a556fc196dc8fe3f8b18469ac",
+      "available": true
+    },
+    {
+      "id": "btdig",
+      "url": "https://raw.githubusercontent.com/galaris/BTDigg-qBittorrent-plugin/main/btdig.py",
+      "sha256": "32ea79f5686fff4e3cea0f3fcd97bf1df9da16c29a64e5f742db8a055ce87d84",
+      "available": true
+    },
+    {
+      "id": "c411",
+      "url": "https://raw.githubusercontent.com/OptimusKoala/qbittorrent-c411-plugin/refs/heads/main/c411.py",
+      "sha256": "b535c042ad912453658539b912d50b8ea0ac109de41764495730ac1b34e034eb",
+      "available": true
+    },
+    {
+      "id": "calidadtorrent",
+      "url": "https://raw.githubusercontent.com/BurningMop/qBittorrent-Search-Plugins/refs/heads/main/calidadtorrent.py",
+      "sha256": "6cf8c997c762c807d3d48fe966b7957e88d1a1d0ef747f138656348c517d53d0",
+      "available": true
+    },
+    {
+      "id": "cloudtorrents",
+      "url": "https://raw.githubusercontent.com/elazar/qbittorrent-search-plugins/refs/heads/add-cloudtorrents-plugin/nova3/engines/cloudtorrents.py",
+      "sha256": "861485972efd8f442f289c80146e5d7b113c071667f07c2e2484d265859ba720",
+      "available": true
+    },
+    {
+      "id": "cpasbien",
+      "url": "https://raw.githubusercontent.com/MarcBresson/cpasbien/master/src/cpasbien.py",
+      "sha256": "69884cfd0e78708f5227859bca9e310227c1a9507d5cd0d03e4992dfdb2c76e6",
+      "available": true
+    },
+    {
+      "id": "danishbytes",
+      "url": "https://raw.githubusercontent.com/444995/qbit-search-plugins/main/engines/danishbytes.py",
+      "sha256": "8091bf0ac73c3cde9dae08e8f6ca7a5a05cc620df3a6a650c211a51cb6572918",
+      "available": true
+    },
+    {
+      "id": "darklibria",
+      "url": "https://raw.githubusercontent.com/bugsbringer/qbit-plugins/master/darklibria.py",
+      "sha256": "c2e2cd728b69e3a1ddb75374dc95a0010b6f85d037dc9f38eefb48c7f42b058f",
+      "available": true
+    },
+    {
+      "id": "divxtotal",
+      "url": "https://raw.githubusercontent.com/BurningMop/qBittorrent-Search-Plugins/refs/heads/main/divxtotal.py",
+      "sha256": "cec809857e1087a13bf27f74a8f46d710ba8b353fec772f92fc011e8fc8746e9",
+      "available": true
+    },
+    {
+      "id": "dmhy",
+      "url": "https://raw.githubusercontent.com/diazchika/dmhy/main/dmhy.py",
+      "sha256": "f946209618a8cbe8cda9c0498e8bc3cfe04221d4010b578ae39f84232ab34576",
+      "available": true
+    },
+    {
+      "id": "dmhy_2",
+      "url": "https://raw.githubusercontent.com/ZH1637/dmhy/main/dmhy.py",
+      "sha256": "c09c07139f12d31d0b6d26bc62d2943ef8188cbe0451a3b433a697a7e9967bbe",
+      "available": true
+    },
+    {
+      "id": "dodi_repacks",
+      "url": "https://raw.githubusercontent.com/Bioux1/qbtSearchPlugins/main/dodi_repacks.py",
+      "sha256": "51b49a2c181088da532afa2fdd75b64e480d20f0d67c83076a1f85bc16bd8506",
+      "available": true
+    },
+    {
+      "id": "dontorrent",
+      "url": "https://raw.githubusercontent.com/BurningMop/qBittorrent-Search-Plugins/refs/heads/main/dontorrent.py",
+      "sha256": "f9a0ada328c01598f00d34a30b6447a9fdf86810c870b2cbcc65e99098857ae2",
+      "available": true
+    },
+    {
+      "id": "dontorrent_2",
+      "url": "https://raw.githubusercontent.com/dangar16/dontorrent-plugin/main/dontorrent.py",
+      "sha256": "09bcbf582ce55c54d3605e711a2ba7456e71c9f27db7ec258280b187c4dcec21",
+      "available": true
+    },
+    {
+      "id": "elitetorrent",
+      "url": "https://raw.githubusercontent.com/iordic/qbittorrent-search-plugins/master/engines/elitetorrent.py",
+      "sha256": "181186dbb86f5b3b817ac97d96169ea0c5b0d907a9ddb0cff204456a8014e994",
+      "available": true
+    },
+    {
+      "id": "esmeraldatorrent",
+      "url": "https://raw.githubusercontent.com/BurningMop/qBittorrent-Search-Plugins/refs/heads/main/esmeraldatorrent.py",
+      "sha256": "1004b06f4bac2af34270fcecb29d81ca7b918f28bea6dadc710643360f528baf",
+      "available": true
+    },
+    {
+      "id": "eztvx",
+      "url": "https://raw.githubusercontent.com/DrPurp/eztvx-qbittorrent-plugin/main/eztvx.py",
+      "sha256": "07383109341fd035073f35ca3ddcd9095a407afcba8248b573419ae90759767a",
+      "available": true
+    },
+    {
+      "id": "filelist",
+      "url": "https://raw.githubusercontent.com/RaresPNet/filelist_search_plugin/main/filelist.py",
+      "sha256": "93b889155dcc03c868baf08c4ade923762c4d1689d21a9f9c359430b787e2148",
+      "available": true
+    },
+    {
+      "id": "fitgirl_repacks",
+      "url": "https://raw.githubusercontent.com/Bioux1/qbtSearchPlugins/main/fitgirl_repacks.py",
+      "sha256": "3285f800eac78beb6bec8ad0503d34966abcea36ecbf802048e87a46b6965bd2",
+      "available": true
+    },
+    {
+      "id": "gazellegames",
+      "url": "https://raw.githubusercontent.com/Ooggle/qbittorrent-search-plugins/master/engines/gazellegames.py",
+      "sha256": "d95e07f55a33107f8aad5d3c0afc9b5860f9ec01e8437fe6f0c9ec2d875de931",
+      "available": true
+    },
+    {
+      "id": "glotorrents",
+      "url": "https://raw.githubusercontent.com/LightDestory/qBittorrent-Search-Plugins/master/src/engines/glotorrents.py",
+      "sha256": "66f7ac3ec14f7739451d4614823f82acda619430dda59bb521c51f507b5966ca",
+      "available": true
+    },
+    {
+      "id": "goggames",
+      "url": "https://raw.githubusercontent.com/tolotp/qbittorrent-search-plugins-de-busqueda/refs/heads/main/Plugins/goggames.py",
+      "sha256": "756bf172b89051f15f726618fc38cd3a44cb74a2a810a46ed2d1ed8fcbdb7642",
+      "available": true
+    },
+    {
+      "id": "iptorrents",
+      "url": "https://raw.githubusercontent.com/txtsd/qB-IPT/master/iptorrents.py",
+      "sha256": "c96f3d6a8788ebeb240253c366c8d5421340859c5b8c04142ab9a3849bac54fc",
+      "available": true
+    },
+    {
+      "id": "kickasstorrents",
+      "url": "https://raw.githubusercontent.com/LightDestory/qBittorrent-Search-Plugins/master/src/engines/kickasstorrents.py",
+      "sha256": "b3e9f714f06936a9185b3a54bd58a6f4230d13d1378d87012284f2955bf68d69",
+      "available": true
+    },
+    {
+      "id": "kinozal",
+      "url": "https://raw.githubusercontent.com/imDMG/qBt_SE/master/engines/kinozal.py",
+      "sha256": "00a7e6d13b1e381d3453e7d434da4a205ac144ec19ea5de9252333f26da4a828",
+      "available": true
+    },
+    {
+      "id": "latteam",
+      "url": "https://raw.githubusercontent.com/tolotp/qbittorrent-search-plugins-de-busqueda/refs/heads/main/Plugins/latteam.py",
+      "sha256": "83ecf058611c2fdb3eb28932b06310d09d0b27b89c60651b4f70b78ca5a726e4",
+      "available": true
+    },
+    {
+      "id": "linuxtracker",
+      "url": "https://raw.githubusercontent.com/MadeOfMagicAndWires/qBit-plugins/6074a7cccb90dfd5c81b7eaddd3138adec7f3377/engines/linuxtracker.py",
+      "sha256": "1e0bd56b2146f8b12b5a966b3c26fb9668e43c20bff9a3551ee1ebc749093c87",
+      "available": true
+    },
+    {
+      "id": "lostfilm",
+      "url": "https://raw.githubusercontent.com/bugsbringer/qbit-plugins/master/lostfilm.py",
+      "sha256": "bce29accd37ce5561c21b25e358125da06d50d37fb7b6d8f2041608d0c36422e",
+      "available": true
+    },
+    {
+      "id": "magnetdl",
+      "url": "https://raw.githubusercontent.com/nindogo/qbtSearchScripts/master/magnetdl.py",
+      "sha256": "e87857e3c48a9bc71583d9d68378cb52da6c685c89fa3ea41d47e3370f6bdb7b",
+      "available": true
+    },
+    {
+      "id": "magnetdl_2",
+      "url": "https://Scare.ca/dl/qBittorrent/magnetdl.py",
+      "sha256": "",
+      "available": false
+    },
+    {
+      "id": "maxitorrent",
+      "url": "https://raw.githubusercontent.com/joseeloren/search-plugins/master/nova3/engines/maxitorrent.py",
+      "sha256": "7dfd624b206f74a4f65dbb47f430082dac580a75e8edb657ef6b90d576b485a0",
+      "available": true
+    },
+    {
+      "id": "mejortorrent",
+      "url": "https://raw.githubusercontent.com/iordic/qbittorrent-search-plugins/master/engines/mejortorrent.py",
+      "sha256": "3ba2a8d31316970a05d933cdd563aa17ec3d4976cb355da24ed5e47834ff783a",
+      "available": true
+    },
+    {
+      "id": "mikan",
+      "url": "https://raw.githubusercontent.com/Cycloctane/qBittorrent-plugins/master/engines/mikan.py",
+      "sha256": "91d6a0a308443fbb8501a1238a07179630ee34d1b253a5248b8dbfbcc88a4907",
+      "available": true
+    },
+    {
+      "id": "mikanani",
+      "url": "https://raw.githubusercontent.com/Cc050511/qBit-search-plugins/main/mikanani.py",
+      "sha256": "6718aa913e7f244b4699835eec05cb91c9acdaaf741f6c3ef651fc348e383a52",
+      "available": true
+    },
+    {
+      "id": "milkie",
+      "url": "https://raw.githubusercontent.com/tolotp/qbittorrent-search-plugins-de-busqueda/refs/heads/main/Plugins/milkie.py",
+      "sha256": "418f8d5d9bb8ead7c3b98f64e71fff35104db4b45fb47faf0c0233bf963f59d4",
+      "available": true
+    },
+    {
+      "id": "mypornclub",
+      "url": "https://raw.githubusercontent.com/BurningMop/qBittorrent-Search-Plugins/refs/heads/main/mypornclub.py",
+      "sha256": "11aa1fdbe2e9ffa48aa0a89fa9115b6b7bc0fe979d6a99d58882ea9e2484558b",
+      "available": true
+    },
+    {
+      "id": "naranjatorrent",
+      "url": "https://raw.githubusercontent.com/BurningMop/qBittorrent-Search-Plugins/refs/heads/main/naranjatorrent.py",
+      "sha256": "b0aee03a25844b2aef789afa0da6e4258b4e9a6b69970172f435a118410bfa6d",
+      "available": true
+    },
+    {
+      "id": "ncore",
+      "url": "https://raw.githubusercontent.com/darktohka/qbittorrent-plugins/master/ncore.py",
+      "sha256": "b0f875f12c72d35c452afe1b12b533805c57aaad18278b92122e7c8f5e84b8fd",
+      "available": true
+    },
+    {
+      "id": "nekobt",
+      "url": "https://raw.githubusercontent.com/tolotp/qbittorrent-search-plugins-de-busqueda/refs/heads/main/Plugins/nekobt.py",
+      "sha256": "29aba65332f19823208c1186d4366b5d909f0cab4043a6876f204e417819964a",
+      "available": true
+    },
+    {
+      "id": "nnmclub",
+      "url": "https://raw.githubusercontent.com/imDMG/qBt_SE/master/engines/nnmclub.py",
+      "sha256": "921745b01a3497f385d0730fdf6722fe5bac4b77d2519f28035d8245784a4812",
+      "available": true
+    },
+    {
+      "id": "nyaa",
+      "url": "https://raw.githubusercontent.com/phuongtailtranminh/qBittorrent-Nyaa-Search-Plugin/master/nyaa.py",
+      "sha256": "416a318040aa6359ae14bddd083a947b7910e2de944b8ae2b801c174de65a485",
+      "available": true
+    },
+    {
+      "id": "nyaapantsu",
+      "url": "https://raw.githubusercontent.com/MadeOfMagicAndWires/qBit-plugins/refs/heads/main/engines/nyaapantsu.py",
+      "sha256": "32d4b6488d72d6a42f31bb70c05e2d01b8cfc62a370daafda4eed7d2971a1173",
+      "available": true
+    },
+    {
+      "id": "nyaasi",
+      "url": "https://raw.githubusercontent.com/MadeOfMagicAndWires/qBit-plugins/master/engines/nyaasi.py",
+      "sha256": "8b38deb7d22d86c3d64300cd58d55810260ea61b96b0fd552c3748201de44e46",
+      "available": true
+    },
+    {
+      "id": "onlinefix",
+      "url": "https://raw.githubusercontent.com/caiocinel/onlinefix-qbittorrent-plugin/main/onlinefix.py",
+      "sha256": "614fbe675d23bc60def90828aef3d8b4b2f2bf1ccdd58c395f0dc4e686f2f155",
+      "available": true
+    },
+    {
+      "id": "pantsu",
+      "url": "https://raw.githubusercontent.com/alessandro-ooo/one-click-qbittorrent-searchplugins/e223546ac7257dbc2b3b5918c412579bec5f869f/plugins/pantsu.py",
+      "originalUrl": "https://raw.githubusercontent.com/libellula/qbt-plugins/main/pantsu.py",
+      "sha256": "cebdc11b9f75b6f113bacd950223384114a17218873ebe77f1e282850e0b3d6c",
+      "available": true,
+      "resolution": "archived-copy"
+    },
+    {
+      "id": "pediatorrent",
+      "url": "https://raw.githubusercontent.com/BurningMop/qBittorrent-Search-Plugins/refs/heads/main/pediatorrent.py",
+      "sha256": "33539ee6edd1733dee72cc6a474a6861edfb16a66d9a2008428d5757421fe327",
+      "available": true
+    },
+    {
+      "id": "pediatorrent_2",
+      "url": "https://raw.githubusercontent.com/dangar16/pediatorrent-plugin/refs/heads/main/pediatorrent.py",
+      "sha256": "88099fa1203755c23646c2c1c2ccb19e5c4c51053b70a11aedcec1da258e9f50",
+      "available": true
+    },
+    {
+      "id": "pirateiro",
+      "url": "https://raw.githubusercontent.com/LightDestory/qBittorrent-Search-Plugins/master/src/engines/pirateiro.py",
+      "sha256": "3618b5279966057eca22011a5d4032c32fac756e8b78720d2c63b0f367574e96",
+      "available": true
+    },
+    {
+      "id": "pornolab",
+      "url": "https://raw.githubusercontent.com/kizashiX38/qbittorrent-search-plugins/860c2b1eb7237779ebf98c0f6db8de4f460a8f9e/private_sites/pornolab.py",
+      "originalUrl": "https://raw.githubusercontent.com/TainakaDrums/qbPornolab/master/pornolab.py",
+      "sha256": "fbfdb62321635cf81faa694884eae0a162a833cb69981965c85769848a697541",
+      "available": true,
+      "resolution": "archived-copy"
+    },
+    {
+      "id": "prowlarr",
+      "url": "https://raw.githubusercontent.com/swannie-eire/prowlarr-qbittorrent-plugins/main/prowlarr.py",
+      "sha256": "6fd63129ad11f4d72dd41d1a28d2d459ff52c8ee656b98855edc7817959f2957",
+      "available": true
+    },
+    {
+      "id": "redacted_ch",
+      "url": "https://raw.githubusercontent.com/evyd13/search-plugins/master/nova3/engines/redacted_ch.py",
+      "sha256": "9a98885c978959afbc151224ffe480717a11328913c9c397388b25a97fc61abc",
+      "available": true
+    },
+    {
+      "id": "redetorrent",
+      "url": "https://gist.githubusercontent.com/bebetoh/b5e1f4731462de9b837f5026617b1d4a/raw/e71d0020078d56d3f7e9a903ca7b4d44774e10f7/redetorrent.py",
+      "sha256": "ce2016fc6bd2c6a0f417d0167a5906ffed09f4656077c046058ca6a919d206da",
+      "available": true
+    },
+    {
+      "id": "rockbox",
+      "url": "https://raw.githubusercontent.com/LightDestory/qBittorrent-Search-Plugins/master/src/engines/rockbox.py",
+      "sha256": "fe17c0a0a51029abe159143ad9ce0178ce05aeaa7f12da3453f19c429815ed7c",
+      "available": true
+    },
+    {
+      "id": "rutor",
+      "url": "https://raw.githubusercontent.com/imDMG/qBt_SE/master/engines/rutor.py",
+      "sha256": "1cf9c5c302ad8defbe6ddb90bcbdf56cc905b49517b9233618b0f5a252845913",
+      "available": true
+    },
+    {
+      "id": "rutracker",
+      "url": "https://raw.githubusercontent.com/imDMG/qBt_SE/master/engines/rutracker.py",
+      "sha256": "8b99542099ad1bd927a31d97b3f7a6b959695636f4713678da8a4f5343dc313b",
+      "available": true
+    },
+    {
+      "id": "rutracker_2",
+      "url": "https://raw.githubusercontent.com/nbusseneau/qBittorrent-rutracker-plugin/master/rutracker.py",
+      "sha256": "bb8407c57a5c563effdab206a93e0df239a9f4d9ea32fd3c37cda6325876b1aa",
+      "available": true
+    },
+    {
+      "id": "sktorrent",
+      "url": "https://raw.githubusercontent.com/Ashalda/sktorrent-qbt/refs/heads/main/sktorrent.py",
+      "sha256": "a917b482741a0b301f09ce0c1edbfe5d7b4663c2367ede1a1bcde2641d62e28c",
+      "available": true
+    },
+    {
+      "id": "smallgames",
+      "url": "https://raw.githubusercontent.com/hannsen/qbittorrent_search_plugins/master/smallgames.py",
+      "sha256": "7d1086be858e8b4f59fc8c8c201b612c740a1b22c98a75b27477a1f00f1ed233",
+      "available": true
+    },
+    {
+      "id": "snowfl",
+      "url": "https://raw.githubusercontent.com/LightDestory/qBittorrent-Search-Plugins/master/src/engines/snowfl.py",
+      "sha256": "04a1f767f03c18134ce193eabcda43f4c37c53d56ed06d67b4fc7627ca0eb710",
+      "available": true
+    },
+    {
+      "id": "solidtorrents",
+      "url": "https://raw.githubusercontent.com/BurningMop/qBittorrent-Search-Plugins/refs/heads/main/solidtorrents.py",
+      "sha256": "b71443fdb67f3714c722f2ef7886ce376db94d5d791b47fb267cfb3559b1ffa0",
+      "available": true
+    },
+    {
+      "id": "speedapp",
+      "url": "https://raw.githubusercontent.com/miIiano/SpeedApp.io-qBittorent-search-plugin/main/speedapp.py",
+      "sha256": "67dd25182039eccd6ffddf50634ad4a026ff19c9f11505e61f9a2f390e208fb7",
+      "available": true
+    },
+    {
+      "id": "subsplease",
+      "url": "https://raw.githubusercontent.com/kli885/qBittorent-SubsPlease-Search-Plugin/main/subsplease.py",
+      "sha256": "3348ff9076b03c34ce87152597ffe0034ce1e192520d79b154952aa862bfc21c",
+      "available": true
+    },
+    {
+      "id": "sukebei",
+      "url": "https://raw.githubusercontent.com/alessandro-ooo/one-click-qbittorrent-searchplugins/e223546ac7257dbc2b3b5918c412579bec5f869f/plugins/sukebei.py",
+      "originalUrl": "https://raw.githubusercontent.com/libellula/qbt-plugins/main/sukebei.py",
+      "sha256": "075d6845bd150be0d0dbb1c7116ec1076d3c6d7f6d846f68c044da958a9c2ffd",
+      "available": true,
+      "resolution": "archived-copy"
+    },
+    {
+      "id": "sukebeisi",
+      "url": "https://raw.githubusercontent.com/vt-idiot/qBit-SukebeiNyaa-plugin/master/engines/sukebeisi.py",
+      "sha256": "353cb88a05a37f6ca30f9ce36163d64926c8706a5a41bef634e4b4e07b155539",
+      "available": true
+    },
+    {
+      "id": "tapochek",
+      "url": "https://raw.githubusercontent.com/MjKey/qBT-SE/refs/heads/master/enigines/tapochek.py",
+      "sha256": "c213ffa435fcdd862a5d309b29b87c80c3f0d2389652fb2f371b0da3e03638c1",
+      "available": true
+    },
+    {
+      "id": "thepiratebay",
+      "url": "https://raw.githubusercontent.com/LightDestory/qBittorrent-Search-Plugins/master/src/engines/thepiratebay.py",
+      "sha256": "0a8e83eeaf15aa65a714828d28ef9b6a99139c6e056298671d4a1d5c6a7437d5",
+      "available": true
+    },
+    {
+      "id": "thepiratebay_2",
+      "url": "https://Scare.ca/dl/qBittorrent/thepiratebay.py",
+      "sha256": "",
+      "available": false
+    },
+    {
+      "id": "therarbg",
+      "url": "https://raw.githubusercontent.com/BurningMop/qBittorrent-Search-Plugins/refs/heads/main/therarbg.py",
+      "sha256": "4e748cbe68989c3d26bfda76a03d8640314802507fde8005f05878165f803cbc",
+      "available": true
+    },
+    {
+      "id": "tokyotoshokan",
+      "url": "https://raw.githubusercontent.com/BrunoReX/qBittorrent-Search-Plugin-TokyoToshokan/master/tokyotoshokan.py",
+      "sha256": "e0cac329d5787d9a83a5bb7365af64fa939152dd5b9104daeaa1a37713c0dbe5",
+      "available": true
+    },
+    {
+      "id": "toloka_to",
+      "url": "https://raw.githubusercontent.com/playday3008/qBittorrent-plugins/refs/heads/main/plugins/search/toloka_to.py",
+      "sha256": "f35cacefb92ea17379c3a9703780327ded0fb302565a9983139717fed2a5ad85",
+      "available": true
+    },
+    {
+      "id": "tomadivx",
+      "url": "https://raw.githubusercontent.com/BurningMop/qBittorrent-Search-Plugins/refs/heads/main/tomadivx.py",
+      "sha256": "fed83e5beacad5c38940d34aa650ba451e74fc90949df3a0eb74815c6693f017",
+      "available": true
+    },
+    {
+      "id": "torrenflix",
+      "url": "https://raw.githubusercontent.com/BurningMop/qBittorrent-Search-Plugins/refs/heads/main/deprecated/torrenflix.py",
+      "originalUrl": "https://raw.githubusercontent.com/BurningMop/qBittorrent-Search-Plugins/refs/heads/main/torrenflix.py",
+      "sha256": "badadbc0f51edb4de0302270c304e0dc539c9fdecfc0879ee34e91157287547e",
+      "available": true,
+      "resolution": "moved-upstream"
+    },
+    {
+      "id": "torrent9",
+      "url": "https://raw.githubusercontent.com/menegop/qbfrench/master/torrent9.py",
+      "sha256": "e178e65032c2dd6e60c54713943eedc3c51de4f4c6b18c1d671cf9b3a41b3e7a",
+      "available": true
+    },
+    {
+      "id": "torrentdownload",
+      "url": "https://raw.githubusercontent.com/LightDestory/qBittorrent-Search-Plugins/master/src/engines/torrentdownload.py",
+      "sha256": "33a6a92307e3020e9cf29804af5b064dbf1036c7b383ad702733c46f20692804",
+      "available": true
+    },
+    {
+      "id": "torrentdownload_2",
+      "url": "https://Scare.ca/dl/qBittorrent/torrentdownload.py",
+      "sha256": "",
+      "available": false
+    },
+    {
+      "id": "torrentdownloads",
+      "url": "https://raw.githubusercontent.com/BurningMop/qBittorrent-Search-Plugins/refs/heads/main/torrentdownloads.py",
+      "sha256": "c97e0405d5b9cd4db9c91da94ddd1a1da0326cf8d8ee9671f10be33f8b449c8a",
+      "available": true
+    },
+    {
+      "id": "torrentgalaxy",
+      "url": "https://raw.githubusercontent.com/nindogo/qbtSearchScripts/master/torrentgalaxy.py",
+      "sha256": "9448cbebc24ebf2db5f422d4e0ae13917b8512a82d465ba27edad58202ddc32e",
+      "available": true
+    },
+    {
+      "id": "torrentleech",
+      "url": "https://raw.githubusercontent.com/444995/qbit-search-plugins/main/engines/torrentleech.py",
+      "sha256": "bc0a73346616024d969ec78d6b80f5254c30963d421ca5527b868cc6a3b5fcfe",
+      "available": true
+    },
+    {
+      "id": "traht",
+      "url": "https://raw.githubusercontent.com/BurningMop/qBittorrent-Search-Plugins/refs/heads/main/traht.py",
+      "sha256": "de1d9447998276a807ac8ee20007ec4049d17de0b3b7886094136806d0e2b6bc",
+      "available": true
+    },
+    {
+      "id": "uindex",
+      "url": "https://raw.githubusercontent.com/tolotp/qbittorrent-search-plugins-de-busqueda/refs/heads/main/Plugins/%28deprecated%29%20uindex.py",
+      "originalUrl": "https://raw.githubusercontent.com/tolotp/qbittorrent-search-plugins-de-busqueda/refs/heads/main/Plugins/uindex.py",
+      "sha256": "41ee5886d00dd4cf90a08e98f110653f61f6a6dc909fcc03115cc6e6809aa773",
+      "available": true,
+      "resolution": "moved-upstream"
+    },
+    {
+      "id": "uniondht",
+      "url": "https://raw.githubusercontent.com/msagca/qbittorrent-plugins/main/uniondht.py",
+      "sha256": "4b298abdd30844dde360729c718d31be19410207659d7d667a83b2dd43304877",
+      "available": true
+    },
+    {
+      "id": "unionfansub",
+      "url": "https://gitlab.com/CrimsonKoba/qb-search-plugin/-/raw/master/unionfansub.py",
+      "sha256": "74399f914ab46f452d023c55b76dbd0de2f4550987001f08e650bfdde11da870",
+      "available": true
+    },
+    {
+      "id": "unionfansub_2",
+      "url": "https://raw.githubusercontent.com/tolotp/qbittorrent-search-plugins-de-busqueda/refs/heads/main/Plugins/unionfansub.py",
+      "sha256": "11fb10a9559301e1ac20f7218778461abd6c79e656eea8e17817a2cb75dc6229",
+      "available": true
+    },
+    {
+      "id": "xxxclubto",
+      "url": "https://raw.githubusercontent.com/BurningMop/qBittorrent-Search-Plugins/refs/heads/main/xxxclubto.py",
+      "sha256": "212470cca92675c7752ae6dc6516af42c72d93931176324ebd9349b3443071d0",
+      "available": true
+    },
+    {
+      "id": "yggapi",
+      "url": "https://raw.githubusercontent.com/Laiteux/YggAPI-qBittorrent-Search-Plugin/main/yggapi.py",
+      "sha256": "081dd01c9c54836c63f6a25ad75a68c5fa2a7eec8b4a476b75a616b3ac6122fc",
+      "available": true
+    },
+    {
+      "id": "yggtorrent",
+      "url": "https://raw.githubusercontent.com/CravateRouge/qBittorrentSearchPlugins/master/yggtorrent.py",
+      "sha256": "3bab7078e4d59c86b57d51454627d78841cb9d5707f84ed5566df12b31d0c70c",
+      "available": true
+    },
+    {
+      "id": "yggtracker",
+      "url": "https://raw.githubusercontent.com/YGGverse/qbittorrent-yggtracker-search-plugin/main/yggtracker.py",
+      "sha256": "e5fdede3e0f2f721c8fbcf5cbd1af9643e423b7a1baf8bf689e65b623d78d8d9",
+      "available": true
+    },
+    {
+      "id": "yourbittorrent",
+      "url": "https://raw.githubusercontent.com/LightDestory/qBittorrent-Search-Plugins/master/src/engines/yourbittorrent.py",
+      "sha256": "5aeccc1e6addce6e632d159b412cd43335c6dc8a31a55397655af1dd14938187",
+      "available": true
+    },
+    {
+      "id": "yts",
+      "url": "https://codeberg.org/lazulyra/qbit-plugins/raw/branch/main/yts/yts.py",
+      "sha256": "cb066319b5f6092621b21debc4303d937bacd2bdaef643f1740a516145cbfb9e",
+      "available": true
+    },
+    {
+      "id": "zamundarip",
+      "url": "https://raw.githubusercontent.com/codeobfuscation/qBittorrent-ZamundaRIP-plugin/main/zamundarip.py",
+      "sha256": "cab764ca80b0d617e2f43615d85ca08a0e01bf9dd95cc73f4883b0be0d969b69",
+      "available": true
+    },
+    {
+      "id": "zooqle",
+      "url": "https://raw.githubusercontent.com/444995/qbit-search-plugins/main/engines/zooqle.py",
+      "sha256": "beb30e1de0577b07d031e5e66174bf724bc5e2821f3f4924bd5d9a79256e5f62",
+      "available": true
+    }
+  ]
+}

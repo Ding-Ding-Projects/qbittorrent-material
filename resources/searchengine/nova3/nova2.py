@@ -1,4 +1,4 @@
-# VERSION: 1.53
+# VERSION: 1.54
 
 # Author:
 #  Fabien Devaux <fab AT gnux DOT info>
@@ -137,8 +137,18 @@ def import_engine(engine_module_name: EngineModuleName) -> Optional[type[Engine]
         # import engines.[engine_module_name]
         engine_module = importlib.import_module(f"engines.{engine_module_name}")
         engine_class = getattr(engine_module, engine_module_name)
-    except Exception:
-        pass
+    except Exception as error:
+        # Capabilities used to swallow the real import failure, leaving the UI
+        # with the actively misleading verdict "Plugin is not supported." A
+        # stable, single-line diagnostic lets the native manager name the
+        # missing package, syntax error, or class mismatch while still keeping
+        # the XML capability document valid on stdout.
+        detail = str(error).replace("\r", " ").replace("\n", " ")
+        print(
+            f"PLUGIN_IMPORT_ERROR:{engine_module_name}:"
+            f"{type(error).__name__}:{detail}",
+            file=sys.stderr,
+        )
 
     engine_dict[engine_module_name] = engine_class
     return engine_class

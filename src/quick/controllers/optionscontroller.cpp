@@ -56,6 +56,8 @@
 
 using BitTorrent::Session;
 
+OptionsController *OptionsController::s_instance = nullptr;
+
 bool OptionsController::windowsDefaultAppsAvailable() const
 {
 #ifdef Q_OS_WIN
@@ -389,11 +391,18 @@ OptionsController *OptionsController::create(QQmlEngine *, QJSEngine *)
     return instance;
 }
 
+OptionsController *OptionsController::existingInstance()
+{
+    return s_instance;
+}
+
 OptionsController::OptionsController(QObject *parent)
     : QObject(parent)
     , m_watchedFoldersModel(new WatchedFoldersModel(this))
     , m_advancedSettingsModel(new AdvancedSettingsModel(this))
 {
+    if (!s_instance)
+        s_instance = this;
     qCDebug(lcUi) << "OptionsController: constructing";
 
     connect(m_watchedFoldersModel, &WatchedFoldersModel::modifiedChanged, this, [this]
@@ -410,6 +419,12 @@ OptionsController::OptionsController(QObject *parent)
         connect(session, &Session::IPFilterParsed, this, &OptionsController::ipFilterParsed);
 
     load();
+}
+
+OptionsController::~OptionsController()
+{
+    if (s_instance == this)
+        s_instance = nullptr;
 }
 
 bool OptionsController::isModified() const

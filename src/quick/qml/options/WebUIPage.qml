@@ -38,6 +38,10 @@ Flickable {
     component OptCheck: CheckBox {
         property string settingKey: ""
         property bool defaultValue: false
+        property string paletteSettingKey: settingKey
+        property string paletteSettingTitle: text
+        property string paletteSettingKind: "toggle"
+        property var paletteSettingDefault: defaultValue
         font: Typography.bodyMedium
         checked: (root.rev, OptionsController.value(settingKey, defaultValue))
         onToggled: {
@@ -56,6 +60,10 @@ Flickable {
         spacing: Spacing.lg
 
         CheckableGroupBox {
+            property string paletteSettingKey: "Preferences/WebUI/Enabled"
+            property string paletteSettingTitle: title
+            property string paletteSettingKind: "toggle"
+            property var paletteSettingDefault: false
             title: qsTr("Web User Interface (Remote control)")
             Layout.fillWidth: true
             checked: (root.rev, OptionsController.value("Preferences/WebUI/Enabled", false))
@@ -66,6 +74,10 @@ Flickable {
                 labelWidth: 160
                 Layout.fillWidth: true
                 TextField {
+                    property string paletteSettingKey: "Preferences/WebUI/Address"
+                    property string paletteSettingTitle: qsTr("Web UI IP address")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: "*"
                     Layout.fillWidth: true
                     placeholderText: "*"
                     text: (root.rev, OptionsController.value("Preferences/WebUI/Address", "*"))
@@ -77,6 +89,10 @@ Flickable {
                 labelWidth: 160
                 Layout.fillWidth: true
                 SpinBox {
+                    property string paletteSettingKey: "Preferences/WebUI/Port"
+                    property string paletteSettingTitle: qsTr("Web UI port")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 8080
                     from: 1; to: 65535; editable: true
                     value: (root.rev, OptionsController.value("Preferences/WebUI/Port", 8080))
                     onValueModified: OptionsController.setValue("Preferences/WebUI/Port", value)
@@ -90,6 +106,10 @@ Flickable {
 
             // ---- HTTPS --------------------------------------------------------
             CheckableGroupBox {
+                property string paletteSettingKey: "Preferences/WebUI/HTTPS/Enabled"
+                property string paletteSettingTitle: title
+                property string paletteSettingKind: "toggle"
+                property var paletteSettingDefault: false
                 title: qsTr("Use HTTPS instead of HTTP")
                 Layout.fillWidth: true
                 checked: (root.rev, OptionsController.value("Preferences/WebUI/HTTPS/Enabled", false))
@@ -99,6 +119,10 @@ Flickable {
                     orientation: Qt.Vertical
                     Layout.fillWidth: true
                     PathField {
+                        property string paletteSettingKey: "Preferences/WebUI/HTTPS/CertificatePath"
+                        property string paletteSettingTitle: qsTr("HTTPS certificate path")
+                        property string paletteSettingKind: "destination"
+                        property var paletteSettingDefault: ""
                         Layout.fillWidth: true
                         pickFolder: false
                         title: qsTr("Select certificate")
@@ -111,6 +135,10 @@ Flickable {
                     orientation: Qt.Vertical
                     Layout.fillWidth: true
                     PathField {
+                        property string paletteSettingKey: "Preferences/WebUI/HTTPS/KeyPath"
+                        property string paletteSettingTitle: qsTr("HTTPS private-key path")
+                        property string paletteSettingKind: "destination"
+                        property var paletteSettingDefault: ""
                         Layout.fillWidth: true
                         pickFolder: false
                         title: qsTr("Select key")
@@ -131,6 +159,10 @@ Flickable {
                     labelWidth: 160
                     Layout.fillWidth: true
                     TextField {
+                        property string paletteSettingKey: "Preferences/WebUI/Username"
+                        property string paletteSettingTitle: qsTr("Web UI username")
+                        property string paletteSettingKind: "destination"
+                        property var paletteSettingDefault: "admin"
                         Layout.fillWidth: true
                         text: (root.rev, OptionsController.value("Preferences/WebUI/Username", "admin"))
                         onEditingFinished: OptionsController.setValue("Preferences/WebUI/Username", text)
@@ -141,6 +173,11 @@ Flickable {
                     labelWidth: 160
                     Layout.fillWidth: true
                     TextField {
+                        property string paletteSettingKey: "Preferences/WebUI/Password_Plaintext"
+                        property string paletteSettingTitle: qsTr("Web UI password")
+                        property string paletteSettingKind: "destination"
+                        property var paletteSettingDefault: ""
+                        property bool paletteSettingSensitive: true
                         Layout.fillWidth: true
                         echoMode: TextInput.Password
                         placeholderText: qsTr("Change current password")
@@ -154,12 +191,19 @@ Flickable {
                     Layout.fillWidth: true
                     spacing: Spacing.sm
                     TextField {
+                        property string paletteSettingKey: "Preferences/WebUI/APIKey"
+                        property string paletteSettingTitle: qsTr("Web UI API key")
+                        property string paletteSettingKind: "destination"
+                        property var paletteSettingDefault: ""
+                        property bool paletteSettingSensitive: true
                         Layout.fillWidth: true
                         readOnly: true
                         placeholderText: qsTr("Generate a key")
                         text: (root.rev, OptionsController.maskedApiKey())
                     }
                     IconButton {
+                        property string paletteActionKey: "copy-api-key"
+                        property string paletteActionTitle: tooltip
                         symbol: Icons.content_copy
                         tooltip: qsTr("Copy API key")
                         enabled: OptionsController.apiKeyValid
@@ -172,6 +216,8 @@ Flickable {
                         }
                     }
                     IconButton {
+                        property string paletteActionKey: "rotate-or-generate-api-key"
+                        property string paletteActionTitle: tooltip
                         symbol: Icons.refresh
                         tooltip: OptionsController.apiKeyValid ? qsTr("Rotate API key") : qsTr("Generate API key")
                         onClicked: {
@@ -180,6 +226,8 @@ Flickable {
                         }
                     }
                     IconButton {
+                        property string paletteActionKey: "delete-api-key"
+                        property string paletteActionTitle: tooltip
                         symbol: Icons.remove
                         tooltip: qsTr("Delete API key")
                         enabled: OptionsController.apiKeyValid
@@ -204,6 +252,8 @@ Flickable {
                 defaultValue: false
             }
             Button {
+                property string paletteActionKey: "edit-ip-subnet-whitelist"
+                property string paletteActionTitle: text
                 text: qsTr("IP subnet whitelist...")
                 enabled: bypassSubnet.checked
                 onClicked: {
@@ -217,6 +267,10 @@ Flickable {
                 labelWidth: 300
                 Layout.fillWidth: true
                 SpinBox {
+                    property string paletteSettingKey: "Preferences/WebUI/MaxAuthenticationFailCount"
+                    property string paletteSettingTitle: qsTr("Maximum Web UI authentication failures")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 5
                     from: 0; to: 2147483647; editable: true
                     value: (root.rev, OptionsController.value("Preferences/WebUI/MaxAuthenticationFailCount", 5))
                     textFromValue: (v, l) => v === 0 ? qsTr("Never") : Number(v).toLocaleString(l, 'f', 0)
@@ -229,6 +283,10 @@ Flickable {
                 labelWidth: 300
                 Layout.fillWidth: true
                 SpinBox {
+                    property string paletteSettingKey: "Preferences/WebUI/BanDuration"
+                    property string paletteSettingTitle: qsTr("Web UI client ban duration")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 3600
                     from: 1; to: 2147483647; editable: true
                     value: (root.rev, OptionsController.value("Preferences/WebUI/BanDuration", 3600))
                     textFromValue: (v, l) => Number(v).toLocaleString(l, 'f', 0) + " " + qsTr("sec")
@@ -241,6 +299,10 @@ Flickable {
                 labelWidth: 300
                 Layout.fillWidth: true
                 SpinBox {
+                    property string paletteSettingKey: "Preferences/WebUI/SessionTimeout"
+                    property string paletteSettingTitle: qsTr("Web UI session timeout")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 3600
                     from: 0; to: 2147483647; editable: true
                     value: (root.rev, OptionsController.value("Preferences/WebUI/SessionTimeout", 3600))
                     textFromValue: (v, l) => v === 0 ? qsTr("Disabled") : (Number(v).toLocaleString(l, 'f', 0) + " " + qsTr("sec"))
@@ -251,6 +313,10 @@ Flickable {
 
             // ---- Alternative WebUI -------------------------------------------
             CheckableGroupBox {
+                property string paletteSettingKey: "Preferences/WebUI/AlternativeUIEnabled"
+                property string paletteSettingTitle: title
+                property string paletteSettingKind: "toggle"
+                property var paletteSettingDefault: false
                 title: qsTr("Use alternative WebUI")
                 Layout.fillWidth: true
                 checked: (root.rev, OptionsController.value("Preferences/WebUI/AlternativeUIEnabled", false))
@@ -260,6 +326,10 @@ Flickable {
                     orientation: Qt.Vertical
                     Layout.fillWidth: true
                     PathField {
+                        property string paletteSettingKey: "Preferences/WebUI/RootFolder"
+                        property string paletteSettingTitle: qsTr("Alternative Web UI files location")
+                        property string paletteSettingKind: "destination"
+                        property var paletteSettingDefault: ""
                         Layout.fillWidth: true
                         title: qsTr("Choose Alternative UI files location")
                         path: (root.rev, OptionsController.value("Preferences/WebUI/RootFolder", ""))
@@ -289,6 +359,10 @@ Flickable {
                     defaultValue: true
                 }
                 CheckableGroupBox {
+                    property string paletteSettingKey: "Preferences/WebUI/HostHeaderValidation"
+                    property string paletteSettingTitle: title
+                    property string paletteSettingKind: "toggle"
+                    property var paletteSettingDefault: true
                     title: qsTr("Enable Host header validation")
                     Layout.fillWidth: true
                     checked: (root.rev, OptionsController.value("Preferences/WebUI/HostHeaderValidation", true))
@@ -298,6 +372,10 @@ Flickable {
                         orientation: Qt.Vertical
                         Layout.fillWidth: true
                         TextField {
+                            property string paletteSettingKey: "Preferences/WebUI/ServerDomains"
+                            property string paletteSettingTitle: qsTr("Web UI server domains")
+                            property string paletteSettingKind: "destination"
+                            property var paletteSettingDefault: "*"
                             Layout.fillWidth: true
                             placeholderText: "*"
                             text: (root.rev, OptionsController.value("Preferences/WebUI/ServerDomains", "*"))
@@ -309,6 +387,10 @@ Flickable {
 
             // ---- Custom HTTP headers -----------------------------------------
             CheckableGroupBox {
+                property string paletteSettingKey: "Preferences/WebUI/CustomHTTPHeadersEnabled"
+                property string paletteSettingTitle: title
+                property string paletteSettingKind: "toggle"
+                property var paletteSettingDefault: false
                 title: qsTr("Add custom HTTP headers")
                 Layout.fillWidth: true
                 checked: (root.rev, OptionsController.value("Preferences/WebUI/CustomHTTPHeadersEnabled", false))
@@ -317,6 +399,10 @@ Flickable {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 100
                     TextArea {
+                        property string paletteSettingKey: "Preferences/WebUI/CustomHTTPHeaders"
+                        property string paletteSettingTitle: qsTr("Custom HTTP headers")
+                        property string paletteSettingKind: "destination"
+                        property var paletteSettingDefault: ""
                         wrapMode: TextEdit.NoWrap
                         font: Typography.mono
                         placeholderText: qsTr("Header: value pairs, one per line")
@@ -328,6 +414,10 @@ Flickable {
 
             // ---- Reverse proxy ------------------------------------------------
             CheckableGroupBox {
+                property string paletteSettingKey: "Preferences/WebUI/ReverseProxySupportEnabled"
+                property string paletteSettingTitle: title
+                property string paletteSettingKind: "toggle"
+                property var paletteSettingDefault: false
                 title: qsTr("Enable reverse proxy support")
                 Layout.fillWidth: true
                 checked: (root.rev, OptionsController.value("Preferences/WebUI/ReverseProxySupportEnabled", false))
@@ -337,6 +427,10 @@ Flickable {
                     orientation: Qt.Vertical
                     Layout.fillWidth: true
                     TextField {
+                        property string paletteSettingKey: "Preferences/WebUI/TrustedReverseProxiesList"
+                        property string paletteSettingTitle: qsTr("Trusted reverse proxies list")
+                        property string paletteSettingKind: "destination"
+                        property var paletteSettingDefault: ""
                         Layout.fillWidth: true
                         text: (root.rev, OptionsController.value("Preferences/WebUI/TrustedReverseProxiesList", ""))
                         onEditingFinished: OptionsController.setValue("Preferences/WebUI/TrustedReverseProxiesList", text)
@@ -347,6 +441,10 @@ Flickable {
 
         // ==== DynDNS ==========================================================
         CheckableGroupBox {
+            property string paletteSettingKey: "Preferences/DynDNS/Enabled"
+            property string paletteSettingTitle: title
+            property string paletteSettingKind: "toggle"
+            property var paletteSettingDefault: false
             title: qsTr("Update my dynamic domain name")
             Layout.fillWidth: true
             checked: (root.rev, OptionsController.value("Preferences/DynDNS/Enabled", false))
@@ -357,6 +455,10 @@ Flickable {
                 labelWidth: 160
                 Layout.fillWidth: true
                 ComboBox {
+                    property string paletteSettingKey: "Preferences/DynDNS/Service"
+                    property string paletteSettingTitle: qsTr("Dynamic DNS service")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 0
                     Layout.fillWidth: true
                     model: [ qsTr("DynDNS"), qsTr("No-IP") ]
                     currentIndex: (root.rev, OptionsController.value("Preferences/DynDNS/Service", 0))
@@ -364,6 +466,8 @@ Flickable {
                 }
             }
             Button {
+                property string paletteActionKey: "register-dyndns"
+                property string paletteActionTitle: text
                 text: qsTr("Register")
                 onClicked: {
                     Log.info("ui", "WebUI: DynDNS register")
@@ -375,6 +479,10 @@ Flickable {
                 labelWidth: 160
                 Layout.fillWidth: true
                 TextField {
+                    property string paletteSettingKey: "Preferences/DynDNS/DomainName"
+                    property string paletteSettingTitle: qsTr("Dynamic DNS domain name")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: "changeme.dyndns.org"
                     Layout.fillWidth: true
                     text: (root.rev, OptionsController.value("Preferences/DynDNS/DomainName", "changeme.dyndns.org"))
                     onEditingFinished: OptionsController.setValue("Preferences/DynDNS/DomainName", text)
@@ -385,6 +493,10 @@ Flickable {
                 labelWidth: 160
                 Layout.fillWidth: true
                 TextField {
+                    property string paletteSettingKey: "Preferences/DynDNS/Username"
+                    property string paletteSettingTitle: qsTr("Dynamic DNS username")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: ""
                     Layout.fillWidth: true
                     text: (root.rev, OptionsController.value("Preferences/DynDNS/Username", ""))
                     onEditingFinished: OptionsController.setValue("Preferences/DynDNS/Username", text)
@@ -395,6 +507,11 @@ Flickable {
                 labelWidth: 160
                 Layout.fillWidth: true
                 TextField {
+                    property string paletteSettingKey: "Preferences/DynDNS/Password"
+                    property string paletteSettingTitle: qsTr("Dynamic DNS password")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: ""
+                    property bool paletteSettingSensitive: true
                     Layout.fillWidth: true
                     echoMode: TextInput.Password
                     text: (root.rev, OptionsController.value("Preferences/DynDNS/Password", ""))

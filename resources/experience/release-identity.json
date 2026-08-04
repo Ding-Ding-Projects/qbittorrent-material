@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "available": false,
+  "id": "",
+  "codeName": "",
+  "english": "",
+  "zhHant": "",
+  "photoUrl": "",
+  "photoAssetName": "",
+  "photoDigest": "",
+  "photoTag": "",
+  "catalogSourceUrl": "https://raw.githubusercontent.com/Ding-Ding-Projects/dim-sum-photos/main/catalog/index.json",
+  "catalogRevision": "",
+  "catalogBlobSha": "",
+  "reason": "This build has no published dim-sum release identity."
+}

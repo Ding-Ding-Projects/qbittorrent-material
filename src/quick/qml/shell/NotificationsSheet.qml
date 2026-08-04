@@ -10,22 +10,32 @@ import QtQuick.Layouts
 import qBittorrent
 
 /* Persistent notification centre for all informational, warning and error cards. */
-Item {
+Sheet {
     id: root
-    property bool open: false
+    sheetWidth: 440
+    accessibleName: qsTr("Notifications")
+    z: 160
+
     signal closeRequested()
     signal openHistoryRequested()
-    readonly property int matchingNotifications: NotificationCenter.matchingCount(
-        searchField.text, searchField.regexEnabled, searchField.regexFlags,
-        scopeBox.currentValue || "all")
 
-    anchors.top: parent.top
-    anchors.bottom: parent.bottom
-    anchors.right: parent.right
-    width: Math.min(440, parent ? parent.width : 440)
-    x: open ? 0 : width
-    visible: open || x < width
-    z: 160
+    // matchingCount() is an invokable rather than a Q_PROPERTY getter, so make
+    // the model signals explicit binding dependencies. Without these reads the
+    // empty state could remain stale after a notification arrived or was read.
+    readonly property int matchingNotifications: {
+        // These reads intentionally register all model-state notify signals as
+        // dependencies even though matchingCount() owns the actual filtering.
+        const modelState = [NotificationCenter.count,
+            NotificationCenter.unreadCount, NotificationCenter.activeCount]
+        return NotificationCenter.matchingCount(
+            searchField.text, searchField.regexEnabled, searchField.regexFlags,
+            scopeBox.currentValue || "all")
+    }
+
+    onOpenChanged: {
+        if (open)
+            Qt.callLater(function() { searchField.forceActiveFocus(Qt.TabFocusReason) })
+    }
 
     function matches(title, body, severity, read) {
         var scope = scopeBox.currentValue
@@ -45,13 +55,6 @@ Item {
             return evaluated.valid && evaluated.count > 0
         }
         return haystack.toLocaleLowerCase().indexOf(query.toLocaleLowerCase()) >= 0
-    }
-
-    Behavior on x {
-        NumberAnimation {
-            duration: ThemeManager.reducedMotion ? 0 : 180
-            easing.type: Easing.OutCubic
-        }
     }
 
     Rectangle {
@@ -94,12 +97,14 @@ Item {
                 }
             }
 
-            RowLayout {
+            GridLayout {
                 Layout.fillWidth: true
                 Layout.leftMargin: Spacing.md
                 Layout.rightMargin: Spacing.md
                 Layout.bottomMargin: Spacing.sm
-                spacing: Spacing.sm
+                columns: (I18n.language === I18n.Bilingual || width < 360) ? 1 : 2
+                columnSpacing: Spacing.sm
+                rowSpacing: Spacing.sm
 
                 FilterTextField {
                     id: searchField
@@ -111,6 +116,7 @@ Item {
                 }
                 ComboBox {
                     id: scopeBox
+                    Layout.fillWidth: true
                     textRole: "text"
                     valueRole: "value"
                     model: [
@@ -123,23 +129,48 @@ Item {
                 }
             }
 
-            RowLayout {
+            GridLayout {
                 Layout.fillWidth: true
                 Layout.leftMargin: Spacing.md
                 Layout.rightMargin: Spacing.md
                 Layout.bottomMargin: Spacing.sm
+                columns: (I18n.language === I18n.Bilingual || width < 400) ? 1 : 3
+                columnSpacing: Spacing.sm
+                rowSpacing: Spacing.xs
                 Button {
+                    Layout.fillWidth: true
                     text: qsTr("Mark all read")
                     flat: true
                     enabled: NotificationCenter.unreadCount > 0
                     onClicked: NotificationCenter.markAllRead()
                 }
-                Item { Layout.fillWidth: true }
                 Button {
+                    Layout.fillWidth: true
+                    text: qsTr("Dismiss all (%1)").arg(NotificationCenter.activeCount)
+                    flat: true
+                    enabled: NotificationCenter.activeCount > 0
+                    Accessible.name: qsTr("Dismiss all %1 active notifications")
+                        .arg(NotificationCenter.activeCount)
+                    Accessible.description: qsTr("Dismisses active notification cards and keeps them in notification history")
+                    onClicked: NotificationCenter.dismissAll()
+                }
+                Button {
+                    Layout.fillWidth: true
                     text: qsTr("Clear history")
                     flat: true
-                    enabled: NotificationCenter.count > 0
-                    onClicked: NotificationCenter.clearAll()
+                    enabled: false
+                    Accessible.description: clearHistoryExplanation.text
+                }
+
+                Label {
+                    id: clearHistoryExplanation
+                    Layout.fillWidth: true
+                    Layout.columnSpan: parent.columns
+                    text: qsTr("Clear history is unavailable until notification records can be restored from append-only local history.")
+                    font: Typography.bodySmall
+                    color: Theme.color("onSurfaceVariant")
+                    wrapMode: Text.WordWrap
+                    Accessible.name: text
                 }
             }
 
@@ -163,23 +194,44 @@ Item {
                     required property string severity
                     required property string timeText
                     required property bool isRead
+                    required property bool dismissed
                     required property string actionLabel
                     required property string actionId
 
                     readonly property bool included: root.matches(title, body, severity, isRead)
+                    readonly property bool oneShotAction: actionId.startsWith("journal-undo:")
+                    readonly property bool actionAvailable: actionLabel.length > 0
+                        && !(oneShotAction && dismissed)
                     readonly property color accent: severity === "error" ? Theme.color("error")
                                                     : severity === "warning" ? Theme.color("warning")
                                                     : severity === "success" ? Theme.color("success")
                                                     : Theme.color("primary")
+                    readonly property string severityLabel: severity === "error" ? qsTr("Error")
+                        : severity === "warning" ? qsTr("Warning")
+                        : severity === "success" ? qsTr("Completed")
+                        : severity === "progress" ? qsTr("In progress") : qsTr("Notice")
+                    readonly property string readLabel: isRead ? qsTr("Read") : qsTr("Unread")
+                    readonly property string presentationLabel: dismissed
+                        ? qsTr("Dismissed") : qsTr("Active notification")
                     width: feedView.width
                     height: included ? content.implicitHeight + Spacing.md * 2 : 0
                     visible: included
+                    activeFocusOnTab: included
                     radius: Spacing.radiusCard
                     color: isRead ? Theme.color("surfaceVariant") : Theme.color("surfaceContainerHigh")
-                    border.width: isRead ? 1 : 2
-                    border.color: accent
+                    border.width: activeFocus ? 3 : (isRead ? 1 : 2)
+                    border.color: activeFocus ? Theme.color("focusRing") : accent
                     Accessible.role: Accessible.ListItem
-                    Accessible.name: title + ". " + body + ". " + timeText
+                    Accessible.name: severityLabel + ". " + title + ". " + body
+                        + ". " + timeText
+                    Accessible.description: readLabel + ". " + presentationLabel
+
+                    Keys.onSpacePressed: NotificationCenter.markRead(card.notificationId)
+                    Keys.onReturnPressed: NotificationCenter.markRead(card.notificationId)
+                    Keys.onDeletePressed: {
+                        if (!card.dismissed)
+                            NotificationCenter.dismiss(card.notificationId)
+                    }
 
                     RowLayout {
                         id: content
@@ -205,11 +257,25 @@ Item {
                             }
                             Label { Layout.fillWidth: true; text: card.body; font: Typography.bodyMedium; color: Theme.color("onSurfaceVariant"); wrapMode: Text.WordWrap }
                             Button {
-                                visible: card.actionLabel.length > 0
+                                visible: card.actionAvailable
                                 text: card.actionLabel
                                 flat: true
                                 onClicked: NotificationCenter.activateAction(card.notificationId)
                             }
+                        }
+
+                        ToolButton {
+                            visible: !card.dismissed
+                            Layout.alignment: Qt.AlignTop
+                            text: qsTr("Dismiss")
+                            display: AbstractButton.IconOnly
+                            Accessible.name: qsTr("Dismiss %1 notification").arg(card.title)
+                            contentItem: MDIcon {
+                                name: "close"
+                                size: 20
+                                color: Theme.color("onSurface")
+                            }
+                            onClicked: NotificationCenter.dismiss(card.notificationId)
                         }
                     }
 

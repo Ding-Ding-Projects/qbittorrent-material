@@ -33,23 +33,25 @@ TextField {
 
     signal regexApplied(string pattern, string flags)
 
-    function setFlag(flag, enabled) {
-        var next = regexFlags.replace(flag, "")
-        if (enabled && next.indexOf(flag) < 0)
-            next += flag
+    function canonicalFlags(value) {
         var canonical = ""
         var order = "gimsu"
         for (var i = 0; i < order.length; ++i)
-            if (next.indexOf(order[i]) >= 0) canonical += order[i]
-        regexFlags = canonical
+            if (value.indexOf(order[i]) >= 0) canonical += order[i]
+        return canonical
     }
 
     function openBuilder() {
         if (!builderAvailable)
             return
-        builderPattern.text = root.text
+        builderPopup.snapshotPattern = root.text
+        builderPopup.snapshotFlags = root.regexFlags
+        builderPopup.draftFlags = root.regexFlags
+        builderPopup.appliedThisOpen = false
+        builderPattern.text = builderPopup.snapshotPattern
         sampleEditor.text = root.builderSampleText
         builderPopup.open()
+        Qt.callLater(builderPopup.placeAtAnchor)
     }
 
     placeholderText: placeholder
@@ -132,21 +134,98 @@ TextField {
 
     Popup {
         id: builderPopup
-        parent: root
-        x: Math.max(0, Math.min(root.width - width, 0))
-        y: root.height + Spacing.xs
-        width: Math.max(420, Math.min(620, root.Window.window
-            ? root.Window.window.width - Spacing.xl * 2 : 620))
-        height: Math.max(420, Math.min(620, root.Window.window
-            ? root.Window.window.height - 140 : 620))
+        parent: Overlay.overlay
+
+        readonly property real viewportMargin: Spacing.md
+        readonly property point anchorTop: {
+            // mapToItem() alone does not expose its geometry dependencies to
+            // the QML binding engine. Read them explicitly so moving/resizing
+            // the field or overlay repositions (or re-clamps) an open builder.
+            const fieldGeometry = root.x + root.y + root.width + root.height
+            const overlayGeometry = parent.width + parent.height
+            const mapped = root.mapToItem(parent, 0, 0)
+            return Qt.point(mapped.x + (fieldGeometry + overlayGeometry) * 0,
+                            mapped.y)
+        }
+        readonly property real availableBelow: Math.max(0,
+            parent.height - (anchorTop.y + root.height + Spacing.xs) - viewportMargin)
+        readonly property real availableAbove: Math.max(0,
+            anchorTop.y - Spacing.xs - viewportMargin)
+        readonly property bool openBelow: availableBelow >= Math.min(420, 620)
+            || availableBelow >= availableAbove
+        property real dragOriginX: 0
+        property real dragOriginY: 0
+        property bool userPositioned: false
+        property string snapshotPattern: ""
+        property string snapshotFlags: "iu"
+        property string draftFlags: "iu"
+        property bool appliedThisOpen: false
+
+        function setDraftFlag(flag, enabled) {
+            var next = draftFlags.replace(flag, "")
+            if (enabled && next.indexOf(flag) < 0)
+                next += flag
+            draftFlags = root.canonicalFlags(next)
+        }
+
+        function restoreSnapshot() {
+            root.text = snapshotPattern
+            root.regexFlags = snapshotFlags
+            builderPattern.text = snapshotPattern
+            draftFlags = snapshotFlags
+        }
+
+        function settleAfterGeometryChange() {
+            if (!visible)
+                return
+            Qt.callLater(function() {
+                if (!builderPopup.visible)
+                    return
+                if (builderPopup.userPositioned)
+                    builderPopup.moveWithinViewport(builderPopup.x, builderPopup.y)
+                else
+                    builderPopup.placeAtAnchor()
+            })
+        }
+
+        function moveWithinViewport(nextX, nextY) {
+            x = Math.max(viewportMargin,
+                Math.min(nextX, Math.max(viewportMargin,
+                    parent.width - width - viewportMargin)))
+            y = Math.max(viewportMargin,
+                Math.min(nextY, Math.max(viewportMargin,
+                    parent.height - height - viewportMargin)))
+        }
+
+        function placeAtAnchor() {
+            var anchoredY = openBelow
+                ? anchorTop.y + root.height + Spacing.xs
+                : anchorTop.y - height - Spacing.xs
+            moveWithinViewport(anchorTop.x, anchoredY)
+        }
+
+        width: Math.min(620, Math.max(0, parent.width - viewportMargin * 2))
+        height: Math.min(620, openBelow ? availableBelow : availableAbove)
         modal: false
         focus: true
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         padding: 0
         Material.elevation: 12
+        onOpened: {
+            userPositioned = false
+            placeAtAnchor()
+        }
+        onClosed: {
+            if (!appliedThisOpen)
+                restoreSnapshot()
+            root.forceActiveFocus(Qt.PopupFocusReason)
+        }
+        onWidthChanged: settleAfterGeometryChange()
+        onHeightChanged: settleAfterGeometryChange()
+        onAnchorTopChanged: settleAfterGeometryChange()
 
         readonly property var evaluation: WorkspaceManager.evaluateRegularExpression(
-            builderPattern.text, root.regexFlags, sampleEditor.text)
+            builderPattern.text, draftFlags, sampleEditor.text)
 
         background: Rectangle {
             radius: Spacing.radiusDialog
@@ -161,9 +240,32 @@ TextField {
             Accessible.role: Accessible.Dialog
 
             RowLayout {
+                id: builderHeader
                 Layout.fillWidth: true
                 Layout.margins: Spacing.md
                 spacing: Spacing.sm
+                Accessible.name: qsTr("Drag Regex Builder")
+                Accessible.description: qsTr("Drag this header to move the Regex Builder")
+
+                DragHandler {
+                    id: builderDragHandler
+                    target: null
+                    cursorShape: active ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                    onActiveChanged: {
+                        if (active) {
+                            builderPopup.userPositioned = true
+                            builderPopup.dragOriginX = builderPopup.x
+                            builderPopup.dragOriginY = builderPopup.y
+                        }
+                    }
+                    onTranslationChanged: {
+                        if (active)
+                            builderPopup.moveWithinViewport(
+                                builderPopup.dragOriginX + translation.x,
+                                builderPopup.dragOriginY + translation.y)
+                    }
+                }
+
                 MDIcon { icon: Icons.settings_suggest; size: 20; color: Theme.color("primary") }
                 ColumnLayout {
                     Layout.fillWidth: true
@@ -182,22 +284,22 @@ TextField {
                 IconButton {
                     symbol: Icons.close
                     tooltip: qsTr("Close and return to search")
-                    onClicked: {
-                        builderPopup.close()
-                        root.forceActiveFocus()
-                    }
+                    onClicked: builderPopup.close()
                 }
             }
 
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.color("outlineVariant") }
 
             ScrollView {
+                id: builderScroll
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
+                contentWidth: availableWidth
+                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
                 ColumnLayout {
-                    width: Math.max(0, builderPopup.width - Spacing.xl * 2)
+                    width: builderScroll.availableWidth
                     spacing: Spacing.md
 
                     Item { Layout.preferredHeight: 1 }
@@ -232,8 +334,8 @@ TextField {
                             delegate: CheckBox {
                                 required property var modelData
                                 text: modelData.key + " · " + modelData.label
-                                checked: root.regexFlags.indexOf(modelData.key) >= 0
-                                onToggled: root.setFlag(modelData.key, checked)
+                                checked: builderPopup.draftFlags.indexOf(modelData.key) >= 0
+                                onToggled: builderPopup.setDraftFlag(modelData.key, checked)
                             }
                         }
                     }
@@ -361,7 +463,8 @@ TextField {
                     text: qsTr("Copy /pattern/flags")
                     flat: true
                     onClicked: {
-                        clipboardHelper.text = "/" + builderPattern.text + "/" + root.regexFlags
+                        clipboardHelper.text = "/" + builderPattern.text + "/"
+                            + builderPopup.draftFlags
                         clipboardHelper.selectAll()
                         clipboardHelper.copy()
                     }
@@ -372,11 +475,14 @@ TextField {
                     highlighted: true
                     enabled: builderPopup.evaluation.valid
                     onClicked: {
-                        root.text = builderPattern.text
+                        var appliedPattern = builderPattern.text
+                        var appliedFlags = root.canonicalFlags(builderPopup.draftFlags)
+                        builderPopup.appliedThisOpen = true
+                        root.text = appliedPattern
+                        root.regexFlags = appliedFlags
                         root.regexEnabled = true
-                        root.regexApplied(root.text, root.regexFlags)
+                        root.regexApplied(appliedPattern, appliedFlags)
                         builderPopup.close()
-                        root.forceActiveFocus()
                     }
                 }
             }

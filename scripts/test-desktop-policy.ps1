@@ -111,6 +111,7 @@ $requiredDesktopFiles = @(
     "src/quick/controllers/experiencecontroller.h",
     "src/quick/controllers/notificationcontroller.cpp",
     "src/quick/controllers/notificationcontroller.h",
+    "src/quick/qml/components/AdvancedColorPicker.qml",
     "src/quick/qml/components/Snackbar.qml",
     "src/quick/qml/dialogs/ChangelogPage.qml",
     "src/quick/qml/shell/DimSumSurprise.qml",
@@ -126,8 +127,8 @@ $requiredDesktopFiles = @(
     "resources/branding/qbittorrent-material.rc",
     "docs/assets/logo-mark.png",
     "resources/experience/changelog.json",
-    "resources/experience/dim-sum.json",
-    "resources/dim-sum/index.json",
+    "resources/experience/release-identity.json",
+    "resources/updates/squirrel-feed-public-key.json",
     "scripts/count-lines.ps1",
     "scripts/select-release-dim-sum.ps1",
     "src/quick/qml/shell/MaterialTitleBar.qml"
@@ -135,6 +136,45 @@ $requiredDesktopFiles = @(
 foreach ($relativePath in $requiredDesktopFiles) {
     Test-Policy (Test-Path -LiteralPath (Get-RepositoryPath $relativePath) -PathType Leaf) `
         "$relativePath is present"
+}
+
+$lineCounterSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "scripts/count-lines.ps1")
+Test-Policy ($lineCounterSource.Contains('HumanLines') `
+        -and $lineCounterSource.Contains('Human-written physical lines') `
+        -and $lineCounterSource.Contains('$grand.AgentLines + $grand.HumanLines') `
+        -and $lineCounterSource.Contains('Co-Authored-By:') `
+        -and $lineCounterSource.Contains('.+\[bot\]')) `
+    "the committed line counter reports explicit human/agent surviving-line attribution with conservative automation identities"
+
+$feedPublicKey = Read-JsonFile "resources/updates/squirrel-feed-public-key.json"
+if ($null -ne $feedPublicKey) {
+    $feedPublicDer = $null
+    $feedPublicRsa = $null
+    try {
+        $feedPublicDer = [Convert]::FromBase64String(
+            [string]$feedPublicKey.spkiDerBase64)
+        $feedPublicFingerprint = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData($feedPublicDer)).ToLowerInvariant()
+        $feedPublicRsa = [Security.Cryptography.RSA]::Create()
+        $feedPublicBytesRead = 0
+        $feedPublicRsa.ImportSubjectPublicKeyInfo(
+            $feedPublicDer, [ref]$feedPublicBytesRead)
+        Test-Policy ($feedPublicKey.schemaVersion -eq 1 `
+                -and $feedPublicKey.algorithm -eq 'RSASSA-PKCS1-v1_5-SHA256' `
+                -and $feedPublicRsa.KeySize -eq 3072 `
+                -and $feedPublicBytesRead -eq $feedPublicDer.Length `
+                -and $feedPublicFingerprint -eq [string]$feedPublicKey.spkiSha256 `
+                -and $feedPublicFingerprint -eq '4479439dfb5bce538ab92e492dd677628060c8558d4c49ac7b253f3eeb4f36e8') `
+            "the committed Squirrel feed public key is the expected RSA-3072 SPKI and exact fingerprint"
+    }
+    catch {
+        Test-Policy $false `
+            "the committed Squirrel feed public key is the expected RSA-3072 SPKI and exact fingerprint ($($_.Exception.Message))"
+    }
+    finally {
+        if ($null -ne $feedPublicRsa) { $feedPublicRsa.Dispose() }
+    }
 }
 
 try {
@@ -145,46 +185,42 @@ catch {
     Test-Policy $false "the Windows image decoder is available ($($_.Exception.Message))"
 }
 
-$dishes = Read-JsonFile "resources/experience/dim-sum.json"
-if ($null -ne $dishes) {
-    $dishList = @($dishes)
-    $requiredDishIds = @("har-gow", "siu-mai", "egg-tart")
-    Test-Policy ($dishList.Count -ge $requiredDishIds.Count) `
-        "the startup catalog preserves every shipped dish and can grow"
-    Test-Policy ((@($dishList.id | Sort-Object -Unique)).Count -eq $dishList.Count) `
-        "dim-sum identifiers are unique"
-    foreach ($requiredDishId in $requiredDishIds) {
-        Test-Policy (@($dishList.id) -contains $requiredDishId) `
-            "the startup catalog preserves '$requiredDishId'"
-    }
-
-    foreach ($dish in $dishList) {
-        $complete = -not [string]::IsNullOrWhiteSpace([string] $dish.id) `
-            -and -not [string]::IsNullOrWhiteSpace([string] $dish.english) `
-            -and -not [string]::IsNullOrWhiteSpace([string] $dish.cantonese) `
-            -and -not [string]::IsNullOrWhiteSpace([string] $dish.altEnglish) `
-            -and -not [string]::IsNullOrWhiteSpace([string] $dish.altCantonese)
-        Test-Policy $complete "dim-sum entry '$($dish.id)' has bilingual names and alt text"
-
-        $resourcePath = [string] $dish.image
-        Test-Policy ($resourcePath -match '^qrc:/dim-sum/[^/]+\.png$') `
-            "dim-sum entry '$($dish.id)' uses a bundled qrc PNG"
-        if ($resourcePath -match '^qrc:/(.+)$') {
-            Test-DecodablePng "resources/$($Matches[1])"
-        }
-    }
+$releaseIdentity = Read-JsonFile "resources/experience/release-identity.json"
+if ($null -ne $releaseIdentity) {
+    $identityAvailable = $releaseIdentity.available -eq $true
+    $identityCodeName = "{0} · {1}" -f `
+        ([string]$releaseIdentity.english), ([string]$releaseIdentity.zhHant)
+    $identityAsset = [regex]::Escape([string]$releaseIdentity.photoAssetName)
+    $identityTag = [regex]::Escape([string]$releaseIdentity.photoTag)
+    $validIdentity = ([string]$releaseIdentity.id -match '^hk-dish-[0-9]{4}$') `
+        -and ([string]$releaseIdentity.photoAssetName `
+            -match '^hk-dish-[0-9]{4}-[a-z0-9-]+\.png$') `
+        -and ([string]$releaseIdentity.photoTag `
+            -match '^catalog-v1(?:-part-[0-9]{3})?$') `
+        -and ([string]$releaseIdentity.photoDigest -match '^sha256:[0-9a-f]{64}$') `
+        -and ([string]$releaseIdentity.catalogRevision -match '^[0-9a-f]{40}$') `
+        -and ([string]$releaseIdentity.catalogBlobSha -match '^[0-9a-f]{40}$') `
+        -and ([string]$releaseIdentity.catalogSourceUrl -eq `
+            'https://raw.githubusercontent.com/Ding-Ding-Projects/dim-sum-photos/main/catalog/index.json') `
+        -and ([string]$releaseIdentity.codeName -ceq $identityCodeName) `
+        -and ([string]$releaseIdentity.photoUrl `
+            -match "^https://github\.com/Ding-Ding-Projects/dim-sum-photos/releases/download/$identityTag/$identityAsset$")
+    Test-Policy ($releaseIdentity.schemaVersion -eq 1 `
+            -and (($identityAvailable -and $validIdentity) `
+                -or (-not $identityAvailable `
+                    -and -not [string]::IsNullOrWhiteSpace([string]$releaseIdentity.reason)))) `
+        "release identity is either a complete public catalog-v1 record or a truthful version-only fallback"
 }
 
-$releaseCatalog = Read-JsonFile "resources/dim-sum/index.json"
-if ($null -ne $releaseCatalog) {
-    foreach ($dish in @($releaseCatalog)) {
-        $releaseImage = "resources/dim-sum/$([string]$dish.image)"
-        Test-Policy (-not [string]::IsNullOrWhiteSpace([string]$dish.id) `
-                -and -not [string]::IsNullOrWhiteSpace([string]$dish.english) `
-                -and -not [string]::IsNullOrWhiteSpace([string]$dish.cantonese) `
-                -and (Test-Path -LiteralPath (Get-RepositoryPath $releaseImage) -PathType Leaf)) `
-            "release catalog entry '$($dish.id)' has a bundled photo"
-    }
+foreach ($legacyDimSumPath in @(
+    "resources/experience/dim-sum.json",
+    "resources/dim-sum/index.json",
+    "resources/dim-sum/har-gow.png",
+    "resources/dim-sum/siu-mai.png",
+    "resources/dim-sum/egg-tart.png"
+)) {
+    Test-Policy (-not (Test-Path -LiteralPath (Get-RepositoryPath $legacyDimSumPath))) `
+        "$legacyDimSumPath is removed in favor of the authoritative public catalog"
 }
 
 $changelog = Read-JsonFile "resources/experience/changelog.json"
@@ -256,9 +292,16 @@ if ($null -ne $cantonese) {
 }
 
 $sourceCMake = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/CMakeLists.txt")
+$desktopResourcesQrc = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "resources/resources.qrc")
 Test-Policy ($sourceCMake -match 'quick/qml/\*\.qml') "CMake discovers every desktop QML surface"
-Test-Policy ($sourceCMake -match 'experience/\*\.json') "CMake bundles the offline experience catalogs"
-Test-Policy ($sourceCMake -match 'dim-sum/\*\.png') "CMake bundles the local dim-sum images"
+Test-Policy ($sourceCMake -match 'experience/\*\.json') `
+    "CMake bundles changelog and release-identity metadata"
+Test-Policy ($sourceCMake -notmatch 'dim-sum/\*\.png') `
+    "CMake does not bundle private dim-sum photo copies"
+Test-Policy ($desktopResourcesQrc.Contains('experience/release-identity.json') `
+        -and $desktopResourcesQrc -notmatch 'experience/dim-sum\.json|dim-sum/[^<]+\.png') `
+    "the desktop resource manifest ships release identity metadata without a copied catalog or photo"
 Test-Policy ($sourceCMake -match 'DEPLOY_TOOL_OPTIONS\s+\$\{_qbt_qt_deploy_tool_options\}' `
         -and $sourceCMake -match '--include-plugins qoffscreen') `
     "Windows packages include the offscreen platform plugin used by release smoke tests"
@@ -318,6 +361,19 @@ if (Test-Path -LiteralPath $wikiSafetyTest -PathType Leaf) {
 
 $mainQml = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/Main.qml")
 $titleBarQml = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/shell/MaterialTitleBar.qml")
+$themeFacadeQml = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/theme/Theme.qml")
+$themeManagerHeader = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/theme/thememanager.h")
+$themeManagerSource = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/theme/thememanager.cpp")
+$quickSettingsQml = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/shell/SettingsSheet.qml")
+$advancedColorPickerQml = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/components/AdvancedColorPicker.qml")
+$filterTextFieldQml = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/components/FilterTextField.qml")
+$sheetQml = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/shell/Sheet.qml")
+$regexBuilderSheetQml = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/shell/RegexBuilderSheet.qml")
+$componentsQmldir = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/components/qmldir")
 foreach ($surface in @("DimSumSurprise", "NotificationsSheet", "RegexBuilderSheet", "SettingsSheet")) {
     Test-Policy ($mainQml -match [regex]::Escape($surface)) "Main.qml wires $surface"
 }
@@ -333,8 +389,150 @@ Test-Policy ($mainQml.Contains('Qt.FramelessWindowHint') `
         -and $mainQml.Contains('MaterialTitleBar') `
         -and $titleBarQml.Contains('showMinimized()') `
         -and $titleBarQml.Contains('showMaximized()') `
-        -and $titleBarQml.Contains('startSystemMove()')) `
+        -and $titleBarQml.Contains('startSystemMove()') `
+        -and $themeManagerSource.Contains('put(u"surfaceContainer"_s')) `
     "the Windows app paints a functional Material title bar and window controls"
+Test-Policy ($themeManagerHeader.Contains('Q_PROPERTY(int paletteRevision READ paletteRevision NOTIFY themeChanged)') `
+        -and $themeManagerSource.Contains('void ThemeManager::notifyThemeChanged()') `
+        -and $themeFacadeQml.Contains('readonly property int paletteRevision: ThemeManager.paletteRevision') `
+        -and $themeFacadeQml.Contains('const revision = paletteRevision') `
+        -and $themeFacadeQml.Contains('return color(_stateName(state))')) `
+    "seed, style, override, and scheme changes invalidate every QML palette-role binding"
+Test-Policy (-not $quickSettingsQml.Contains('Dialogs.ColorDialog') `
+        -and $quickSettingsQml.Contains('AdvancedColorPicker {') `
+        -and $quickSettingsQml.Contains('id: seedColorPickerButton') `
+        -and $quickSettingsQml.Contains('Accessible.name: qsTr("Open Material seed color picker")') `
+        -and $quickSettingsQml.Contains('forceOpaque: true') `
+        -and $quickSettingsQml.Contains('seedColorPicker.openFor(') `
+        -and $componentsQmldir.Contains('AdvancedColorPicker')) `
+    "Quick Settings uses the reusable app-painted advanced seed-color picker"
+Test-Policy (-not $quickSettingsQml.Contains('placeholderText: "#6750A4"') `
+        -and $quickSettingsQml.Contains('readonly property bool validColor: ThemeManager.isValidColor(text)') `
+        -and $quickSettingsQml.Contains('interval: 160') `
+        -and $quickSettingsQml.Contains('onTriggered: root.previewSeedColor(root.pendingSeedColor)') `
+        -and $quickSettingsQml.Contains('if (validColor)') `
+        -and $quickSettingsQml.Contains('root.queueSeedColorPreview(text)')) `
+    "valid typed seed colors preview after a short debounce while invalid text remains editable"
+Test-Policy ($quickSettingsQml.Contains('columns: width >= 300 ? 3 : 1') `
+        -and $quickSettingsQml.Contains('wrapMode: Text.WordWrap') `
+        -and $quickSettingsQml.Contains('Material seed colors are applied as opaque.')) `
+    "the seed-color controls reflow at narrow and bilingual widths and explain output alpha"
+
+$requiredColorSpaces = @(
+    "HEX / HEX8", "RGB / RGBA", "HSL / HSLA", "HSV / HSB", "HWB",
+    "CIELAB", "LCH", "OKLab", "OKLCH", "CMYK", "Named color"
+)
+foreach ($colorSpace in $requiredColorSpaces) {
+    Test-Policy ($advancedColorPickerQml.Contains('qsTr("' + $colorSpace + '")')) `
+        "the advanced picker translates $colorSpace values"
+}
+Test-Policy ($advancedColorPickerQml.Contains('id: saturationValueField') `
+        -and $advancedColorPickerQml.Contains('id: hueSlider') `
+        -and $advancedColorPickerQml.Contains('id: alphaSlider') `
+        -and $advancedColorPickerQml.Contains('Keys.onPressed: function(event)') `
+        -and $advancedColorPickerQml.Contains('Accessible.role: Accessible.Slider')) `
+    "the advanced picker offers continuous keyboard-accessible saturation, value, hue, and alpha controls"
+Test-Policy ($advancedColorPickerQml.Contains('function formattedColor(index, color)') `
+        -and $advancedColorPickerQml.Contains('function parsedFormattedColor(index, value)') `
+        -and $advancedColorPickerQml.Contains('ThemeManager.nameForColor(color)') `
+        -and $advancedColorPickerQml.Contains('pendingClip = true') `
+        -and $advancedColorPickerQml.Contains('function contrastRatio()')) `
+    "color translation is bidirectional and reports gamut clipping and applied contrast"
+Test-Policy ($advancedColorPickerQml.Contains('readonly property string strictNumberPattern:') `
+        -and $advancedColorPickerQml.Contains('function strictNumbers(value, expression, count)') `
+        -and $advancedColorPickerQml.Contains('new RegExp(expression, "i")') `
+        -and $advancedColorPickerQml.Contains('match.length !== count + 1') `
+        -and $advancedColorPickerQml.Contains('!Number.isFinite(number)') `
+        -and $advancedColorPickerQml.Contains('"^rgb\\(') `
+        -and $advancedColorPickerQml.Contains('"^cmyka\\(') `
+        -and -not $advancedColorPickerQml.Contains('function numbersIn(')) `
+    "color-space editors reject malformed and extra-token input with anchored exact-arity grammars"
+Test-Policy ($advancedColorPickerQml.Contains('return name.length ? name : colorHex8(color)') `
+        -and $advancedColorPickerQml.Contains('var fallbackHex = parseHex(namedValue)') `
+        -and $advancedColorPickerQml.Contains('if (fallbackHex !== null)') `
+        -and -not $advancedColorPickerQml.Contains('qsTr("custom (%1)")')) `
+    "named-color formatting falls back to parseable ARGB so unnamed colors round-trip"
+Test-Policy ($advancedColorPickerQml.Contains('var white = boundedUnit(values[1] / 100)') `
+        -and $advancedColorPickerQml.Contains('var black = boundedUnit(values[2] / 100)') `
+        -and $advancedColorPickerQml.Contains('if (sum > 1)') `
+        -and $advancedColorPickerQml.Contains('var c = boundedUnit(values[0] / 100)') `
+        -and $advancedColorPickerQml.Contains('var k = boundedUnit(values[3] / 100)') `
+        -and $advancedColorPickerQml.Contains('if (lchChroma < 0)') `
+        -and $advancedColorPickerQml.Contains('if (oklchChroma < 0)') `
+        -and $advancedColorPickerQml.Contains('function boundedGamutUnit(value)') `
+        -and $advancedColorPickerQml.Contains('if (!pendingClip)')) `
+    "negative, out-of-range, stale, and out-of-gamut input requires an explicit current clipping review"
+Test-Policy ($advancedColorPickerQml.Contains('clipboardHelper.copy()') `
+        -and $advancedColorPickerQml.Contains('GUI/Appearance/RecentSeedColors') `
+        -and $advancedColorPickerQml.Contains('customPalette') `
+        -and $advancedColorPickerQml.Contains('function outputColor()')) `
+    "the advanced picker copies translations, persists recent/custom colors, and enforces its alpha policy"
+Test-Policy ($advancedColorPickerQml.Contains('id: pickerPropertySearch') `
+        -and $advancedColorPickerQml.Contains('objectName: "advancedColorPickerPropertySearch"') `
+        -and $advancedColorPickerQml.Contains('function propertyMatches(corpus)') `
+        -and $advancedColorPickerQml.Contains('pickerPropertySearch.regexEnabled') `
+        -and $advancedColorPickerQml.Contains('pickerPropertySearch.regexFlags') `
+        -and $advancedColorPickerQml.Contains('visible: root.showTranslator') `
+        -and $advancedColorPickerQml.Contains('visible: root.showCustomPalette') `
+        -and $advancedColorPickerQml.Contains('visible: root.showRecentColors')) `
+    "the picker has its own regex-builder-backed property search and filters its controls locally"
+Test-Policy ($advancedColorPickerQml.Contains('Accessible.focused: activeFocus') `
+        -and $advancedColorPickerQml.Contains('"Saturation %1 percent, value %2 percent.') `
+        -and $advancedColorPickerQml.Contains('"Saturation %1% · value %2%"') `
+        -and $advancedColorPickerQml.Contains('Qt.Key_Left') `
+        -and $advancedColorPickerQml.Contains('Qt.Key_Right') `
+        -and $advancedColorPickerQml.Contains('Qt.Key_Up') `
+        -and $advancedColorPickerQml.Contains('Qt.Key_Down') `
+        -and $advancedColorPickerQml.Contains('event.modifiers & Qt.ShiftModifier')) `
+    "the two-dimensional color field exposes numeric saturation/value and keyboard-equivalent focus behavior"
+Test-Policy ($filterTextFieldQml.Contains('property string snapshotPattern:') `
+        -and $filterTextFieldQml.Contains('property string snapshotFlags:') `
+        -and $filterTextFieldQml.Contains('property string draftFlags:') `
+        -and $filterTextFieldQml.Contains('builderPopup.snapshotPattern = root.text') `
+        -and $filterTextFieldQml.Contains('builderPopup.snapshotFlags = root.regexFlags') `
+        -and $filterTextFieldQml.Contains('checked: builderPopup.draftFlags.indexOf(') `
+        -and $filterTextFieldQml.Contains('onToggled: builderPopup.setDraftFlag(')) `
+    "anchored regex builders stage a snapshot of both pattern and flags"
+Test-Policy ($filterTextFieldQml.Contains('closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside') `
+        -and $filterTextFieldQml.Contains('onClosed: {') `
+        -and $filterTextFieldQml.Contains('if (!appliedThisOpen)') `
+        -and $filterTextFieldQml.Contains('restoreSnapshot()') `
+        -and $filterTextFieldQml.Contains('root.text = snapshotPattern') `
+        -and $filterTextFieldQml.Contains('root.regexFlags = snapshotFlags') `
+        -and $filterTextFieldQml.Contains('onClicked: builderPopup.close()')) `
+    "Escape, outside press, and Close restore both regex pattern and flags"
+Test-Policy ($filterTextFieldQml.Contains('var appliedPattern = builderPattern.text') `
+        -and $filterTextFieldQml.Contains('var appliedFlags = root.canonicalFlags(builderPopup.draftFlags)') `
+        -and $filterTextFieldQml.Contains('builderPopup.appliedThisOpen = true') `
+        -and $filterTextFieldQml.Contains('root.text = appliedPattern') `
+        -and $filterTextFieldQml.Contains('root.regexFlags = appliedFlags') `
+        -and $filterTextFieldQml.Contains('root.regexApplied(appliedPattern, appliedFlags)')) `
+    "Apply atomically commits the staged regex pattern and flags"
+Test-Policy ($advancedColorPickerQml.Contains('parent: Overlay.overlay') `
+        -and $advancedColorPickerQml.Contains('horizontalViewportMargin') `
+        -and $advancedColorPickerQml.Contains('verticalViewportMargin') `
+        -and $advancedColorPickerQml.Contains('ScrollBar.horizontal.policy: ScrollBar.AlwaysOff') `
+        -and $advancedColorPickerQml.Contains('DragHandler {') `
+        -and $advancedColorPickerQml.Contains('focusTarget.forceActiveFocus')) `
+    "the picker paints a bounded scrollable draggable overlay and restores focus"
+Test-Policy ($sheetQml.Contains('Math.max(0, parent.width - anchors.rightMargin * 2)') `
+        -and $sheetQml.Contains('ThemeManager.reducedMotion ? 0 : 240') `
+        -and $sheetQml.Contains('ThemeManager.reducedMotion ? 0 : 200') `
+        -and $regexBuilderSheetQml.Contains('id: builderScroll') `
+        -and $regexBuilderSheetQml.Contains('width: Math.max(0, builderScroll.availableWidth)') `
+        -and $regexBuilderSheetQml.Contains('ScrollBar.horizontal.policy: ScrollBar.AlwaysOff')) `
+    "sheets stay within narrow viewports, scroll internally, and respect reduced motion"
+foreach ($namedSheet in @("SettingsSheet.qml", "HistorySheet.qml", "RegexBuilderSheet.qml")) {
+    $namedSheetSource = Get-Content -Raw -LiteralPath `
+        (Get-RepositoryPath "src/quick/qml/shell/$namedSheet")
+    Test-Policy ($namedSheetSource.Contains('accessibleName: qsTr(')) `
+        "$namedSheet exposes a named accessible pane"
+}
+Test-Policy ($themeManagerHeader.Contains('Q_INVOKABLE bool isValidColor(const QString &value) const') `
+        -and $themeManagerHeader.Contains('Q_INVOKABLE QColor parseColorValue(const QString &value) const') `
+        -and $themeManagerHeader.Contains('Q_INVOKABLE QString nameForColor(const QColor &value) const') `
+        -and $themeManagerSource.Contains('normalized.setAlpha(255)')) `
+    "the theme boundary validates/translates names and normalizes Material seeds to opaque"
 
 $guiAddManager = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/controllers/guiaddtorrentmanager.h")
@@ -493,30 +691,39 @@ Test-Policy ($desktopIntegration.Contains('QString DesktopIntegration::findWellK
         -and $desktopIntegration.Contains('qEnvironmentVariable("ProgramW6432")') `
         -and -not $desktopIntegration.Contains('writableLocation(QStandardPaths::AppLocalDataLocation),')) `
     "editor detection looks where VS Code actually installs, not only on PATH"
-$associationUninstall = Get-Content -Raw -LiteralPath `
-    (Get-RepositoryPath "installer/file_associations_uninstall.nsh")
-$associationInstall = Get-Content -Raw -LiteralPath `
-    (Get-RepositoryPath "installer/file_associations_install.nsh")
-Test-Policy ($associationInstall.Contains('ReadRegDWORD $1 HKCU "Software\qBittorrentMaterial\AssociationBackup\torrent" "Saved"') `
-        -and $associationInstall.Contains('ReadRegDWORD $1 HKCU "Software\qBittorrentMaterial\AssociationBackup\magnet" "Saved"') `
-        -and $associationInstall.Contains('WriteRegDWORD HKCU "Software\qBittorrentMaterial\AssociationBackup\torrent" "Saved" 1') `
-        -and $associationInstall.Contains('WriteRegDWORD HKCU "Software\qBittorrentMaterial\AssociationBackup\magnet" "Saved" 1') `
-        -and $associationInstall.Contains('WriteRegStr HKCR ".torrent" "" "qBittorrentMaterial.torrent"') `
-        -and $associationInstall.Contains('WriteRegStr HKCR "magnet" "URL Protocol" ""')) `
-    "association installation snapshots previous handlers before taking ownership"
-Test-Policy ($associationUninstall.Contains('ReadRegStr $0 HKCR "qBittorrentMaterial.torrent\shell\open\command" ""') `
-        -and $associationUninstall.Contains('ReadRegStr $0 HKCR "magnet\shell\open\command" ""') `
-        -and $associationUninstall.Contains('ReadRegStr $1 HKCR "magnet" "URL Protocol"') `
-        -and $associationUninstall.Contains('ReadRegDWORD $1 HKCU "Software\qBittorrentMaterial\AssociationBackup\torrent" "Saved"') `
-        -and $associationUninstall.Contains('ReadRegDWORD $1 HKCU "Software\qBittorrentMaterial\AssociationBackup\magnet" "Saved"') `
-        -and $associationUninstall.Contains('WriteRegStr HKCR ".torrent" "" "$2"') `
-        -and $associationUninstall.Contains('WriteRegStr HKCR "magnet" "URL Protocol" "$2"') `
-        -and $associationUninstall.Contains('DeleteRegKey HKCU "Software\qBittorrentMaterial\AssociationBackup\torrent"') `
-        -and $associationUninstall.Contains('DeleteRegKey HKCU "Software\qBittorrentMaterial\AssociationBackup\magnet"') `
-        -and $associationUninstall.Contains('DeleteRegKey /ifempty HKCR "magnet\shell"') `
-        -and -not $associationUninstall.Contains('DeleteRegKey HKCR "magnet\shell\open\command"') `
-        -and -not $associationUninstall.Contains('DeleteRegKey HKCR "magnet\shell"')) `
-    "uninstall restores a snapshotted handler and preserves changed associations unless their command still belongs to this app"
+$squirrelLifecycle = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/app/squirrellifecycle.cpp")
+$squirrelVersionResource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "resources/branding/qbittorrent-material.rc")
+$desktopMain = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/main.cpp")
+Test-Policy ($squirrelVersionResource.Contains('BLOCK "040904b0"') `
+        -and $squirrelVersionResource.Contains('VALUE "SquirrelAwareVersion", "1\0"') `
+        -and $desktopMain.Contains('SquirrelLifecycle::handle(QCoreApplication::arguments())') `
+        -and $squirrelLifecycle.Contains('event == u"--squirrel-install"_s') `
+        -and $squirrelLifecycle.Contains('event == u"--squirrel-updated"_s') `
+        -and $squirrelLifecycle.Contains('event == u"--squirrel-uninstall"_s') `
+        -and $squirrelLifecycle.Contains('u"--createShortcut=qbittorrent.exe"_s') `
+        -and $squirrelLifecycle.Contains('u"--removeShortcut=qbittorrent.exe"_s')) `
+    "the English version resource enables native Squirrel lifecycle hooks that preserve automatic shortcuts"
+Test-Policy ($squirrelLifecycle.Contains('Software\\qBittorrentMaterial\\AssociationBackup') `
+        -and $squirrelLifecycle.Contains('captureAssociations()') `
+        -and $squirrelLifecycle.Contains('commandBelongsTo(torrentCommand, expectedCommand)') `
+        -and $squirrelLifecycle.Contains('commandBelongsTo(magnetCommand, expectedCommand)') `
+        -and $squirrelLifecycle.Contains('restoreValue(torrentBackup') `
+        -and $squirrelLifecycle.Contains('restoreValue(magnetBackup') `
+        -and $squirrelLifecycle.Contains('backupName + u"Type"_s') `
+        -and $squirrelLifecycle.Contains('RegQueryInfoKeyW') `
+        -and $squirrelLifecycle.Contains('writeDword(torrentBackup, u"ExtensionKeyPresent"_s') `
+        -and $squirrelLifecycle.Contains('writeDword(magnetBackup, u"RootKeyPresent"_s') `
+        -and $squirrelLifecycle.Contains('restoreKeyPresence(torrentBackup') `
+        -and $squirrelLifecycle.Contains('restoreKeyPresence(magnetBackup') `
+        -and $squirrelLifecycle.Contains('value_or(1) == 1') `
+        -and -not $squirrelLifecycle.Contains('deleteKeyIfEmpty(HKEY_CURRENT_USER, classes + u".torrent"_s)') `
+        -and -not $squirrelLifecycle.Contains('deleteKeyIfEmpty(HKEY_CURRENT_USER, classes + u"magnet"_s)') `
+        -and $squirrelLifecycle.Contains('SHChangeNotify(SHCNE_ASSOCCHANGED') `
+        -and $squirrelLifecycle -notmatch 'HKEY_CLASSES_ROOT' `
+        -and $squirrelLifecycle.Contains('installRoot.absoluteFilePath(u"qbittorrent.exe"_s)')) `
+    "Squirrel snapshots exact per-user .torrent/magnet handlers and top-level key presence, restoring them only while the stable stub is still owned"
 $torrentImplSource = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/base/bittorrent/torrentimpl.cpp")
 Test-Policy ($torrentImplSource.Contains('Path logicalPath = m_filePaths.at(index)') `
@@ -563,6 +770,10 @@ Test-Policy ($mainQml.Contains('actionId.startsWith("open-export:")') `
         -and $mainQml.Contains('DesktopIntegration.openInExternalEditor(target)') `
         -and $workspaceViewSource.Contains('"open-export:" + target')) `
     "an export offers to open itself in the configured editor"
+Test-Policy ($workspaceViewSource.Contains('"open-workspace-location:" + target') `
+        -and $mainQml.Contains('actionId.startsWith("open-workspace-location:")') `
+        -and $mainQml.Contains('target.startsWith("file:")')) `
+    "workspace notification actions are durable and handled by the single main snackbar host"
 
 # Local search surfaces reach the anchored regex builder rather than owning a
 # hand-rolled ".*" toggle that cannot build a pattern.
@@ -817,6 +1028,149 @@ Get-ChildItem -LiteralPath (Get-RepositoryPath "src/quick/qml") -Filter "*.qml" 
 Test-Policy ($legacySnackbarCalls.Count -eq 0) `
     "desktop QML contains no legacy static Snackbar.show calls$($legacySnackbarCalls -join ', ')"
 
+$notificationHeader = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/controllers/notificationcontroller.h")
+$notificationSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/controllers/notificationcontroller.cpp")
+$notificationSheetSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/shell/NotificationsSheet.qml")
+$notificationSheetFrame = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/shell/Sheet.qml")
+$notificationAppHeader = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/shell/AppHeader.qml")
+$snackbarSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/components/Snackbar.qml")
+$notificationRegressionSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "test/testnotificationcontroller.cpp")
+$rootCMakeForNotifications = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "CMakeLists.txt")
+$appCMakeForNotifications = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/CMakeLists.txt")
+$primarySnackbarHosts = @(
+    Get-ChildItem -LiteralPath (Get-RepositoryPath "src/quick/qml") -Recurse -Filter "*.qml" |
+        Select-String -Pattern 'primaryHost\s*:\s*true' -CaseSensitive
+)
+Test-Policy ($notificationHeader.Contains('Q_PROPERTY(int activeCount READ activeCount NOTIFY activeCountChanged)') `
+        -and $notificationHeader.Contains('Q_INVOKABLE void dismissAll()') `
+        -and $notificationSource.Contains('void NotificationController::dismissAll()') `
+        -and $notificationSource.Contains('entry.dismissed = true;') `
+        -and $notificationSource.Contains('emit allDismissed();')) `
+    "bulk notification dismissal marks active entries dismissed without deleting history"
+Test-Policy ($notificationSheetSource.Contains('qsTr("Dismiss all (%1)").arg(NotificationCenter.activeCount)') `
+        -and $notificationSheetSource.Contains('Accessible.name: qsTr("Dismiss all %1 active notifications")') `
+        -and $notificationSheetSource.Contains('onClicked: NotificationCenter.dismissAll()')) `
+    "the notification centre exposes a keyboard-accessible dismiss-all action with the exact active count"
+Test-Policy ($notificationSheetSource -match '(?m)^Sheet\s*\{' `
+        -and $notificationSheetSource -notmatch 'x:\s*open\s*\?\s*0\s*:\s*width' `
+        -and $notificationSheetFrame.Contains('enabled: open') `
+        -and $notificationSheetFrame.Contains('transform: Translate') `
+        -and $notificationSheetSource.Contains('I18n.language === I18n.Bilingual') `
+        -and ([regex]::Matches($notificationSheetSource, 'GridLayout\s*\{')).Count -ge 2) `
+    "the notification centre uses the bounded sheet motion and adapts controls for narrow bilingual layouts"
+Test-Policy ($notificationSheetSource.Contains('const modelState = [NotificationCenter.count,') `
+        -and $notificationSheetSource.Contains('required property bool dismissed') `
+        -and $notificationSheetSource.Contains('activeFocusOnTab: included') `
+        -and $notificationSheetSource.Contains('Accessible.description: readLabel + ". " + presentationLabel') `
+        -and $notificationSheetSource.Contains('Keys.onDeletePressed:') `
+        -and $notificationAppHeader.Contains('Accessible.checked: active') `
+        -and $notificationAppHeader.Contains('qsTr("%1 unread · %2 total")')) `
+    "notification search state, cards, dismiss controls, and the header expose reactive keyboard and assistive state"
+Test-Policy ($notificationSheetSource.Contains('Clear history is unavailable until notification records can be restored from append-only local history.') `
+        -and $notificationSheetSource -notmatch 'onClicked:\s*NotificationCenter\.clearAll\(\)' `
+        -and $notificationSource.Contains('entry.actionId.startsWith(u"journal-undo:"_s)') `
+        -and $notificationSource.Contains('if (oneShot && entry.dismissed)') `
+        -and $notificationSource.Contains('entry.actionId.clear();')) `
+    "history clearing is disabled without append-only restoration and one-shot undo actions cannot replay"
+Test-Policy ($transfersPageSource.Contains('qsTr("Torrent file(s) exported."), "success"') `
+        -and $transfersPageSource.Contains('qsTr("Could not export the selected torrent file(s)."), "error"') `
+        -and $addTorrentDialog.Contains('qsTr("Torrent file exported."), "success"') `
+        -and $addTorrentDialog.Contains('qsTr("Could not export the torrent file."), "error"') `
+        -and ([regex]::Matches($workspaceViewSource, 'NotificationCenter\.notify\(')).Count -eq 1 `
+        -and $workspaceViewSource -notmatch 'workspaceSnackbar') `
+    "export outcomes keep truthful severity and each Workspace operation publishes one actionable notification"
+Test-Policy ($snackbarSource.Contains('function onAllDismissed()') `
+        -and $snackbarSource.Contains('function onNotificationDismissed(id)') `
+        -and $snackbarSource.Contains('activeModel.clear()') `
+        -and $snackbarSource.Contains('property bool primaryHost: false') `
+        -and $snackbarSource.Contains('target: root.primaryHost ? NotificationCenter : null') `
+        -and $snackbarSource -notmatch '_callbacks' `
+        -and $snackbarSource.Contains('actionId === undefined ? "" : String(actionId)') `
+        -and $notificationSource.Contains('kMaximumActionIdLength = 4096') `
+        -and $primarySnackbarHosts.Count -eq 1 `
+        -and $primarySnackbarHosts[0].Path -eq (Get-RepositoryPath "src/quick/qml/Main.qml") `
+        -and $snackbarSource.Contains('qsTr("Dismiss all (%1)").arg(NotificationCenter.activeCount)') `
+        -and $notificationHeader.Contains('void notificationDismissed(const QString &id)') `
+        -and $notificationSource.Contains('emit notificationDismissed(id);') `
+        -and $snackbarSource.Contains('onClicked: NotificationCenter.dismissAll()')) `
+    "one primary snackbar host exposes truthful bulk dismissal and removes cards from every dismissal route"
+
+$snackbarDismissAllIndex = $snackbarSource.IndexOf('id: dismissAllButton')
+$snackbarScrollIndex = $snackbarSource.IndexOf('id: notificationScroll')
+Test-Policy ($snackbarSource.Contains('id: snackbarViewport') `
+        -and $snackbarSource -match 'anchors\.right:\s*parent\.right' `
+        -and $snackbarSource -match 'anchors\.bottom:\s*parent\.bottom' `
+        -and $snackbarSource -match 'width:\s*Math\.max\(0,\s*Math\.min\(480,' `
+        -and $snackbarSource -match 'height:\s*Math\.max\(0,\s*Math\.min\(maximumHeight,' `
+        -and $snackbarSource -notmatch 'Math\.max\(280' `
+        -and $snackbarSource -notmatch 'maximumVisible') `
+    "the Snackbar remains bottom-right and clamps both dimensions to narrow and high-scale viewports"
+Test-Policy (([regex]::Matches($snackbarSource, 'ScrollView\s*\{')).Count -eq 1 `
+        -and $snackbarDismissAllIndex -ge 0 `
+        -and $snackbarScrollIndex -gt $snackbarDismissAllIndex `
+        -and $snackbarSource.Contains('Layout.minimumHeight: 0') `
+        -and $snackbarSource.Contains('contentWidth: availableWidth') `
+        -and $snackbarSource.Contains('ScrollBar.horizontal.policy: ScrollBar.AlwaysOff') `
+        -and $snackbarSource -match 'ScrollBar\.vertical:\s*ScrollBar\s*\{' `
+        -and $snackbarSource.Contains('policy: ScrollBar.AsNeeded') `
+        -and $snackbarSource.Contains('width: Math.max(0, notificationScroll.availableWidth)')) `
+    "Dismiss all stays pinned outside the internally scrolling notification cards"
+Test-Policy ($notificationHeader.Contains('Q_INVOKABLE QVariantList activeEntries() const') `
+        -and $notificationSource.Contains('QVariantList NotificationController::activeEntries() const') `
+        -and $notificationSource.Contains('m_entries.crbegin()') `
+        -and $notificationSource.Contains('if (entry.dismissed)') `
+        -and $snackbarSource.Contains('NotificationCenter.activeEntries()') `
+        -and $snackbarSource.Contains('Component.onCompleted: hydrateActiveNotifications()') `
+        -and $snackbarSource.Contains('activeModel.get(i).notificationId === id') `
+        -and $snackbarSource.Contains('running: !card.persistent')) `
+    "the primary Snackbar hydrates persisted undismissed cards without duplicates and restarts only transient timers"
+Test-Policy ($snackbarSource -match 'IconButton\s*\{' `
+        -and $snackbarSource.Contains('symbol: Icons.close') `
+        -and $snackbarSource -notmatch 'icon\.name:\s*"close"' `
+        -and ([regex]::Matches($snackbarSource, 'focusPolicy:\s*Qt\.StrongFocus')).Count -ge 3 `
+        -and $snackbarSource.Contains('Accessible.role: Accessible.List') `
+        -and $snackbarSource.Contains('Accessible.role: Accessible.AlertMessage')) `
+    "Snackbar dismissal and action controls use bundled icons and remain keyboard and screen-reader accessible"
+Test-Policy ($notificationSource.Contains('entry.actionId.startsWith(u"journal-undo:"_s)') `
+        -and $notificationSource.Contains('if (oneShot && entry.dismissed)') `
+        -and $notificationSource.Contains('entry.actionLabel.clear()') `
+        -and $notificationSource.Contains('entry.actionId.clear()') `
+        -and $notificationSource.Contains('{ActionLabelRole, ActionIdRole}') `
+        -and $notificationSource.Contains('emit actionRequested(actionId, id)')) `
+    "journal undo notification actions are consumed once while file-opening actions stay repeatable"
+Test-Policy ($notificationSource.Contains('constexpr int kMaximumEntries = 200') `
+        -and $notificationSource.Contains('QVector<QString> evictedActiveIds') `
+        -and $notificationSource.Contains('for (int row = kMaximumEntries; row < m_entries.size(); ++row)') `
+        -and $notificationSource.Contains('emit notificationDismissed(evictedId);') `
+        -and $notificationSource.IndexOf('emit notificationDismissed(evictedId);') -lt `
+             $notificationSource.IndexOf('emit notificationRaised(entry.id')) `
+    "active notification eviction removes the stale Snackbar id before announcing entry 201"
+Test-Policy ($notificationRegressionSource.Contains('QCoreApplication application(argc, argv)') `
+        -and $notificationRegressionSource.Contains('number <= 201') `
+        -and $notificationRegressionSource.Contains('controller->count() == 200') `
+        -and $notificationRegressionSource.Contains('dismissedIds.constFirst() == ids.constFirst()') `
+        -and $notificationRegressionSource.Contains('controller->activateAction(actionNotificationId)') `
+        -and $notificationRegressionSource.Contains('controller->dismiss(actionNotificationId)') `
+        -and $notificationRegressionSource.Contains('controller->dismissAll()') `
+        -and $notificationRegressionSource.Contains('controller->activeEntries().isEmpty()')) `
+    "the opt-in non-GUI regression covers 201 persistent entries, eviction, action consumption, individual dismissal, and dismiss-all"
+Test-Policy ($rootCMakeForNotifications.Contains('option(QBT_BUILD_NOTIFICATION_TESTS') `
+        -and $rootCMakeForNotifications -match 'QBT_BUILD_NOTIFICATION_TESTS[\s\S]*?OFF\)' `
+        -and $appCMakeForNotifications.Contains('testnotificationcontroller EXCLUDE_FROM_ALL') `
+        -and $appCMakeForNotifications.Contains('QBT_NOTIFICATION_TEST_NO_PREFERENCES') `
+        -and $appCMakeForNotifications.Contains('add_test(NAME testnotificationcontroller COMMAND testnotificationcontroller)') `
+        -and $notificationSource.Contains('#if !defined(QBT_NOTIFICATION_TEST_NO_PREFERENCES)')) `
+    "the notification regression is opt-in, excluded from release builds, registered with CTest, and cannot write user preferences"
+
 $filterSidebar = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/transferlist/FilterSidebar.qml")
 Test-Policy ($filterSidebar -match 'width:\s*Math\.max\(0,\s*filterScroll\.availableWidth\)') `
     "the filter sidebar reserves the vertical scrollbar viewport"
@@ -839,6 +1193,43 @@ foreach ($filterPanel in @(
             -and $filterPanelSource -notmatch 'TapHandler\s*\{') `
         "$filterPanel routes left and right clicks through one pointer target"
 }
+$statusFilterPanel = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/transferlist/StatusFilterPanel.qml")
+Test-Policy ($statusFilterPanel.Contains('Accessible.role: Accessible.RadioButton') `
+        -and $statusFilterPanel.Contains('Accessible.name: rowItem.model.label') `
+        -and $statusFilterPanel.Contains('Accessible.description: qsTr("%1 torrents")') `
+        -and $statusFilterPanel.Contains('Accessible.checked: rowItem.selected')) `
+    "status filters expose their labels, counts, and checked radio state"
+Test-Policy (([regex]::Matches($statusFilterPanel, 'activeFocusOnTab:')).Count -eq 1 `
+        -and $statusFilterPanel.Contains('activeFocusOnTab: rowItem.index === root.rovingIndex') `
+        -and $statusFilterPanel.Contains('id: statusRepeater') `
+        -and $statusFilterPanel.Contains('statusRepeater.itemAt(') `
+        -and $statusFilterPanel.Contains('function onModelReset()') `
+        -and $statusFilterPanel.Contains('function onStatusFilterChanged()')) `
+    "status filters expose one roving Tab stop synchronized through model resets"
+Test-Policy ($statusFilterPanel.Contains('Qt.Key_Up') `
+        -and $statusFilterPanel.Contains('Qt.Key_Left') `
+        -and $statusFilterPanel.Contains('Qt.Key_Down') `
+        -and $statusFilterPanel.Contains('Qt.Key_Right') `
+        -and $statusFilterPanel.Contains('Qt.Key_Space') `
+        -and $statusFilterPanel.Contains('Qt.Key_Return') `
+        -and $statusFilterPanel.Contains('Qt.Key_Enter') `
+        -and $statusFilterPanel.Contains('root.moveSelection(') `
+        -and $statusFilterPanel.Contains('event.accepted = true')) `
+    "status-filter arrows move and select while Space and Enter activate the focused radio"
+Test-Policy ($statusFilterPanel.Contains('border.width: rowItem.activeFocus ? 2 : 0') `
+        -and $statusFilterPanel.Contains('border.color: Theme.color("focusRing")') `
+        -and $statusFilterPanel.Contains('onActiveFocusChanged:')) `
+    "status filters paint a visible active-focus ring"
+$statusClickHandlers = [regex]::Matches($statusFilterPanel, 'onClicked:').Count
+$statusRightClick = [regex]::Match($statusFilterPanel,
+    'if \(mouse\.button === Qt\.RightButton\) \{(?<body>[\s\S]*?)\n\s*\}')
+Test-Policy ($statusClickHandlers -eq 1 `
+        -and $statusRightClick.Success `
+        -and $statusRightClick.Groups['body'].Value.Contains('contextMenu.popup()') `
+        -and -not $statusRightClick.Groups['body'].Value.Contains('statusFilter =') `
+        -and -not $statusRightClick.Groups['body'].Value.Contains('activateIndex')) `
+    "right-click opens the status menu without changing the selected radio"
 
 $experienceController = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/controllers/experiencecontroller.cpp")
 $experienceHeader = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/controllers/experiencecontroller.h")
@@ -846,6 +1237,29 @@ $dimSumSurface = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qm
 $settingsSheet = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/shell/SettingsSheet.qml")
 Test-Policy ($experienceController -match 'bounded\(10\)\s*!=\s*0') `
     "startup dim-sum surprise uses one fresh 10 percent draw"
+Test-Policy ($experienceController.Contains('QStandardPaths::AppLocalDataLocation') `
+        -and $experienceController.Contains('QTimer::singleShot(0') `
+        -and $experienceController.Contains('m_cachedDishes.isEmpty()') `
+        -and $experienceController.Contains('QSaveFile output') `
+        -and $experienceController.Contains('QImageReader') `
+        -and $experienceController.Contains('QCryptographicHash::Sha256') `
+        -and $experienceController.Contains('QCryptographicHash::Sha1') `
+        -and $experienceController.Contains('QNetworkRequest::ManualRedirectPolicy') `
+        -and $experienceController.Contains('kMaximumCachedDishes') `
+        -and $experienceController.Contains('kMaximumRedirects') `
+        -and $experienceController.Contains('timeout->start()') `
+        -and $experienceController.Contains('isAllowedUrl') `
+        -and $experienceController.Contains('hasProcessArgumentPrefix(u"--capture-ui"_s)') `
+        -and $experienceController -notmatch ':/experience/dim-sum\.json|qrc:/dim-sum/') `
+    "startup dim-sum uses a bounded asynchronous verified app-data cache and fails open without local catalog assets"
+Test-Policy ($experienceHeader.Contains('currentReleaseIdentity') `
+        -and $experienceHeader.Contains('dimSumCacheStatus') `
+        -and $dimSumSurface.Contains('dish.image') `
+        -and $dimSumSurface.Contains('dish.publicPhotoUrl') `
+        -and $dimSumSurface.Contains('dish.catalogRevision') `
+        -and $dimSumSurface.Contains('dishImage.status === Image.Ready') `
+        -and $dimSumSurface.Contains('Qt.openUrlExternally(root.publicPhotoUrl)')) `
+    "desktop surfaces expose only decoded cached photos with authoritative public provenance"
 Test-Policy (($experienceController -notmatch 'DimSumSurpriseEnabled') -and
     ($experienceHeader -notmatch 'dimSumEnabled') -and
     ($dimSumSurface -notmatch 'Turn off surprises') -and
@@ -888,8 +1302,10 @@ Test-Policy ($appCMake -match 'qbittorrent-material\.rc') `
     "the Windows executable embeds the multi-resolution product icon"
 
 $transfersPage = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/shell/TransfersPage.qml")
-Test-Policy ($transfersPage -match 'enabled:\s*TransferController\.selectionCount\s*>\s*0') `
-    "selection-only Split Dock actions expose their disabled state"
+Test-Policy ($transfersPage -match 'enabled:\s*TransferController\.selectionCount\s*>\s*0' `
+        -and $transfersPage.Contains('color: !splitDockActionButton.enabled') `
+        -and $transfersPage.Contains('? Theme.color("outline")')) `
+    "selection-only Split Dock actions and delete icons expose a muted disabled state"
 Test-Policy ($transferControllerHeader.Contains('setDHTDisabled(bool disabled)') `
         -and $transferControllerHeader.Contains('setPEXDisabled(bool disabled)') `
         -and $transferControllerHeader.Contains('setLSDDisabled(bool disabled)') `
@@ -921,23 +1337,57 @@ $peerListModel = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/mo
 $peersTab = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/properties/PeersTab.qml")
 $commandPalette = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/components/CommandPalette.qml")
+$filterTextFieldForPalette = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/components/FilterTextField.qml")
+$appHeaderForPalette = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/shell/AppHeader.qml")
+$appMenuForPalette = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/mainwindow/AppMenuBar.qml")
+$centralTabsForPalette = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/mainwindow/CentralTabs.qml")
+$searchTabForPalette = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/search/SearchTab.qml")
 $mainQmlForPalette = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/Main.qml")
 $optionsDialogForPalette = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/options/OptionsDialog.qml")
-Test-Policy ($mainQmlForPalette -match 'Shortcut\s*\{\s*sequences:\s*\["Ctrl\+Shift\+P"\]' `
+Test-Policy ($mainQmlForPalette -match 'id:\s*actionCommandPalette' `
+        -and $mainQmlForPalette -match 'shortcut:\s*"Ctrl\+Shift\+F"' `
+        -and $mainQmlForPalette -notmatch 'Ctrl\+K' `
+        -and $mainQmlForPalette -match 'onTriggered:\s*commandPalette\.openPalette\(\)' `
         -and $mainQmlForPalette -match 'CommandPalette\s*\{' `
-        -and $mainQmlForPalette -match 'invokePaletteCommand\(commandId\)') `
-    "Ctrl+Shift+P opens the wired desktop command palette"
+        -and $mainQmlForPalette -match 'invokePaletteCommand\(commandId\)' `
+        -and $mainQmlForPalette -match 'function\s+openPanel\(panel\)' `
+        -and $mainQmlForPalette -match 'openPanel\(commandId\.slice\(6\)\)' `
+        -and $appHeaderForPalette -match 'actionCommandPalette\.trigger\(\)' `
+        -and $appMenuForPalette -match 'action:\s*menuBar\.shell\.actionCommandPalette') `
+    "Ctrl+Shift+F without a competing Ctrl+K binding and idempotent panel destinations open the wired desktop command palette"
 Test-Policy ($commandPalette -match 'WorkspaceManager\.evaluateRegularExpression' `
         -and $commandPalette -match 'Keys\.onDownPressed' `
         -and $commandPalette -match 'Keys\.onUpPressed' `
         -and $commandPalette -match 'Keys\.onReturnPressed' `
         -and $commandPalette -match 'Accessible\.name:\s*qsTr\("Search command palette"\)') `
     "the command palette supports shared regex search, keyboard navigation, and accessible naming"
+Test-Policy ($mainQmlForPalette -match 'function commandPaletteCommands\(\)' `
+        -and $mainQmlForPalette -match 'var actionEntries = \[' `
+        -and ([regex]::Matches($mainQmlForPalette, 'action:\s*action[A-Za-z]+')).Count -ge 50 `
+        -and $mainQmlForPalette -match 'SearchController\.plugins' `
+        -and $mainQmlForPalette -match 'pluginId:\s*plugin\.id' `
+        -and $mainQmlForPalette -match 'centralTabs\.openSearchPlugins\(command\.pluginId\)' `
+        -and $centralTabsForPalette -match 'function openSearchPlugin\(pluginId\)' `
+        -and $searchTabForPalette -match 'function selectPlugin\(pluginId\)' `
+        -and $commandPalette -match 'modelData\.checkable' `
+        -and $commandPalette -match 'root\.commands\.length') `
+    "the command palette covers the shared action catalog and live installed search plugins"
 Test-Policy ($commandPalette -match 'GUI/CommandPalette/FullWindow' `
         -and $commandPalette -match 'color:\s*Theme\.color\("surface"\)' `
         -and $commandPalette -match 'clip:\s*true') `
     "the command palette persists card/full-window choice and paints a bounded scrollable surface"
+Test-Policy ($filterTextFieldForPalette -match 'parent:\s*Overlay\.overlay' `
+        -and $filterTextFieldForPalette -match 'availableBelow' `
+        -and $filterTextFieldForPalette -match 'moveWithinViewport' `
+        -and $filterTextFieldForPalette -match 'DragHandler\s*\{' `
+        -and $filterTextFieldForPalette -match 'ScrollBar\.horizontal\.policy:\s*ScrollBar\.AlwaysOff') `
+    "regex-builder overlays stay in the viewport, scroll vertically, and drag from their header"
 Test-Policy ($mainQmlForPalette -match 'id:\s*"options\.0"' `
         -and $mainQmlForPalette -match 'id:\s*"options\.8"' `
         -and $optionsDialogForPalette -match 'function showPage\(index\)') `
@@ -970,13 +1420,67 @@ Test-Policy ($behaviorPage -match 'visible:\s*OptionsController\.windowsDefaultA
         -and $behaviorPage -match 'action === "windowsDefaultApps"') `
     "the Behavior page platform-gates, describes, invokes, and reports the Default Apps action"
 
-$updateController = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/app/appcontroller.cpp")
-$updateParser = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/app/updatecheck.cpp")
+$programUpdaterHeader = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/app/programupdater.h")
+$programUpdaterSource = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/app/programupdater.cpp")
+$updateReadyBanner = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/components/UpdateReadyBanner.qml")
+$mainQmlForUpdater = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/Main.qml")
 $downloadHandler = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/base/net/downloadhandlerimpl.cpp")
 $downloadManager = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/base/net/downloadmanager.cpp")
 $appCMake = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/CMakeLists.txt")
-Test-Policy ($updateController.Contains('releases/latest') -and $updateController.Contains('.limit(maxReleaseResponseSize)') -and $updateController.Contains('m_updateCheckInProgress') -and $updateController.Contains('result.status != Net::DownloadStatus::Success')) "the program update check is asynchronous, bounded, and failure-safe"
-Test-Policy ($updateParser.Contains('draft') -and $updateParser.Contains('prerelease') -and $updateParser.Contains('^build(?:-|\\.)') -and $updateParser.Contains('latest.buildNumber > current.number')) "the update parser accepts only stable immutable builds and compares run numbers"
+Test-Policy ($programUpdaterHeader.Contains('QPointer<QProcess> m_process') `
+        -and $programUpdaterSource.Contains('--checkForUpdate=') `
+        -and $programUpdaterSource.Contains('--update=') `
+        -and $programUpdaterSource.Contains('kMaximumProcessOutput') `
+        -and $programUpdaterSource.Contains('kCheckTimeoutMs') `
+        -and $programUpdaterSource.Contains('kStageTimeoutMs') `
+        -and $programUpdaterSource.Contains('scheduleRetry()') `
+        -and $programUpdaterSource.Contains('QStandardPaths::isTestModeEnabled()') `
+        -and $programUpdaterSource.Contains('QBT_DISABLE_PROGRAM_UPDATES')) `
+    "the Squirrel updater checks, downloads, stages, retries, and stays bounded without blocking the UI"
+Test-Policy ($programUpdaterSource.Contains('stagedExecutableExists(m_availableVersion)') `
+        -and $programUpdaterSource.Contains('--processStartAndWait=') `
+        -and $programUpdaterHeader.Contains('Q_PROPERTY(QUrl releaseNotesUrl READ releaseNotesUrl CONSTANT)') `
+        -and $updateReadyBanner -match 'ProgramUpdater\.readyToRestart' `
+        -and $updateReadyBanner -match 'readonly property string versionText:\s*ProgramUpdater\.availableVersion' `
+        -and $updateReadyBanner -notmatch 'the latest version' `
+        -and $updateReadyBanner -match 'ProgramUpdater\.releaseNotesUrl' `
+        -and $updateReadyBanner -match 'qsTr\("Release notes"\)' `
+        -and $updateReadyBanner -match 'qsTr\("Later"\)' `
+        -and $updateReadyBanner -match 'qsTr\("Restart to install update"\)' `
+        -and $updateReadyBanner -match 'restartRequested\(root\.returnFocusItem\)' `
+        -and $updateReadyBanner -match 'Accessible\.role:\s*Accessible\.AlertMessage' `
+        -and $updateReadyBanner -match 'duration:\s*ThemeManager\.reducedMotion\s*\?\s*0\s*:\s*Spacing\.motionFast' `
+        -and $mainQmlForUpdater -match 'ProgramUpdater\.restartToUpdate\(\)' `
+        -and $mainQmlForUpdater -match 'id:\s*updateRestartConfirmDialog' `
+        -and $mainQmlForUpdater -match 'acceptText:\s*qsTr\("Restart to install update"\)' `
+        -and $mainQmlForUpdater -match 'rejectText:\s*qsTr\("Later"\)' `
+        -and $mainQmlForUpdater -match 'WorkspaceManager\.dirty\s*&&\s*!WorkspaceManager\.syncNow\(\)' `
+        -and $mainQmlForUpdater -match 'OptionsController\.modified' `
+        -and $mainQmlForUpdater -match 'optionsDialog\.visible\s*=\s*true' `
+        -and $mainQmlForUpdater -match 'restoreUpdateRestartFocus' `
+        -and $mainQmlForUpdater -match 'UpdateReadyBanner\s*\{' `
+        -and $mainQmlForUpdater -match 'target:\s*ProgramUpdater' `
+        -and $mainQmlForUpdater -match 'NotificationCenter\.notify\(body, severity, title\)') `
+    "a verified staged update exposes exact-version notes, Later and focus-safe restart actions without losing Workspace or staged Options edits"
+$releaseNotesActionIndex = $updateReadyBanner.IndexOf('id: releaseNotesButton')
+$laterActionIndex = $updateReadyBanner.IndexOf('id: laterButton')
+$restartActionIndex = $updateReadyBanner.IndexOf('id: restartButton')
+Test-Policy ($updateReadyBanner.Contains('id: actionLayout') `
+        -and $updateReadyBanner.Contains('readonly property real requiredInlineWidth:') `
+        -and $updateReadyBanner.Contains('I18n.language === I18n.Bilingual') `
+        -and $updateReadyBanner.Contains('columns: stackActions ? 1 : 4') `
+        -and ([regex]::Matches($updateReadyBanner, 'Layout\.maximumWidth:\s*actionLayout\.width')).Count -eq 3 `
+        -and ([regex]::Matches($updateReadyBanner, 'wrapMode:\s*Text\.WordWrap')).Count -ge 5 `
+        -and ([regex]::Matches($updateReadyBanner, 'activeFocusOnTab:\s*true')).Count -eq 3 `
+        -and $updateReadyBanner.Contains('KeyNavigation.tab: laterButton') `
+        -and $updateReadyBanner.Contains('KeyNavigation.tab: restartButton') `
+        -and $releaseNotesActionIndex -ge 0 `
+        -and $laterActionIndex -gt $releaseNotesActionIndex `
+        -and $restartActionIndex -gt $laterActionIndex `
+        -and $updateReadyBanner.Contains('leftPadding: Math.min(Spacing.lg, Math.max(0, width / 16))') `
+        -and $updateReadyBanner.Contains('rightPadding: Math.min(Spacing.lg, Math.max(0, width / 16))')) `
+    "ready-update actions stack for constrained or bilingual viewports, wrap without clipping at high scale, and keep Release notes, Later, Restart keyboard order"
 Test-Policy ($downloadHandler.Contains('if (m_isFinished)') `
         -and $downloadHandler.Contains('m_result.data.size() > m_downloadRequest.limit()') `
         -and $downloadHandler.Contains('std::max(bytesReceived, bytesTotal)') `
@@ -1091,9 +1595,16 @@ Test-Policy ($preferencesSource.Contains('u"SearchEngines/seededPlugins"_s') `
 # because the user asked for it and expects a fresh answer.
 $searchManagerCtor = [regex]::Match($searchPluginManager,
     'SearchPluginManager::SearchPluginManager\(\)[\s\S]*?\n\}').Value
-Test-Policy ($searchManagerCtor -match 'QTimer::singleShot\(0, this, \[this\] \{ update\(\); \}\)' `
-        -and $searchManagerCtor -notmatch '\n\s*update\(\);') `
-    "the startup capabilities probe is deferred instead of blocking construction"
+Test-Policy ($searchManagerCtor -match 'QTimer::singleShot\(0,\s*this,\s*\[this\]\s*\{[\s\S]*?update\(true,\s*\[this\]\s*\{\s*startUnofficialCatalogSync\(\);\s*\}\);[\s\S]*?\}\);' `
+        -and $searchPluginManager -match 'connect\(m_capabilityProcess,\s*&QProcess::finished' `
+        -and $searchPluginManager -match 'connect\(m_capabilityProcess,\s*&QProcess::readyReadStandardOutput' `
+        -and $searchPluginManager -match 'connect\(m_capabilityProcess,\s*&QProcess::readyReadStandardError' `
+        -and $searchPluginManager.Contains('MAX_CAPABILITY_STDOUT_BYTES') `
+        -and $searchPluginManager.Contains('MAX_CAPABILITY_STDERR_BYTES') `
+        -and $searchPluginManager.Contains('emit pluginCatalogChanged();') `
+        -and $searchPluginManager -match 'm_capabilityTimeout->setInterval\(10000\)' `
+        -and $searchPluginManager -notmatch 'waitFor(?:Started|Finished)') `
+    "startup and catalog capability probes are serialized, bounded, and asynchronous instead of blocking the UI thread"
 
 # --- Workspace: the browser-style tab strip must actually be visible ----------
 # "surfaceWarm" is aliased to primaryContainer in ThemeManager's named-id map,
@@ -1224,11 +1735,85 @@ Test-Policy (Test-Path -LiteralPath `
 
 $workflowPath = Get-RepositoryPath ".github/workflows/release-every-push.yml"
 Test-Policy (Test-Path -LiteralPath $workflowPath -PathType Leaf) "the push release workflow exists"
+$squirrelBuildSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "scripts/build-squirrel-package.ps1")
+$squirrelSmokeSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "scripts/test-squirrel-package.ps1")
+$squirrelNuspec = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "installer/qbittorrent-material.nuspec")
+$rootCMake = Get-Content -Raw -LiteralPath (Get-RepositoryPath "CMakeLists.txt")
+$buildHelperSource = Get-Content -Raw -LiteralPath (Get-RepositoryPath "run.ps1")
+Test-Policy ($squirrelBuildSource.Contains('$SquirrelVersion = "2.0.1"') `
+        -and $squirrelBuildSource.Contains('$SquirrelSha256 = "923e18abb4fd50b5a4878a39dbcd042ed3f7eb68fc0f82c0955cd5380c921ac7"') `
+        -and $squirrelBuildSource.Contains('$NuGetVersion = "7.6.0"') `
+        -and $squirrelBuildSource.Contains('$NuGetSha256 = "12a7a2e0d11bd872c2a1e03c85b24a0288501f8b22084b47c90d4f2458c978d4"') `
+        -and $squirrelBuildSource.Contains('https://api.nuget.org/v3-flatcontainer/')) `
+    "Squirrel and NuGet downloads are pinned by version and verified SHA256 from the official feed"
+Test-Policy ($squirrelBuildSource.Contains('$expectedDeltaCount = if ($hasPreviousFeed) { 1 } else { 0 }') `
+        -and $squirrelBuildSource.Contains('Squirrel output for $feedDescription must contain exactly $expectedDeltaCount current delta package(s)') `
+        -and $squirrelBuildSource.Contains('--signWithParams=$SignWithParams') `
+        -and $squirrelBuildSource.Contains('$publicSigningPattern') `
+        -and $squirrelBuildSource.Contains('$expectedSigningThumbprint') `
+        -and $squirrelBuildSource.Contains('Get-AuthenticodeSignature') `
+        -and $squirrelBuildSource.Contains('setup-embedded-Update.exe') `
+        -and $squirrelBuildSource.Contains('lib/net45/qbittorrent.exe') `
+        -and $squirrelBuildSource.Contains('lib/net45/qbittorrent_ExecutionStub.exe') `
+        -and $squirrelBuildSource.Contains('Write-GitHubOutput "signed"')) `
+    "Squirrel packaging mandates the expected delta shape and verifies safely parameterized Authenticode output"
+Test-Policy ($squirrelBuildSource.Contains('Move-Item -LiteralPath $_.FullName -Destination $destination') `
+        -and $squirrelBuildSource.Contains('@("[Paths]", "Prefix = .")') `
+        -and $squirrelNuspec.Contains('<file src="**\*" target="lib\net45" />')) `
+    "the Squirrel package flattens qbittorrent.exe and its DLLs beside qt.conf while preserving plugin/QML siblings"
+Test-Policy ($squirrelSmokeSource.Contains('Current silent Setup') `
+        -and $squirrelSmokeSource.Contains('Current normal Setup') `
+        -and $squirrelSmokeSource.Contains('Expected one Squirrel Desktop shortcut and one Start Menu shortcut.') `
+        -and $squirrelSmokeSource.Contains('did not register .torrent and magnet: to the stable execution stub') `
+        -and $squirrelSmokeSource.Contains('Assert-AssociationBaseline') `
+        -and $squirrelSmokeSource.Contains('KeyPresent = $current.KeyPresent') `
+        -and $squirrelSmokeSource.Contains('$current.KeyPresent -ne $expected.KeyPresent') `
+        -and $squirrelSmokeSource.Contains('Invoke-AssociationKeyPresenceSmoke $InstallerPath $PackageVersion') `
+        -and $squirrelSmokeSource.IndexOf('Invoke-AssociationKeyPresenceSmoke $InstallerPath $PackageVersion') `
+            -gt $squirrelSmokeSource.IndexOf('Previous silent Setup') `
+        -and $squirrelSmokeSource.Contains('Assert-AssociationKeyEmpty') `
+        -and $squirrelSmokeSource.Contains('Assert-AssociationKeyAbsent') `
+        -and $squirrelSmokeSource.Contains('Empty association-key silent Setup') `
+        -and $squirrelSmokeSource.Contains('Absent association-key silent Setup') `
+        -and $squirrelSmokeSource.Contains('Verified originally empty per-user .torrent and magnet association keys remain present and empty after uninstall.') `
+        -and $squirrelSmokeSource.Contains('Verified originally absent per-user .torrent and magnet association keys remain absent after uninstall.') `
+        -and $squirrelSmokeSource.Contains('Squirrel.Association.Sentinel') `
+        -and $squirrelSmokeSource.Contains('[Microsoft.Win32.RegistryValueKind]::ExpandString') `
+        -and $squirrelSmokeSource.Contains('Verified exact restoration of pre-existing per-user .torrent and magnet association values.') `
+        -and $squirrelSmokeSource.Contains('$expectedDeltaCount = if ($upgradeExpected) { 1 } else { 0 }') `
+        -and $squirrelSmokeSource.Contains('qbt-material-delta-only-') `
+        -and $squirrelSmokeSource.Contains('--update=$deltaOnlyFeed') `
+        -and $squirrelSmokeSource.Contains('Repacking into full package:') `
+        -and $squirrelSmokeSource.Contains('downloaded and applied the current delta without a full-package fallback.') `
+        -and $squirrelSmokeSource.Contains('@("--uninstall", "--silent")') `
+        -and $squirrelSmokeSource.Contains('gitExecutable -C $workspaceRoot fsck --strict')) `
+    "installed-package smoke covers Setup, shortcuts, delta-only upgrade without full fallback, association restoration, recovery, Git integrity, and uninstall"
+Test-Policy ($rootCMake.Contains('QBT_PACKAGE_VERSION') `
+        -and $rootCMake -notmatch '(?i)CPACK|NSIS' `
+        -and $buildHelperSource.Contains('scripts\build-squirrel-package.ps1') `
+        -and $buildHelperSource -notmatch '(?i)CPACK|NSIS|makensis' `
+        -and -not (Test-Path -LiteralPath `
+            (Get-RepositoryPath "installer/file_associations_install.nsh")) `
+        -and -not (Test-Path -LiteralPath `
+            (Get-RepositoryPath "installer/file_associations_uninstall.nsh"))) `
+    "CMake and the one-click package path use Squirrel without retaining the dead NSIS/CPack path"
 $releaseSelectorSource = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "scripts/select-release-dim-sum.ps1")
-Test-Policy ($releaseSelectorSource.Contains('for ($attempt = 1; $attempt -le 3; ++$attempt)') `
-        -and $releaseSelectorSource.Contains('Start-Sleep -Seconds ($attempt * 2)')) `
-    "dim-sum release allocation retries transient release-note reads"
+Test-Policy ($releaseSelectorSource.Contains('Ding-Ding-Projects/dim-sum-photos') `
+        -and $releaseSelectorSource.Contains('Invoke-GhJson') `
+        -and $releaseSelectorSource.Contains('$ghTimeoutMilliseconds = 60000') `
+        -and $releaseSelectorSource.Contains('^catalog-v1(?:-part-[0-9]{3})?$') `
+        -and $releaseSelectorSource.Contains('$History.Digests.Contains($Asset.Digest)') `
+        -and $releaseSelectorSource.Contains('dim-sum-id:') `
+        -and $releaseSelectorSource.Contains('Dim-sum code name:') `
+        -and $releaseSelectorSource.Contains('CatalogFixturePath') `
+        -and $releaseSelectorSource.Contains('catalogBlobSha = $BlobSha') `
+        -and $releaseSelectorSource.Contains('New-Result -Available $false') `
+        -and $releaseSelectorSource -notmatch 'Invoke-WebRequest|Invoke-RestMethod') `
+    "dim-sum release allocation uses bounded gh-only public provenance, legacy-use inference, offline fixtures, and version-only fallback"
 if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {
     $workflow = Get-Content -Raw -LiteralPath $workflowPath
     $workflowLines = @(Get-Content -LiteralPath $workflowPath)
@@ -1260,7 +1845,7 @@ if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {
     $policyStep = $stepLines["Run desktop policy and content-integrity tests"]
     $buildStep = $stepLines["Build"]
     $runtimeStep = $stepLines["Run built QML startup smoke test"]
-    $packageStep = $stepLines["Build and verify the NSIS installer"]
+    $packageStep = $stepLines["Build and verify the Squirrel installer and update feed"]
     $publishStep = $stepLines["Publish one immutable non-draft release"]
     Test-Policy ($null -ne $policyStep -and $null -ne $buildStep `
             -and $null -ne $packageStep -and $null -ne $publishStep `
@@ -1274,8 +1859,8 @@ if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {
         "the built QML startup smoke test runs against a deployed runtime before packaging"
 
     $tokenPattern = 'secrets\.RELEASE_TOKEN\s*\|\|\s*secrets\.ORG_TOKEN\s*\|\|\s*secrets\.GITHUB_TOKEN'
-    Test-Policy (([regex]::Matches($workflow, $tokenPattern)).Count -eq 3) `
-        "release identity, dim-sum allocation, and publication use the token fallback order"
+    Test-Policy (([regex]::Matches($workflow, $tokenPattern)).Count -eq 4) `
+        "release identity, prior-feed download, dim-sum allocation, and publication use the token fallback order"
     Test-Policy ($workflow -match 'Measure hosted runner resources') `
         "the workflow measures the hosted runner before relying on it"
     Test-Policy ($workflow -match 'GITHUB_WORKSPACE' -and $workflow -match 'RUNNER_TEMP') `
@@ -1286,13 +1871,77 @@ if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {
             -and $workflow -match 'Project line count' `
             -and $workflow -match 'LINE_COUNT_PATH') `
         "the release notes include the committed CI line-count table"
+    Test-Policy ($workflow -match 'gh api --include' `
+            -and $workflow -match '\$latestStatus -eq 404' `
+            -and $workflow -match 'Latest-release discovery failed closed' `
+            -and $workflow -match 'partial or ambiguous Squirrel feed' `
+            -and $workflow -match 'mismatched full-package and Setup versions' `
+            -and $workflow -match 'PREVIOUS_FEED_AVAILABLE') `
+        "prior-feed discovery permits only a proven 404 and requires a complete version-matched feed"
+    Test-Policy ($workflow -match 'SQUIRREL_SIGN_WITH_PARAMS:.*secrets\.SQUIRREL_SIGN_WITH_PARAMS' `
+            -and $workflow -match '\$packageArguments\.SignWithParams' `
+            -and $workflow -match 'steps\.package\.outputs\.signed' `
+            -and $workflow -match 'raw releasify arguments' `
+            -and $workflow -match 'Authenticode signature:' `
+            -and $workflow -match 'Not applied; update authenticity is enforced') `
+        "optional Authenticode uses only non-secret store selectors and release notes state its verified or unapplied status"
+    Test-Policy ($workflow -match 'SQUIRREL_FEED_SIGNING_PRIVATE_KEY_B64:.*secrets\.SQUIRREL_FEED_SIGNING_PRIVATE_KEY_B64' `
+            -and $workflow -match 'resources/updates/squirrel-feed-public-key\.json' `
+            -and $workflow -match 'ImportPkcs8PrivateKey' `
+            -and $workflow -match 'RSASSA-PKCS1_v1_5-SHA256|RSASSA-PKCS1-v1_5-SHA256' `
+            -and $workflow -match 'SignData\(' `
+            -and $workflow -match 'VerifyData\(' `
+            -and $workflow -match 'RELEASES\.sig' `
+            -and $workflow -match '4479439dfb5bce538ab92e492dd677628060c8558d4c49ac7b253f3eeb4f36e8') `
+        "publication requires an exact-byte RSA-SHA256 RELEASES signature bound to the committed public-key fingerprint"
+    Test-Policy ($workflow -match 'publishedAsset\.digest' `
+            -and $workflow -match 'publishedAsset\.size' `
+            -and $workflow -match 'gh release download \$env:RELEASE_TAG' `
+            -and $workflow -match 'Redownloaded Squirrel Setup differs from the exact locally tested bytes' `
+            -and $workflow -match 'Redownloaded RELEASES/signature bytes differ' `
+            -and $workflow -match 'Redownloaded RELEASES\.sig failed committed-public-key verification') `
+        "published assets retain tested sizes/digests and redownloaded Setup plus signed feed bytes are verified exactly"
+    Test-Policy ($workflow -match 'master-updater' `
+            -and $workflow -match 'feature-preview' `
+            -and $workflow -match '"v\$packageVersion"' `
+            -and $workflow -match 'Get-PublishedMasterSquirrelReleases' `
+            -and $workflow -match 'gh release edit \$expectedLatest\.TagName' `
+            -and $workflow -match 'releases/latest' `
+            -and $workflow -match 'latestChannelStable') `
+        "out-of-order runs preserve immutable releases while the highest master Squirrel version owns latest"
+    $releaseCreateOffset = $workflow.IndexOf('gh release create $env:RELEASE_TAG')
+    $workflowCompletedOffset = $workflow.IndexOf(
+        '$workflowCompleted = [DateTimeOffset]::FromUnixTimeSeconds',
+        [Math]::Max(0, $releaseCreateOffset))
+    $timingEditOffset = $workflow.IndexOf(
+        'gh release edit $env:RELEASE_TAG',
+        [Math]::Max(0, $workflowCompletedOffset))
+    Test-Policy ($workflow -match '(?m)^\s*actions:\s*read\s*$' `
+            -and $workflow -match 'gh run view \$env:GITHUB_RUN_ID' `
+            -and $workflow -match '--json jobs' `
+            -and $workflow -match '\.startedAt' `
+            -and $workflow -match 'Workflow started:' `
+            -and $workflow -match 'Workflow completed:' `
+            -and $workflow -match 'Workflow duration:' `
+            -and $workflow -match 'yyyy-MM-dd''T''HH:mm:ss''Z''' `
+            -and $workflow -match '\{0:D2\}:\{1:D2\}:\{2:D2\}' `
+            -and $releaseCreateOffset -ge 0 `
+            -and $workflowCompletedOffset -gt $releaseCreateOffset `
+            -and $timingEditOffset -gt $workflowCompletedOffset `
+            -and $workflow -match '\$missingTimingLines\.Count -ne 0') `
+        "release notes verify first-job-to-publication workflow timestamps and stable HH:mm:ss duration"
     Test-Policy ($workflow -match 'select-release-dim-sum\.ps1' `
-            -and $workflow -match 'resources/dim-sum/index\.json' `
+            -and $workflow -match 'Stamp the selected public release identity into the desktop build' `
             -and $workflow -match 'DIM_SUM_CODE_NAME' `
-            -and $workflow -match 'DIM_SUM_PATH') `
-        "the release selects a verified catalog photo and a non-repeating code name"
+            -and $workflow -match 'DIM_SUM_PHOTO_URL' `
+            -and $workflow -match 'DIM_SUM_CATALOG_REVISION' `
+            -and $workflow -match 'Public dim-sum photo:' `
+            -and $workflow -match 'version-only release' `
+            -and $workflow -notmatch 'DIM_SUM_PATH') `
+        "the release stamps a public catalog identity, links its photo, and permits a truthful version-only fallback without attaching a copied image"
     Test-Policy ($workflow -match '--latest=false' `
-            -and $workflow -match 'GITHUB_REF_NAME -eq "master"') `
+            -and $workflow -match '\$isNewestMasterPackage = \$env:GITHUB_REF_NAME -eq ''master''' `
+            -and $workflow -match '''feature-preview''') `
         "feature-branch releases cannot silently become the latest release"
     Test-Policy (([regex]::Matches($workflow, '(?m)^\s*gh release create\s')).Count -eq 1) `
         "the workflow has exactly one GitHub Release creation command"
@@ -1309,18 +1958,34 @@ if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {
     Test-Policy ($workflow -match 'actions/setup-python@[0-9a-f]{40}' `
             -and $workflow -match 'jurplel/install-qt-action/action@[0-9a-f]{40}') `
         "the Qt installer bypasses its mutable wrapper dependencies"
-    Test-Policy ($workflow -match 'qoffscreen\.dll' `
-            -and $workflow -match 'qoffscreend\.dll' `
-            -and $workflow -match 'RedirectStandardOutput' `
-            -and $workflow -match 'Write-SmokeOutput') `
+    Test-Policy ($squirrelSmokeSource -match 'qoffscreen\.dll' `
+            -and $squirrelSmokeSource -match 'qoffscreend\.dll' `
+            -and $squirrelSmokeSource -match 'RedirectStandardOutput' `
+            -and $squirrelSmokeSource -match 'Write-SmokeOutput') `
         "installed-package smoke tests assert release plugins and retain launch diagnostics"
+    Test-Policy ($workflow -notmatch '(?i)NSIS|\bcpack\b' `
+            -and $workflow -match 'QBT_PACKAGE_VERSION=\$packageVersion' `
+            -and $workflow -match 'steps\.package\.outputs\.releases' `
+            -and $workflow -match 'steps\.package\.outputs\.fullPackage' `
+            -and $workflow -match 'steps\.package\.outputs\.deltaPackage') `
+        "the workflow publishes one monotonic Squirrel Setup plus full, delta-when-available, and RELEASES update assets"
     Test-Policy ($workflow -match '(?ms)name:\s*Check out the pushed commit.*?fetch-depth:\s*0') `
         "the release checkout includes full history for changelog commit validation"
     Test-Policy ($workflow -notmatch '--draft|--prerelease') `
         "the release command cannot request a draft or prerelease"
     Test-Policy ($workflow -notmatch '--clobber') "the workflow never clobbers a release asset"
-    Test-Policy ($workflow -notmatch 'gh release upload') "the workflow never mutates an existing release"
+    Test-Policy ($workflow -notmatch 'gh release upload') `
+        "the workflow never uploads assets into an existing release"
     Test-Policy ($workflow -notmatch '(?i)\btui\b') "the workflow remains Windows-desktop-only"
+}
+
+try {
+    & (Join-Path $PSScriptRoot 'test-unofficial-plugin-catalog.ps1')
+    Test-Policy $true "the verified unofficial-plugin catalog covers every canonical wiki entry and is integrated safely"
+}
+catch {
+    Write-Host "  catalog policy detail: $($_.Exception.Message)"
+    Test-Policy $false "the verified unofficial-plugin catalog covers every canonical wiki entry and is integrated safely"
 }
 
 if ($failures.Count -gt 0) {

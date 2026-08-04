@@ -21,6 +21,7 @@ import qBittorrent
 Sheet {
     id: root
     sheetWidth: 620
+    accessibleName: qsTr("Regex Builder")
 
     property var filterProxy: null
     property string pattern: "(19|20)\\d{2}"
@@ -126,12 +127,15 @@ Sheet {
         Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.color("outlineVariant") }
 
         ScrollView {
+            id: builderScroll
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
+            contentWidth: availableWidth
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
             ColumnLayout {
-                width: Math.max(0, root.sheetWidth - Spacing.xl * 2)
+                width: Math.max(0, builderScroll.availableWidth)
                 spacing: Spacing.md
 
                 Item { Layout.preferredHeight: 1 }

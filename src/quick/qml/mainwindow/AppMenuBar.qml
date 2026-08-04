@@ -237,6 +237,7 @@ ToolButton {
         MenuSeparator {}
         IconMenuItem { action: menuBar.shell.actionManageCookies; glyph: Icons.cookie }
         IconMenuItem { action: menuBar.shell.actionOptions; glyph: Icons.settings }
+        IconMenuItem { action: menuBar.shell.actionCommandPalette; glyph: Icons.search }
         MenuSeparator {}
 
         Menu {

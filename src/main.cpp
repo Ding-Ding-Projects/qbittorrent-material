@@ -30,6 +30,7 @@
 
 #include "base/logging.h"
 #include "app/application.h"
+#include "app/squirrellifecycle.h"
 
 using namespace Qt::StringLiterals;
 
@@ -49,6 +50,16 @@ int main(int argc, char *argv[])
     {
         // --- 2. Construct the application (engine init happens inside). --------
         Application app(argc, argv);
+
+        // Squirrel lifecycle hooks must finish quickly, before engine/QML boot.
+        // The normal --squirrel-firstrun path intentionally continues below.
+        if (const std::optional<int> lifecycleExit =
+                SquirrelLifecycle::handle(QCoreApplication::arguments()))
+        {
+            qCInfo(lcApp) << "Squirrel lifecycle complete; exit code ="
+                          << *lifecycleExit;
+            return *lifecycleExit;
+        }
 
         // --- 3. Single-instance guard. ---------------------------------------
         // If another primary instance already owns the lock, forward our

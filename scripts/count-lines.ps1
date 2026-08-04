@@ -82,9 +82,22 @@ function Test-AgentCommit {
     if ($agentCommitCache.ContainsKey($Commit)) {
         return $agentCommitCache[$Commit]
     }
-    $message = @(& git -C $RepositoryRoot show -s --format="%an%n%B" $Commit)
-    $isAgent = ($message -join "`n") -match '(?im)(^|\n)(?:codex|claude|openai|automation|agent|bot)(?:$|\n)' `
-        -or ($message -join "`n") -match '(?im)^\s*Co-Authored-By:.*(?:codex|claude|openai|automation|agent|bot)'
+    $metadata = @(& git -C $RepositoryRoot show -s --format="%an%n%ae%n%B" $Commit)
+    $authorName = if ($metadata.Count -ge 1) { [string]$metadata[0] } else { "" }
+    $authorEmail = if ($metadata.Count -ge 2) { [string]$metadata[1] } else { "" }
+    $message = $metadata -join "`n"
+
+    # Keep author detection conservative: exact known automation identities,
+    # explicit agent product names, and GitHub's unambiguous [bot] suffix. A
+    # person's ordinary account or noreply address is never automation merely
+    # because an agent happened to make a commit with that configured identity;
+    # those commits need the explicit Co-Authored-By trailer checked below.
+    $automationNamePattern = '(?i)^(?:codex(?:\s+.+)?|openai(?:\s+codex)?|claude(?:\s+(?:code|opus)(?:\s+\d+)?)?|github[ -]actions|copilot|dependabot|renovate|automation|agent|bot|.+\[bot\])$'
+    $automationEmailPattern = '(?i)^(?:codex|claude|openai|github-actions|copilot|dependabot|renovate)(?:\[bot\])?@'
+    $isAutomationAuthor = ($authorName -match $automationNamePattern) `
+        -or ($authorEmail -match $automationEmailPattern)
+    $hasAgentCoAuthor = $message -match '(?im)^\s*Co-Authored-By:.*(?:codex|claude|openai|automation|agent|bot)'
+    $isAgent = $isAutomationAuthor -or $hasAgentCoAuthor
     $agentCommitCache[$Commit] = $isAgent
     return $isAgent
 }
@@ -114,6 +127,10 @@ $records = [System.Collections.Generic.List[object]]::new()
 foreach ($relativePath in $tracked) {
     if ([string]::IsNullOrWhiteSpace($relativePath)) { continue }
     $fullPath = Join-Path $RepositoryRoot ($relativePath -replace '/', [IO.Path]::DirectorySeparatorChar)
+    # `git ls-files` includes paths staged for deletion until the next commit.
+    # They are not part of the release tree that this invocation can measure,
+    # so omit them instead of trying to read a file that no longer exists.
+    if (-not (Test-Path -LiteralPath $fullPath)) { continue }
     $category = Get-Category $relativePath
     # A Git submodule is represented by a tracked gitlink, not a readable file
     # in the superproject. Keep it visible in Excluded without descending into
@@ -149,6 +166,7 @@ foreach ($relativePath in $tracked) {
         Lines = $stats.Lines
         NonBlank = $stats.NonBlank
         AgentLines = $blame.AgentLines
+        HumanLines = $stats.Lines - $blame.AgentLines
     })
 }
 
@@ -161,6 +179,7 @@ $rows = foreach ($categoryName in $orderedCategories) {
         Lines = [int64](($items | Measure-Object -Property Lines -Sum).Sum)
         NonBlank = [int64](($items | Measure-Object -Property NonBlank -Sum).Sum)
         AgentLines = [int64](($items | Measure-Object -Property AgentLines -Sum).Sum)
+        HumanLines = [int64](($items | Measure-Object -Property HumanLines -Sum).Sum)
     }
 }
 
@@ -171,6 +190,7 @@ $project = [pscustomobject]@{
     Lines = [int64](($projectRows | Measure-Object -Property Lines -Sum).Sum)
     NonBlank = [int64](($projectRows | Measure-Object -Property NonBlank -Sum).Sum)
     AgentLines = [int64](($projectRows | Measure-Object -Property AgentLines -Sum).Sum)
+    HumanLines = [int64](($projectRows | Measure-Object -Property HumanLines -Sum).Sum)
 }
 $excluded = $rows | Where-Object { $_.Scope -eq "Excluded" }
 $grand = [pscustomobject]@{
@@ -179,10 +199,12 @@ $grand = [pscustomobject]@{
     Lines = [int64](($rows | Measure-Object -Property Lines -Sum).Sum)
     NonBlank = [int64](($rows | Measure-Object -Property NonBlank -Sum).Sum)
     AgentLines = [int64](($rows | Measure-Object -Property AgentLines -Sum).Sum)
+    HumanLines = [int64](($rows | Measure-Object -Property HumanLines -Sum).Sum)
 }
 $blameTotal = [int64](($records | Measure-Object -Property Lines -Sum).Sum)
-if ($blameTotal -ne $grand.Lines -or $grand.AgentLines -gt $grand.Lines) {
-    throw "Line-count arithmetic is inconsistent: records=$blameTotal, total=$($grand.Lines), agent=$($grand.AgentLines)."
+if ($blameTotal -ne $grand.Lines `
+        -or ($grand.AgentLines + $grand.HumanLines) -ne $grand.Lines) {
+    throw "Line-count arithmetic is inconsistent: records=$blameTotal, total=$($grand.Lines), agent=$($grand.AgentLines), human=$($grand.HumanLines)."
 }
 
 $commit = (& git -C $RepositoryRoot rev-parse HEAD).Trim()
@@ -195,7 +217,9 @@ $result = [pscustomobject]@{
         Rule = "Surviving physical lines attributed by git blame; automation identities or agent Co-Authored-By trailers count as agent-written."
         BlameLines = $blameTotal
         AgentLines = $grand.AgentLines
-        ArithmeticAgrees = ($blameTotal -eq $grand.Lines)
+        HumanLines = $grand.HumanLines
+        ArithmeticAgrees = ($blameTotal -eq $grand.Lines `
+            -and ($grand.AgentLines + $grand.HumanLines) -eq $grand.Lines)
     }
     Exclusions = "Vendored and third-party trees, dependency directories, lockfiles, build output, and binary assets are excluded from project code; the Excluded row remains visible."
 }
@@ -209,14 +233,14 @@ Write-Output "# Project line count"
 Write-Output ""
 Write-Output "Commit: $commit"
 Write-Output ""
-Write-Output "| Scope | Files | Lines | Non-blank lines | Agent-written physical lines |"
-Write-Output "| --- | ---: | ---: | ---: | ---: |"
+Write-Output "| Scope | Files | Lines | Non-blank lines | Agent-written physical lines | Human-written physical lines |"
+Write-Output "| --- | ---: | ---: | ---: | ---: | ---: |"
 foreach ($row in $rows) {
-    Write-Output "| $($row.Scope) | $($row.Files) | $($row.Lines) | $($row.NonBlank) | $($row.AgentLines) |"
+    Write-Output "| $($row.Scope) | $($row.Files) | $($row.Lines) | $($row.NonBlank) | $($row.AgentLines) | $($row.HumanLines) |"
 }
-Write-Output "| **Project total** | **$($project.Files)** | **$($project.Lines)** | **$($project.NonBlank)** | **$($project.AgentLines)** |"
-Write-Output "| **Grand total (tracked text)** | **$($grand.Files)** | **$($grand.Lines)** | **$($grand.NonBlank)** | **$($grand.AgentLines)** |"
+Write-Output "| **Project total** | **$($project.Files)** | **$($project.Lines)** | **$($project.NonBlank)** | **$($project.AgentLines)** | **$($project.HumanLines)** |"
+Write-Output "| **Grand total (tracked text)** | **$($grand.Files)** | **$($grand.Lines)** | **$($grand.NonBlank)** | **$($grand.AgentLines)** | **$($grand.HumanLines)** |"
 Write-Output ""
 Write-Output "Attribution rule: $($result.Attribution.Rule)"
-Write-Output "Arithmetic check: blame lines $blameTotal = grand-total lines $($grand.Lines)"
+Write-Output "Arithmetic check: agent lines $($grand.AgentLines) + human lines $($grand.HumanLines) = blame/grand-total lines $blameTotal"
 Write-Output "Exclusions: $($result.Exclusions)"

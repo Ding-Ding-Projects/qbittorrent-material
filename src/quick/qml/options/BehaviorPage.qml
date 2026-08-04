@@ -41,6 +41,10 @@ Flickable {
     component OptCheck: CheckBox {
         property string settingKey: ""
         property bool defaultValue: false
+        property string paletteSettingKey: settingKey
+        property string paletteSettingTitle: text
+        property string paletteSettingKind: "toggle"
+        property var paletteSettingDefault: defaultValue
         font: Typography.bodyMedium
         checked: (root.rev, OptionsController.value(settingKey, defaultValue))
         onToggled: {
@@ -85,6 +89,10 @@ Flickable {
                 Layout.fillWidth: true
                 ComboBox {
                     id: languageBox
+                    property string paletteSettingKey: "language"
+                    property string paletteSettingTitle: qsTr("Language")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: I18n.language
                     Layout.fillWidth: true
                     Accessible.name: qsTr("Language")
                     model: [ I18n.displayName(0), I18n.displayName(1), I18n.displayName(2) ]
@@ -105,6 +113,10 @@ Flickable {
                     spacing: Spacing.sm
                     Slider {
                         id: englishFunnySlider
+                        property string paletteSettingKey: "englishFunnyLevel"
+                        property string paletteSettingTitle: qsTr("English funny level")
+                        property string paletteSettingKind: "destination"
+                        property var paletteSettingDefault: 1
                         Layout.fillWidth: true
                         from: 1
                         to: 5
@@ -134,6 +146,10 @@ Flickable {
                     spacing: Spacing.sm
                     Slider {
                         id: cantoneseFunnySlider
+                        property string paletteSettingKey: "cantoneseFunnyLevel"
+                        property string paletteSettingTitle: qsTr("Cantonese funny level")
+                        property string paletteSettingKind: "destination"
+                        property var paletteSettingDefault: 3
                         Layout.fillWidth: true
                         from: 1
                         to: 5
@@ -167,6 +183,8 @@ Flickable {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
                 Button {
+                    property string paletteActionKey: "reset-funny-levels"
+                    property string paletteActionTitle: text
                     text: qsTr("Reset funny levels")
                     flat: true
                     Accessible.name: text
@@ -195,6 +213,10 @@ Flickable {
             }
 
             CheckableGroupBox {
+                property string paletteSettingKey: "Preferences/General/UseCustomUITheme"
+                property string paletteSettingTitle: title
+                property string paletteSettingKind: "toggle"
+                property var paletteSettingDefault: false
                 title: qsTr("Use custom UI Theme")
                 Layout.fillWidth: true
                 checked: (root.rev, OptionsController.value("Preferences/General/UseCustomUITheme", false))
@@ -205,6 +227,10 @@ Flickable {
                     orientation: Qt.Vertical
                     Layout.fillWidth: true
                     PathField {
+                        property string paletteSettingKey: "Preferences/General/CustomUIThemePath"
+                        property string paletteSettingTitle: qsTr("UI Theme file")
+                        property string paletteSettingKind: "destination"
+                        property var paletteSettingDefault: ""
                         Layout.fillWidth: true
                         pickFolder: false
                         title: qsTr("Select qBittorrent UI Theme file")
@@ -219,6 +245,8 @@ Flickable {
                 Layout.fillWidth: true
                 spacing: Spacing.sm
                 Button {
+                    property string paletteActionKey: "customize-ui-theme"
+                    property string paletteActionTitle: text
                     text: qsTr("Customize UI Theme...")
                     // Legacy: enabled only when the custom-theme groupbox is OFF.
                     enabled: !(root.rev, OptionsController.value("Preferences/General/UseCustomUITheme", false))
@@ -270,6 +298,10 @@ Flickable {
                     defaultValue: false
                 }
                 ComboBox {
+                    property string paletteSettingKey: "Preferences/General/HideZeroComboValues"
+                    property string paletteSettingTitle: qsTr("When to hide zero and infinity values")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 0
                     enabled: hideZero.checked
                     model: [ qsTr("Always"), qsTr("Stopped torrents only") ]
                     currentIndex: (root.rev, OptionsController.value("Preferences/General/HideZeroComboValues", 0))
@@ -311,6 +343,10 @@ Flickable {
                 labelWidth: 180
                 Layout.fillWidth: true
                 ComboBox {
+                    property string paletteSettingKey: "Preferences/Downloads/DblClOnTorDl"
+                    property string paletteSettingTitle: qsTr("Downloading torrents double-click action")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 0
                     Layout.fillWidth: true
                     model: dblCard.dblClickItems
                     currentIndex: dblCard.indexForValue(
@@ -324,6 +360,10 @@ Flickable {
                 labelWidth: 180
                 Layout.fillWidth: true
                 ComboBox {
+                    property string paletteSettingKey: "Preferences/Downloads/DblClOnTorFn"
+                    property string paletteSettingTitle: qsTr("Completed torrents double-click action")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 1
                     Layout.fillWidth: true
                     model: dblCard.dblClickItems
                     currentIndex: dblCard.indexForValue(
@@ -379,6 +419,10 @@ Flickable {
                 labelWidth: 200
                 Layout.fillWidth: true
                 ComboBox {
+                    property string paletteSettingKey: "GUI/StartUpWindowState"
+                    property string paletteSettingTitle: qsTr("Window state on start up")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 0
                     Layout.fillWidth: true
                     model: [ qsTr("Normal"), qsTr("Minimized"), qsTr("Hidden") ]
                     currentIndex: (root.rev, OptionsController.value("GUI/StartUpWindowState", 0))
@@ -421,6 +465,8 @@ Flickable {
                     wrapMode: Text.WordWrap
                 }
                 Button {
+                    property string paletteActionKey: "open-windows-default-apps"
+                    property string paletteActionTitle: text
                     text: qsTr("Open Windows Default Apps settings page")
                     Accessible.name: text
                     Accessible.description: qsTr("Opens Windows Settings to choose default applications for file and link types")
@@ -432,6 +478,10 @@ Flickable {
             }
 
             CheckableGroupBox {
+                property string paletteSettingKey: "Preferences/General/SystrayEnabled"
+                property string paletteSettingTitle: title
+                property string paletteSettingKind: "toggle"
+                property var paletteSettingDefault: true
                 title: qsTr("Show qBittorrent in notification area")
                 Layout.fillWidth: true
                 checked: (root.rev, OptionsController.value("Preferences/General/SystrayEnabled", true))
@@ -452,6 +502,10 @@ Flickable {
                     labelWidth: 160
                     Layout.fillWidth: true
                     ComboBox {
+                        property string paletteSettingKey: "trayIconStyle"
+                        property string paletteSettingTitle: qsTr("Tray icon style")
+                        property string paletteSettingKind: "destination"
+                        property var paletteSettingDefault: ThemeManager.Normal
                         Layout.fillWidth: true
                         model: [ qsTr("Normal"), qsTr("Monochrome") ]
                         // Keep this choice inside the Options transaction.  The
@@ -485,6 +539,10 @@ Flickable {
 
         // ==== Log Files =======================================================
         CheckableGroupBox {
+            property string paletteSettingKey: "Application/FileLogger/Enabled"
+            property string paletteSettingTitle: title
+            property string paletteSettingKind: "toggle"
+            property var paletteSettingDefault: true
             title: qsTr("Log Files")
             Layout.fillWidth: true
             checked: (root.rev, OptionsController.value("Application/FileLogger/Enabled", true))
@@ -495,6 +553,10 @@ Flickable {
                 orientation: Qt.Vertical
                 Layout.fillWidth: true
                 PathField {
+                    property string paletteSettingKey: "Application/FileLogger/Path"
+                    property string paletteSettingTitle: qsTr("Log file save path")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: ""
                     Layout.fillWidth: true
                     title: qsTr("Choose a save directory")
                     path: (root.rev, OptionsController.value("Application/FileLogger/Path", ""))
@@ -512,6 +574,10 @@ Flickable {
                     defaultValue: true
                 }
                 SpinBox {
+                    property string paletteSettingKey: "Application/FileLogger/MaxSizeKiB"
+                    property string paletteSettingTitle: qsTr("Log backup size threshold")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 65
                     enabled: logBackup.checked
                     from: 1; to: 1024000; stepSize: 1; editable: true
                     value: (root.rev, OptionsController.value("Application/FileLogger/MaxSizeKiB", 65))
@@ -531,12 +597,20 @@ Flickable {
                     defaultValue: true
                 }
                 SpinBox {
+                    property string paletteSettingKey: "Application/FileLogger/Age"
+                    property string paletteSettingTitle: qsTr("Backup log maximum age")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 1
                     enabled: logDelete.checked
                     from: 1; to: 365; editable: true
                     value: (root.rev, OptionsController.value("Application/FileLogger/Age", 1))
                     onValueModified: OptionsController.setValue("Application/FileLogger/Age", value)
                 }
                 ComboBox {
+                    property string paletteSettingKey: "Application/FileLogger/AgeType"
+                    property string paletteSettingTitle: qsTr("Backup log age unit")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 1
                     enabled: logDelete.checked
                     model: [ qsTr("days"), qsTr("months"), qsTr("years") ]
                     currentIndex: (root.rev, OptionsController.value("Application/FileLogger/AgeType", 1))

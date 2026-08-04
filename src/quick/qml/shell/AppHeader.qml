@@ -341,10 +341,22 @@ Rectangle {
 
         // --- Panel buttons -----------------------------------------------------
         HeaderIconButton {
+            iconName: "search"
+            tooltip: qsTr("Command palette")
+            onClicked: root.shell.actionCommandPalette.trigger()
+        }
+        HeaderIconButton {
             iconName: "notifications"
             tooltip: qsTr("Notifications")
             active: root.activePanel === "notifications"
             badgeCount: root.unreadNotifications
+            Accessible.name: qsTr("Notifications") + ". "
+                + qsTr("%1 unread · %2 total")
+                    .arg(root.unreadNotifications).arg(NotificationCenter.count)
+            Accessible.description: active
+                ? qsTr("Notification center open")
+                : qsTr("Notification center closed")
+            Accessible.checked: active
             onClicked: root.panelRequested("notifications")
         }
         HeaderIconButton {

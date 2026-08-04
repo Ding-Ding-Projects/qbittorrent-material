@@ -22,6 +22,9 @@ Item {
     /*! Sheet content width (each design sheet specifies its own). */
     property int sheetWidth: 420
 
+    /*! Accessible name announced for the non-modal sheet surface. */
+    property string accessibleName: ""
+
     /*! Whether the sheet is open. Drive via the shell's panel state. */
     property bool open: false
 
@@ -39,31 +42,41 @@ Item {
         id: panel
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.rightMargin: Spacing.lg
+        anchors.rightMargin: parent.width >= Spacing.lg * 2 ? Spacing.lg : 0
         anchors.topMargin: 78 - Spacing.topBarHeight // parent starts below the header
-        width: root.sheetWidth
+        // A fixed requested width used to place part of the sheet off-screen at
+        // narrow logical sizes (most visibly at 200% display scale). Keep the
+        // normal width when it fits and otherwise consume the bounded viewport.
+        width: Math.min(root.sheetWidth,
+            Math.max(0, parent.width - anchors.rightMargin * 2))
         height: root.compactHeight
-            ? Math.min(contentHolder.childrenRect.height, parent.height - anchors.topMargin - Spacing.lg)
-            : parent.height - anchors.topMargin - Spacing.lg
+            ? Math.min(contentHolder.childrenRect.height,
+                Math.max(0, parent.height - anchors.topMargin - Spacing.lg))
+            : Math.max(0, parent.height - anchors.topMargin - Spacing.lg)
 
         radius: 24
         color: Theme.color("surface")
         border.width: 1
         border.color: Theme.color("outlineVariant")
         clip: true
+        Accessible.role: Accessible.Pane
+        Accessible.name: root.accessibleName
+        Accessible.ignored: root.accessibleName.length === 0 || !root.open
 
         opacity: root.open ? 1 : 0
         transform: Translate {
             x: root.open ? 0 : 24
             Behavior on x {
                 NumberAnimation {
-                    duration: 240
+                    duration: ThemeManager.reducedMotion ? 0 : 240
                     easing.type: Easing.BezierSpline
                     easing.bezierCurve: Spacing.easeStandard
                 }
             }
         }
-        Behavior on opacity { NumberAnimation { duration: 200 } }
+        Behavior on opacity {
+            NumberAnimation { duration: ThemeManager.reducedMotion ? 0 : 200 }
+        }
 
         // Soft drop shadow substitute: a slightly larger translucent halo.
         Rectangle {

@@ -43,6 +43,10 @@ Flickable {
         labelWidth: 440
         Layout.fillWidth: true
         CheckBox {
+            property string paletteSettingKey: advc.settingKey
+            property string paletteSettingTitle: advc.label
+            property string paletteSettingKind: "toggle"
+            property var paletteSettingDefault: advc.defaultValue
             checked: (root.rev, OptionsController.value(advc.settingKey, advc.defaultValue))
             onToggled: {
                 OptionsController.setValue(advc.settingKey, checked)
@@ -63,6 +67,10 @@ Flickable {
         labelWidth: 440
         Layout.fillWidth: true
         SpinBox {
+            property string paletteSettingKey: advs.settingKey
+            property string paletteSettingTitle: advs.label
+            property string paletteSettingKind: "destination"
+            property var paletteSettingDefault: advs.defaultValue
             editable: true
             from: advs.fromValue; to: advs.toValue
             value: (root.rev, OptionsController.value(advs.settingKey, advs.defaultValue))
@@ -88,6 +96,10 @@ Flickable {
         labelWidth: 440
         Layout.fillWidth: true
         ComboBox {
+            property string paletteSettingKey: advcb.settingKey
+            property string paletteSettingTitle: advcb.label
+            property string paletteSettingKind: "destination"
+            property var paletteSettingDefault: advcb.defaultValue
             Layout.fillWidth: true
             model: advcb.items
             currentIndex: (root.rev, OptionsController.value(advcb.settingKey, advcb.defaultValue))
@@ -103,6 +115,10 @@ Flickable {
         labelWidth: 440
         Layout.fillWidth: true
         TextField {
+            property string paletteSettingKey: advl.settingKey
+            property string paletteSettingTitle: advl.label
+            property string paletteSettingKind: "destination"
+            property var paletteSettingDefault: advl.defaultValue
             Layout.fillWidth: true
             placeholderText: advl.placeholder
             text: (root.rev, OptionsController.value(advl.settingKey, advl.defaultValue))
@@ -150,6 +166,10 @@ Flickable {
                 labelWidth: 440
                 Layout.fillWidth: true
                 ComboBox {
+                    property string paletteSettingKey: "BitTorrent/Session/Interface"
+                    property string paletteSettingTitle: qsTr("Network interface")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: ""
                     Layout.fillWidth: true
                     textRole: "text"
                     valueRole: "value"
@@ -163,6 +183,10 @@ Flickable {
                 labelWidth: 440
                 Layout.fillWidth: true
                 ComboBox {
+                    property string paletteSettingKey: "BitTorrent/Session/InterfaceAddress"
+                    property string paletteSettingTitle: qsTr("Optional IP address to bind to")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: ""
                     Layout.fillWidth: true
                     textRole: "text"
                     valueRole: "value"

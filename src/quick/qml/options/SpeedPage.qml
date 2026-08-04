@@ -36,6 +36,10 @@ Flickable {
     component OptCheck: CheckBox {
         property string settingKey: ""
         property bool defaultValue: false
+        property string paletteSettingKey: settingKey
+        property string paletteSettingTitle: text
+        property string paletteSettingKind: "toggle"
+        property var paletteSettingDefault: defaultValue
         font: Typography.bodyMedium
         checked: (root.rev, OptionsController.value(settingKey, defaultValue))
         onToggled: {
@@ -49,6 +53,7 @@ Flickable {
         id: pair
         property string upKey: ""
         property string downKey: ""
+        property string paletteTitlePrefix: ""
         Layout.fillWidth: true
         spacing: Spacing.sm
         LabeledField {
@@ -56,6 +61,10 @@ Flickable {
             labelWidth: 140
             Layout.fillWidth: true
             SpeedSpinBox {
+                property string paletteSettingKey: pair.upKey
+                property string paletteSettingTitle: pair.paletteTitlePrefix + " " + qsTr("upload rate limit")
+                property string paletteSettingKind: "destination"
+                property var paletteSettingDefault: 0
                 to: 2000000
                 unlimitedValue: 0
                 value: (root.rev, OptionsController.value(pair.upKey, 0))
@@ -67,6 +76,10 @@ Flickable {
             labelWidth: 140
             Layout.fillWidth: true
             SpeedSpinBox {
+                property string paletteSettingKey: pair.downKey
+                property string paletteSettingTitle: pair.paletteTitlePrefix + " " + qsTr("download rate limit")
+                property string paletteSettingKind: "destination"
+                property var paletteSettingDefault: 0
                 to: 2000000
                 unlimitedValue: 0
                 value: (root.rev, OptionsController.value(pair.downKey, 0))
@@ -92,6 +105,7 @@ Flickable {
             RatePair {
                 upKey: "BitTorrent/Session/GlobalUPSpeedLimit"
                 downKey: "BitTorrent/Session/GlobalDLSpeedLimit"
+                paletteTitlePrefix: qsTr("Global")
             }
         }
 
@@ -102,9 +116,14 @@ Flickable {
             RatePair {
                 upKey: "BitTorrent/Session/AlternativeGlobalUPSpeedLimit"
                 downKey: "BitTorrent/Session/AlternativeGlobalDLSpeedLimit"
+                paletteTitlePrefix: qsTr("Alternative")
             }
 
             CheckableGroupBox {
+                property string paletteSettingKey: "BitTorrent/Session/BandwidthSchedulerEnabled"
+                property string paletteSettingTitle: title
+                property string paletteSettingKind: "toggle"
+                property var paletteSettingDefault: false
                 title: qsTr("Schedule the use of alternative rate limits")
                 Layout.fillWidth: true
                 checked: (root.rev, OptionsController.value("BitTorrent/Session/BandwidthSchedulerEnabled", false))
@@ -117,6 +136,10 @@ Flickable {
                     // Minutes-since-midnight stored; edited as hh:mm.
                     SpinBox {
                         id: fromTime
+                        property string paletteSettingKey: "Preferences/Scheduler/start_time"
+                        property string paletteSettingTitle: qsTr("Alternative rate limits start time")
+                        property string paletteSettingKind: "destination"
+                        property var paletteSettingDefault: 480
                         from: 0; to: 1439; editable: true
                         value: (root.rev, OptionsController.value("Preferences/Scheduler/start_time", 480))
                         textFromValue: (v) => root._fmtTime(v)
@@ -130,6 +153,10 @@ Flickable {
                     Layout.fillWidth: true
                     SpinBox {
                         id: toTime
+                        property string paletteSettingKey: "Preferences/Scheduler/end_time"
+                        property string paletteSettingTitle: qsTr("Alternative rate limits end time")
+                        property string paletteSettingKind: "destination"
+                        property var paletteSettingDefault: 1200
                         from: 0; to: 1439; editable: true
                         value: (root.rev, OptionsController.value("Preferences/Scheduler/end_time", 1200))
                         textFromValue: (v) => root._fmtTime(v)
@@ -142,6 +169,10 @@ Flickable {
                     labelWidth: 100
                     Layout.fillWidth: true
                     ComboBox {
+                        property string paletteSettingKey: "Preferences/Scheduler/days"
+                        property string paletteSettingTitle: qsTr("Alternative rate limits schedule days")
+                        property string paletteSettingKind: "destination"
+                        property var paletteSettingDefault: 0
                         Layout.fillWidth: true
                         model: [ qsTr("Every day"), qsTr("Weekdays"), qsTr("Weekends"),
                                  qsTr("Monday"), qsTr("Tuesday"), qsTr("Wednesday"), qsTr("Thursday"),

@@ -46,6 +46,10 @@ Flickable {
     component OptCheck: CheckBox {
         property string settingKey: ""
         property bool defaultValue: false
+        property string paletteSettingKey: settingKey
+        property string paletteSettingTitle: text
+        property string paletteSettingKind: "toggle"
+        property var paletteSettingDefault: defaultValue
         font: Typography.bodyMedium
         checked: (root.rev, OptionsController.value(settingKey, defaultValue))
         onToggled: {
@@ -93,6 +97,10 @@ Flickable {
                 Layout.fillWidth: true
 
                 SpinBox {
+                    property string paletteSettingKey: "searchHistoryLength"
+                    property string paletteSettingTitle: qsTr("Search history length")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 50
                     from: 0
                     to: 500
                     editable: true
@@ -126,6 +134,10 @@ Flickable {
 
                     TextField {
                         id: pythonPathField
+                        property string paletteSettingKey: "pythonExecutablePath"
+                        property string paletteSettingTitle: qsTr("Python interpreter path")
+                        property string paletteSettingKind: "destination"
+                        property var paletteSettingDefault: ""
                         Layout.fillWidth: true
                         placeholderText: qsTr("Detected automatically")
                         selectByMouse: true
@@ -135,6 +147,8 @@ Flickable {
                     }
 
                     IconButton {
+                        property string paletteActionKey: "choose-python-interpreter"
+                        property string paletteActionTitle: tooltip
                         symbol: Icons.folder_open
                         tooltip: qsTr("Choose an interpreter")
                         onClicked: pythonDialog.open()
@@ -170,6 +184,8 @@ Flickable {
                 }
 
                 Button {
+                    property string paletteActionKey: "refresh-search-prerequisites"
+                    property string paletteActionTitle: text
                     text: qsTr("Check again")
                     flat: true
                     font: Typography.labelMedium

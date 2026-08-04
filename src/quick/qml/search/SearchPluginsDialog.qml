@@ -28,6 +28,134 @@ import qBittorrent
 Dialog {
     id: root
 
+    property string pendingPluginId: ""
+
+    function pluginStateText(row) {
+        var state = pluginsModel.pluginRecord(row).runtimeState || "not-installed"
+        if (state === "ready") return qsTr("Ready")
+        if (state === "waiting-python") return qsTr("Waiting for Python")
+        if (state === "stale-registration") return qsTr("Waiting for runtime refresh")
+        if (state === "quarantined") return qsTr("Quarantined")
+        if (state === "import-failed") return qsTr("Import failed")
+        if (state === "user-removed") return qsTr("Removed")
+        if (state === "not-installed") return qsTr("Not installed")
+        return state
+    }
+
+    function pluginIntegrityText(row) {
+        var state = pluginsModel.pluginRecord(row).integrityState || "unknown"
+        if (state === "verified-external") return qsTr("Verified")
+        if (state === "user-managed") return qsTr("User managed")
+        if (state === "user-modified") return qsTr("Modified")
+        if (state === "user-removed") return qsTr("Removed")
+        if (state === "missing") return qsTr("Missing")
+        return state
+    }
+
+    function pluginStateColor(row) {
+        var record = pluginsModel.pluginRecord(row)
+        if (record.runtimeState === "ready")
+            return record.enabled ? Theme.color("success") : Theme.color("onSurfaceVariant")
+        if (record.runtimeWaiting || record.runtimeState === "quarantined"
+                || record.runtimeState === "stale-registration")
+            return Theme.color("warning")
+        if (record.runtimeState === "import-failed")
+            return Theme.color("error")
+        return Theme.color("onSurfaceVariant")
+    }
+
+    function pluginHighlightColor(row) {
+        return pluginsModel.highlightedPluginId === pluginsModel.pluginId(row)
+            ? Qt.alpha(Theme.color("primaryContainer"), 0.9) : "transparent"
+    }
+
+    function revealPlugin(pluginId) {
+        if (!pluginId || !pluginId.length)
+            return false
+        pluginsModel.flushPendingInventory()
+        var row = pluginsModel.indexOfPlugin(pluginId)
+        if (row < 0)
+            return false
+        if (!pluginsModel.highlightPlugin(pluginId) || !pluginsTable.revealRow(row))
+            return false
+        pendingPluginId = ""
+        highlightClearTimer.restart()
+        return true
+    }
+
+    function openPlugin(pluginId) {
+        pendingPluginId = pluginId || ""
+        open()
+        Qt.callLater(function() { root.revealPlugin(root.pendingPluginId) })
+    }
+
+    function notifyPluginOperationSummary(summary) {
+        if (!summary)
+            return
+
+        var kind = summary.kind || "install"
+        var state = summary.state || "failed"
+        var requested = Number(summary.requested || 0)
+        var succeeded = Number(summary.succeeded || 0)
+        var failed = Number(summary.failed || 0)
+        var skipped = Number(summary.skipped || 0)
+        var message
+        var severity
+
+        if (kind === "catalog") {
+            var installed = Number(summary.newlyInstalled || 0)
+            var present = Number(summary.alreadyPresent || 0)
+            var removed = Number(summary.userRemoved || 0)
+            var awaiting = Number(summary.awaitingRuntime || 0)
+            if (summary.runtimeUnavailable) {
+                message = qsTr("Unofficial plugin files are ready on disk: %1 installed now, %2 already present, %3 kept removed, and %4 waiting for the search runtime. %5 Fix or select Python, then retry setup. %6 download failure(s) need attention. Per-plugin details remain in Search Plugins.")
+                    .arg(installed).arg(present).arg(removed).arg(awaiting)
+                    .arg(summary.runtimeError || qsTr("The search runtime is unavailable."))
+                    .arg(failed)
+                severity = "warning"
+            } else if (failed > 0) {
+                message = qsTr("Unofficial plugin setup finished with %1 failure(s): %2 installed, %3 already present, %4 kept removed. Open Search Plugins for the per-plugin diagnostics.")
+                    .arg(failed).arg(installed).arg(present).arg(removed)
+                severity = "warning"
+            } else {
+                message = qsTr("Unofficial plugin setup is ready: %1 installed, %2 already present, %3 kept removed.")
+                    .arg(installed).arg(present).arg(removed)
+                severity = "success"
+            }
+        } else if (state === "runtime-unavailable") {
+            message = qsTr("The search-plugin %1 operation was stopped before it could fan out across %2 item(s). %3 Fix or select Python, then retry once. Per-plugin state remains available in Search Plugins.")
+                .arg(kind === "update" ? qsTr("update") : kind === "runtime-recovery" ? qsTr("runtime recovery") : qsTr("install"))
+                .arg(requested)
+                .arg(summary.runtimeError || qsTr("The search runtime is unavailable."))
+            severity = "warning"
+        } else if (state === "no-updates") {
+            message = skipped > 0
+                ? qsTr("No installed search plugins need updates. %1 unavailable or deliberately removed catalog entry/entries were ignored.").arg(skipped)
+                : qsTr("All installed search plugins are already up to date.")
+            severity = "info"
+        } else if (failed > 0) {
+            message = qsTr("Search-plugin %1 finished: %2 succeeded, %3 failed, and %4 were skipped. Open Search Plugins for each plugin's diagnostic.")
+                .arg(kind === "update" ? qsTr("update") : kind === "runtime-recovery" ? qsTr("runtime recovery") : qsTr("install"))
+                .arg(succeeded).arg(failed).arg(skipped)
+            severity = state === "failed" ? "error" : "warning"
+        } else {
+            message = qsTr("Search-plugin %1 finished successfully for %2 item(s); %3 were skipped.")
+                .arg(kind === "update" ? qsTr("update") : kind === "runtime-recovery" ? qsTr("runtime recovery") : qsTr("install"))
+                .arg(succeeded).arg(skipped)
+            severity = "success"
+        }
+
+        NotificationCenter.notify(message, severity, qsTr("Search plugins"))
+        if (Number(summary.serial || 0) > 0)
+            SearchController.acknowledgePluginOperationSummary(summary.serial)
+    }
+
+    function replayPendingPluginOperationSummaries() {
+        var pending = SearchController.pendingPluginOperationSummaries || []
+        for (var i = 0; i < pending.length; ++i)
+            notifyPluginOperationSummary(pending[i])
+    }
+
     title: qsTr("Search plugins")
     modal: false
     parent: Overlay.overlay
@@ -46,33 +174,39 @@ Dialog {
 
     onOpened: {
         Log.debug("search", "SearchPluginsDialog opened")
-        pluginsModel.reload()
+        pluginsModel.flushPendingInventory()
+        replayPendingPluginOperationSummaries()
+        if (pendingPluginId.length)
+            Qt.callLater(function() { root.revealPlugin(root.pendingPluginId) })
     }
     onClosed: Log.debug("search", "SearchPluginsDialog closed")
 
-    SearchPluginsModel { id: pluginsModel }
+    SearchPluginsModel {
+        id: pluginsModel
+        inventory: SearchController.plugins
+    }
 
-    // Feedback from the controller (install/update/uninstall outcomes).
+    Timer {
+        id: highlightClearTimer
+        interval: 1800
+        repeat: false
+        onTriggered: pluginsModel.clearHighlight()
+    }
+
+    Connections {
+        target: pluginsModel
+        function onInventoryChanged() {
+            if (root.pendingPluginId.length)
+                Qt.callLater(function() { root.revealPlugin(root.pendingPluginId) })
+        }
+    }
+
+    // One notification per complete operation. Individual outcomes stay in the
+    // model/palette diagnostic fields and never fan out into a toast storm.
     Connections {
         target: SearchController
-        function onPluginInstalled(name) {
-            NotificationCenter.notify(qsTr("Search plugin \"%1\" installed").arg(SearchController.pluginFullName(name)), "success")
-        }
-        function onPluginInstallFailed(name, reason) {
-            NotificationCenter.notify(qsTr("Couldn't install \"%1\" search engine plugin. %2").arg(name).arg(reason), "error")
-        }
-        function onPluginUpdated(name) {
-            NotificationCenter.notify(qsTr("Search plugin \"%1\" updated").arg(SearchController.pluginFullName(name)), "success")
-        }
-        function onPluginUpdateFailed(name, reason) {
-            NotificationCenter.notify(qsTr("Couldn't update \"%1\" search engine plugin. %2").arg(name).arg(reason), "error")
-        }
-        function onPluginUpdatesChecked(hasUpdates) {
-            if (!hasUpdates)
-                NotificationCenter.notify(qsTr("All your plugins are already up to date."), "info")
-        }
-        function onPluginUpdateCheckFailed(reason) {
-            NotificationCenter.notify(qsTr("Sorry, couldn't check for plugin updates. %1").arg(reason), "error")
+        function onPluginOperationSummaryReady(summary) {
+            root.notifyPluginOperationSummary(summary)
         }
     }
 
@@ -80,9 +214,10 @@ Dialog {
         spacing: Spacing.md
 
         Label {
-            text: qsTr("Installed search plugins:")
+            text: qsTr("Search plugins: %1 known").arg(pluginsModel.count)
             font: Typography.titleMedium
             color: Theme.color("onSurface")
+            Accessible.name: text
         }
 
         // ---- Plugins table (with drag-drop install) ----------------------
@@ -123,15 +258,25 @@ Dialog {
                 columns: [
                     { role: "fullName", title: qsTr("Name"),    width: 240, align: Qt.AlignLeft, visible: true, resizable: true },
                     { role: "version",  title: qsTr("Version"), width: 90,  align: Qt.AlignLeft, visible: true, resizable: true },
-                    { role: "url",      title: qsTr("Url"),     width: 240, align: Qt.AlignLeft, visible: true, resizable: true },
+                    { role: "runtimeState", title: qsTr("State"), width: 150, align: Qt.AlignLeft, visible: true, resizable: true },
+                    { role: "integrityState", title: qsTr("Integrity"), width: 120, align: Qt.AlignLeft, visible: true, resizable: true },
+                    { role: "catalogSourceUrl", title: qsTr("Source"), width: 260, align: Qt.AlignLeft, visible: true, resizable: true },
+                    { role: "diagnostic", title: qsTr("Status details"), width: 260, align: Qt.AlignLeft, visible: true, resizable: true },
                     { role: "enabled",  title: qsTr("Enabled"), width: 90,  align: Qt.AlignHCenter, visible: true, resizable: false }
                 ]
                 delegateFor: (col) => {
                     if (col.role === "enabled") return enabledCell
                     if (col.role === "fullName") return nameCell
+                    if (col.role === "runtimeState") return stateCell
+                    if (col.role === "integrityState") return integrityCell
                     return textCell
                 }
                 onActivated: (row) => {
+                    if (!pluginsModel.isRegistered(row)) {
+                        pluginsModel.highlightPlugin(pluginsModel.pluginId(row))
+                        highlightClearTimer.restart()
+                        return
+                    }
                     var id = pluginsModel.pluginId(row)
                     var newState = !pluginsModel.isEnabled(row)
                     Log.info("search", "Double-click toggled plugin " + id + " -> " + newState)
@@ -140,10 +285,15 @@ Dialog {
                 onContextRequested: (row, pos) => {
                     var rows = pluginsTable.selectedRows.length > 0 ? pluginsTable.selectedRows : [row]
                     var ids = []
-                    for (var i = 0; i < rows.length; ++i)
-                        ids.push(pluginsModel.pluginId(rows[i]))
+                    for (var i = 0; i < rows.length; ++i) {
+                        if (pluginsModel.isRegistered(rows[i]))
+                            ids.push(pluginsModel.pluginId(rows[i]))
+                    }
+                    if (ids.length === 0)
+                        return
                     pluginMenu.pluginIds = ids
-                    pluginMenu.firstEnabled = pluginsModel.isEnabled(rows[0])
+                    pluginMenu.firstEnabled = pluginsModel.isEnabled(
+                        pluginsModel.indexOfPlugin(ids[0]))
                     pluginMenu.x = pos.x
                     pluginMenu.y = pos.y
                     pluginMenu.open()
@@ -157,6 +307,50 @@ Dialog {
             font: Typography.bodyMedium
             color: Theme.color("warning")
             text: qsTr("Warning: Be sure to comply with your country's copyright laws when downloading torrents from any of these search engines.")
+        }
+
+        Label {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            font: Typography.bodyMedium
+            color: Number(SearchController.unofficialPluginStatus.failed || 0) > 0
+                ? Theme.color("error")
+                : SearchController.unofficialPluginStatus.runtimeUnavailable
+                    ? Theme.color("warning") : Theme.color("onSurfaceVariant")
+            visible: Number(SearchController.unofficialPluginStatus.canonicalCount || 0) > 0
+                || SearchController.unofficialPluginStatus.state === "failed"
+            text: SearchController.unofficialPluginStatus.inProgress
+                ? qsTr("Verified unofficial catalog: %1 of %2 processed (%3 HTTPS sources available).")
+                    .arg(SearchController.unofficialPluginStatus.completed || 0)
+                    .arg(SearchController.unofficialPluginStatus.canonicalCount || 0)
+                    .arg(SearchController.unofficialPluginStatus.availableSourceCount || 0)
+                : SearchController.unofficialPluginStatus.runtimeUnavailable
+                    ? qsTr("Verified unofficial catalog: %1 file(s) ready on disk and waiting for the search runtime, %2 download failure(s), %3 kept removed. %4")
+                        .arg(SearchController.unofficialPluginStatus.awaitingRuntime || 0)
+                        .arg(SearchController.unofficialPluginStatus.failed || 0)
+                        .arg(SearchController.unofficialPluginStatus.userRemoved || 0)
+                        .arg(SearchController.unofficialPluginStatus.runtimeError || qsTr("The search runtime is unavailable."))
+                : qsTr("Verified unofficial catalog: %1 registered, %2 failure(s), %3 source link(s) unavailable but covered by verified alternatives.")
+                    .arg(SearchController.unofficialPluginStatus.registered || 0)
+                    .arg(SearchController.unofficialPluginStatus.failed || 0)
+                    .arg(SearchController.unofficialPluginStatus.unavailableSourceCount || 0)
+            Accessible.name: text
+        }
+
+        Label {
+            Layout.fillWidth: true
+            visible: (SearchController.unofficialPluginStatus.errors || []).length > 0
+            text: (SearchController.unofficialPluginStatus.errors || []).join("\n")
+            maximumLineCount: 4
+            elide: Text.ElideRight
+            wrapMode: Text.Wrap
+            font: Typography.bodySmall
+            color: Theme.color("error")
+            Accessible.name: text
+            ToolTip.visible: errorHover.hovered
+            ToolTip.text: text
+            ToolTip.delay: 350
+            HoverHandler { id: errorHover }
         }
 
         Label {
@@ -177,6 +371,7 @@ Dialog {
 
         Button {
             text: qsTr("Install a new one")
+            enabled: !SearchController.pluginOperationInProgress
             DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
             onClicked: {
                 Log.info("search", "Install a new plugin requested")
@@ -185,11 +380,23 @@ Dialog {
         }
         Button {
             text: qsTr("Check for updates")
+            enabled: !SearchController.pluginOperationInProgress
             DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
             onClicked: {
                 Log.info("search", "Check for plugin updates requested")
                 SearchController.checkForPluginUpdates()
             }
+        }
+        Button {
+            text: qsTr("Retry unofficial setup")
+            visible: !SearchController.unofficialPluginStatus.inProgress
+                && (SearchController.unofficialPluginStatus.state === "partial"
+                    || SearchController.unofficialPluginStatus.state === "failed"
+                    || SearchController.unofficialPluginStatus.state === "waiting-runtime")
+            enabled: visible
+            DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
+            Accessible.description: qsTr("Retry verified HTTPS downloads and plugin runtime validation without restarting the app")
+            onClicked: SearchController.retryUnofficialPluginSync()
         }
         Button {
             text: qsTr("Close")
@@ -206,6 +413,14 @@ Dialog {
             id: nameRoot
             anchors.fill: parent
             property var cell: parent
+
+            Rectangle {
+                anchors.fill: parent
+                color: root.pluginHighlightColor(nameRoot.cell.cellRow)
+                Behavior on color {
+                    ColorAnimation { duration: ThemeManager.reducedMotion ? 0 : Spacing.motionFast }
+                }
+            }
             Row {
                 anchors.left: parent.left
                 anchors.leftMargin: Spacing.sm
@@ -224,8 +439,7 @@ Dialog {
                     text: nameRoot.cell.value !== undefined ? ("" + nameRoot.cell.value) : ""
                     font: Typography.bodyMedium
                     elide: Text.ElideRight
-                    color: pluginsModel.isEnabled(nameRoot.cell.cellRow)
-                           ? StateColors.success : StateColors.error
+                    color: root.pluginStateColor(nameRoot.cell.cellRow)
                 }
             }
         }
@@ -233,16 +447,74 @@ Dialog {
 
     Component {
         id: textCell
-        Label {
-            text: (parent.value !== undefined && parent.value !== null) ? ("" + parent.value) : ""
-            font: Typography.bodyMedium
-            elide: Text.ElideRight
-            leftPadding: Spacing.sm
-            rightPadding: Spacing.sm
-            verticalAlignment: Text.AlignVCenter
-            horizontalAlignment: parent.cellAlign
+        Rectangle {
+            id: textRoot
             anchors.fill: parent
-            color: pluginsModel.isEnabled(parent.cellRow) ? StateColors.success : StateColors.error
+            property var cell: parent
+            color: root.pluginHighlightColor(cell.cellRow)
+            Behavior on color {
+                ColorAnimation { duration: ThemeManager.reducedMotion ? 0 : Spacing.motionFast }
+            }
+            Label {
+                anchors.fill: parent
+                text: (textRoot.cell.value !== undefined && textRoot.cell.value !== null)
+                    ? ("" + textRoot.cell.value) : ""
+                font: Typography.bodyMedium
+                elide: Text.ElideRight
+                leftPadding: Spacing.sm
+                rightPadding: Spacing.sm
+                verticalAlignment: Text.AlignVCenter
+                horizontalAlignment: textRoot.cell.cellAlign
+                color: root.pluginStateColor(textRoot.cell.cellRow)
+            }
+        }
+    }
+
+    Component {
+        id: stateCell
+        Rectangle {
+            id: stateRoot
+            anchors.fill: parent
+            property var cell: parent
+            color: root.pluginHighlightColor(cell.cellRow)
+            Behavior on color {
+                ColorAnimation { duration: ThemeManager.reducedMotion ? 0 : Spacing.motionFast }
+            }
+            Label {
+                anchors.fill: parent
+                text: root.pluginStateText(stateRoot.cell.cellRow)
+                font: Typography.bodyMedium
+                elide: Text.ElideRight
+                leftPadding: Spacing.sm
+                rightPadding: Spacing.sm
+                verticalAlignment: Text.AlignVCenter
+                color: root.pluginStateColor(stateRoot.cell.cellRow)
+                Accessible.name: text
+            }
+        }
+    }
+
+    Component {
+        id: integrityCell
+        Rectangle {
+            id: integrityRoot
+            anchors.fill: parent
+            property var cell: parent
+            color: root.pluginHighlightColor(cell.cellRow)
+            Behavior on color {
+                ColorAnimation { duration: ThemeManager.reducedMotion ? 0 : Spacing.motionFast }
+            }
+            Label {
+                anchors.fill: parent
+                text: root.pluginIntegrityText(integrityRoot.cell.cellRow)
+                font: Typography.bodyMedium
+                elide: Text.ElideRight
+                leftPadding: Spacing.sm
+                rightPadding: Spacing.sm
+                verticalAlignment: Text.AlignVCenter
+                color: root.pluginStateColor(integrityRoot.cell.cellRow)
+                Accessible.name: text
+            }
         }
     }
 
@@ -252,14 +524,32 @@ Dialog {
             id: enabledRoot
             anchors.fill: parent
             property var cell: parent
+
+            Rectangle {
+                anchors.fill: parent
+                color: root.pluginHighlightColor(enabledRoot.cell.cellRow)
+                Behavior on color {
+                    ColorAnimation { duration: ThemeManager.reducedMotion ? 0 : Spacing.motionFast }
+                }
+            }
             Switch {
                 anchors.centerIn: parent
+                visible: pluginsModel.isRegistered(enabledRoot.cell.cellRow)
                 checked: enabledRoot.cell.value === true
-                onToggled: {
+                Accessible.name: qsTr("Enable %1").arg(
+                    pluginsModel.pluginRecord(enabledRoot.cell.cellRow).label || qsTr("search plugin"))
+                onClicked: {
                     var id = pluginsModel.pluginId(enabledRoot.cell.cellRow)
                     Log.info("search", "Switch toggled plugin " + id + " -> " + checked)
                     SearchController.enablePlugin(id, checked)
                 }
+            }
+            Label {
+                anchors.centerIn: parent
+                visible: !pluginsModel.isRegistered(enabledRoot.cell.cellRow)
+                text: "—"
+                color: root.pluginStateColor(enabledRoot.cell.cellRow)
+                Accessible.name: root.pluginStateText(enabledRoot.cell.cellRow)
             }
         }
     }

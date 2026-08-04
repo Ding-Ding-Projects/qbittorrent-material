@@ -39,6 +39,10 @@ Flickable {
     component OptCheck: CheckBox {
         property string settingKey: ""
         property bool defaultValue: false
+        property string paletteSettingKey: settingKey
+        property string paletteSettingTitle: text
+        property string paletteSettingKind: "toggle"
+        property var paletteSettingDefault: defaultValue
         font: Typography.bodyMedium
         checked: (root.rev, OptionsController.value(settingKey, defaultValue))
         onToggled: {
@@ -71,6 +75,10 @@ Flickable {
                 labelWidth: 280
                 Layout.fillWidth: true
                 SpinBox {
+                    property string paletteSettingKey: "RSS/Session/RefreshInterval"
+                    property string paletteSettingTitle: qsTr("Feeds refresh interval")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 30
                     from: 1; to: 999999; editable: true
                     value: (root.rev, OptionsController.value("RSS/Session/RefreshInterval", 30))
                     textFromValue: (v, l) => Number(v).toLocaleString(l, 'f', 0) + " " + qsTr("min")
@@ -83,6 +91,10 @@ Flickable {
                 labelWidth: 280
                 Layout.fillWidth: true
                 SpinBox {
+                    property string paletteSettingKey: "RSS/Session/FetchDelay"
+                    property string paletteSettingTitle: qsTr("Same host request delay")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 2
                     from: 0; to: 2147483646; editable: true
                     value: (root.rev, OptionsController.value("RSS/Session/FetchDelay", 2))
                     textFromValue: (v, l) => Number(v).toLocaleString(l, 'f', 0) + " " + qsTr("sec")
@@ -95,6 +107,10 @@ Flickable {
                 labelWidth: 280
                 Layout.fillWidth: true
                 SpinBox {
+                    property string paletteSettingKey: "RSS/Session/MaxArticlesPerFeed"
+                    property string paletteSettingTitle: qsTr("Maximum number of articles per feed")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: 50
                     from: 1; to: 2147483646; editable: true
                     value: (root.rev, OptionsController.value("RSS/Session/MaxArticlesPerFeed", 50))
                     onValueModified: OptionsController.setValue("RSS/Session/MaxArticlesPerFeed", value)
@@ -112,6 +128,8 @@ Flickable {
                 defaultValue: false
             }
             Button {
+                property string paletteActionKey: "edit-auto-download-rules"
+                property string paletteActionTitle: text
                 text: qsTr("Edit auto downloading rules...")
                 onClicked: {
                     Log.info("ui", "RSS: edit auto-download rules requested")
@@ -139,6 +157,10 @@ Flickable {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 120
                 TextArea {
+                    property string paletteSettingKey: "RSS/AutoDownloader/SmartEpisodeFilter"
+                    property string paletteSettingTitle: qsTr("RSS smart episode filters")
+                    property string paletteSettingKind: "destination"
+                    property var paletteSettingDefault: ""
                     font: Typography.mono
                     placeholderText: qsTr("One filter per line")
                     text: (root.rev, OptionsController.value("RSS/AutoDownloader/SmartEpisodeFilter", ""))

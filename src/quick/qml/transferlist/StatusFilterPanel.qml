@@ -31,8 +31,54 @@ Column {
 
     /*! The shared \c TorrentFilterProxyModel. */
     property var proxy: null
+    property int rovingIndex: 0
+    property var statusValues: []
 
     spacing: 0
+    Accessible.role: Accessible.Grouping
+    Accessible.name: qsTr("Status filters")
+
+    function syncRovingIndex() {
+        if (statusRepeater.count <= 0) {
+            rovingIndex = -1
+            return
+        }
+        if (proxy) {
+            for (var i = 0; i < statusRepeater.count; ++i) {
+                if (statusValues[i] === proxy.statusFilter) {
+                    rovingIndex = i
+                    return
+                }
+            }
+        }
+        rovingIndex = Math.max(0, Math.min(rovingIndex, statusRepeater.count - 1))
+    }
+
+    function activateIndex(index, focusReason) {
+        if (statusRepeater.count <= 0)
+            return
+        var wrapped = ((index % statusRepeater.count) + statusRepeater.count)
+            % statusRepeater.count
+        var row = statusRepeater.itemAt(wrapped)
+        if (!row)
+            return
+        rovingIndex = wrapped
+        if (proxy && statusValues[wrapped] !== undefined)
+            proxy.statusFilter = statusValues[wrapped]
+        row.forceActiveFocus(focusReason)
+    }
+
+    function registerStatus(index, value) {
+        var next = statusValues.slice()
+        next[index] = value
+        statusValues = next
+    }
+
+    function moveSelection(fromIndex, delta) {
+        activateIndex(fromIndex + delta, Qt.TabFocusReason)
+    }
+
+    onProxyChanged: Qt.callLater(syncRovingIndex)
 
     // TorrentFilter::Status int -> the status glyph (DESIGN_SYSTEM §4).
     function _statusIcon(value) {
@@ -69,10 +115,26 @@ Column {
         }
     }
 
+    Connections {
+        target: root.proxy
+        ignoreUnknownSignals: true
+        function onStatusFilterChanged() { Qt.callLater(root.syncRovingIndex) }
+    }
+
+    Connections {
+        target: statusModel
+        function onModelReset() {
+            root.statusValues = []
+            Qt.callLater(root.syncRovingIndex)
+        }
+    }
+
     StatusFilterMenu { id: contextMenu; proxy: root.proxy }
 
     Repeater {
+        id: statusRepeater
         model: statusModel
+        onCountChanged: Qt.callLater(root.syncRovingIndex)
         delegate: ItemDelegate {
             id: rowItem
             required property int index
@@ -82,12 +144,38 @@ Column {
             height: Spacing.controlHeight
             padding: Spacing.xs
             hoverEnabled: true
-            activeFocusOnTab: true
+            activeFocusOnTab: rowItem.index === root.rovingIndex
+            Accessible.role: Accessible.RadioButton
+            Accessible.name: rowItem.model.label
+            Accessible.description: qsTr("%1 torrents").arg(rowItem.model.count)
+            Accessible.checked: rowItem.selected
+            Component.onCompleted: root.registerStatus(rowItem.index, rowItem.model.value)
+            onIndexChanged: root.registerStatus(rowItem.index, rowItem.model.value)
+            onActiveFocusChanged: {
+                if (activeFocus)
+                    root.rovingIndex = rowItem.index
+            }
+
+            Keys.onPressed: function(event) {
+                if (event.key === Qt.Key_Up || event.key === Qt.Key_Left) {
+                    root.moveSelection(rowItem.index, -1)
+                    event.accepted = true
+                } else if (event.key === Qt.Key_Down || event.key === Qt.Key_Right) {
+                    root.moveSelection(rowItem.index, 1)
+                    event.accepted = true
+                } else if (event.key === Qt.Key_Space || event.key === Qt.Key_Return
+                        || event.key === Qt.Key_Enter) {
+                    root.activateIndex(rowItem.index, Qt.ShortcutFocusReason)
+                    event.accepted = true
+                }
+            }
 
             background: Rectangle {
                 color: rowItem.selected ? Theme.color("surfaceWarm")
                                         : (rowPointer.containsMouse ? Theme.color("surfaceWarm") : "transparent")
                 radius: Spacing.radiusControl
+                border.width: rowItem.activeFocus ? 2 : 0
+                border.color: Theme.color("focusRing")
             }
 
             contentItem: RowLayout {
@@ -112,12 +200,6 @@ Column {
                 }
             }
 
-            onClicked: {
-                Log.info("ui", "Status filter -> " + model.label + " (" + model.value + ")");
-                if (root.proxy)
-                    root.proxy.statusFilter = model.value;
-            }
-
             MouseArea {
                 id: rowPointer
                 anchors.fill: parent
@@ -125,17 +207,21 @@ Column {
                 cursorShape: Qt.PointingHandCursor
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                 onClicked: (mouse) => {
-                    if (mouse.button === Qt.LeftButton) {
-                        if (root.proxy)
-                            root.proxy.statusFilter = rowItem.model.value;
-                    } else {
+                    if (mouse.button === Qt.RightButton) {
                         Log.debug("ui", "Status filter panel context menu");
                         contextMenu.popup();
+                        return
                     }
+                    Log.info("ui", "Status filter -> " + rowItem.model.label
+                        + " (" + rowItem.model.value + ")");
+                    root.activateIndex(rowItem.index, Qt.MouseFocusReason)
                 }
             }
         }
     }
 
-    Component.onCompleted: Log.debug("ui", "StatusFilterPanel ready")
+    Component.onCompleted: {
+        Log.debug("ui", "StatusFilterPanel ready")
+        Qt.callLater(syncRovingIndex)
+    }
 }

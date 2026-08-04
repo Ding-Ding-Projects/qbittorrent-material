@@ -67,9 +67,13 @@ namespace
     }
 }
 
+WorkspaceManager *WorkspaceManager::s_instance = nullptr;
+
 WorkspaceManager::WorkspaceManager(QObject *parent)
     : QAbstractListModel(parent)
 {
+    if (!s_instance)
+        s_instance = this;
     git_libgit2_init();
 
     const QString overrideRoot = qEnvironmentVariable("QBT_WORKSPACE_ROOT").trimmed();
@@ -114,6 +118,8 @@ WorkspaceManager::WorkspaceManager(QObject *parent)
 
 WorkspaceManager::~WorkspaceManager()
 {
+    if (s_instance == this)
+        s_instance = nullptr;
     m_saveTimer.stop();
     if (m_dirty)
     {
@@ -122,6 +128,11 @@ WorkspaceManager::~WorkspaceManager()
             qCWarning(lcUi) << "Workspace shutdown save failed:" << error;
     }
     git_libgit2_shutdown();
+}
+
+WorkspaceManager *WorkspaceManager::existingInstance()
+{
+    return s_instance;
 }
 
 int WorkspaceManager::rowCount(const QModelIndex &parent) const

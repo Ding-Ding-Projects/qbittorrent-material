@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>qBittorrentMaterial</id>
+    <version>$version$</version>
+    <title>qBittorrent Material</title>
+    <authors>qBittorrent Material contributors</authors>
+    <owners>qBittorrent Material contributors</owners>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <projectUrl>https://github.com/Ding-Ding-Projects/qbittorrent-material</projectUrl>
+    <description>A Qt Quick Material desktop BitTorrent client.</description>
+    <summary>A Qt Quick Material desktop BitTorrent client.</summary>
+    <copyright>Copyright qBittorrent Material contributors</copyright>
+    <tags>qbittorrent bittorrent material windows desktop</tags>
+  </metadata>
+  <files>
+    <!-- Squirrel.Windows strips lib/net45 when it expands an application
+         package. The packaging helper flattens CMake's bin/ directory first,
+         because Squirrel generates native execution stubs and shortcuts only
+         for top-level executables. qt.conf, plugins/, and qml/ remain beside
+         that top-level executable. -->
+    <file src="**\*" target="lib\net45" />
+  </files>
+</package>

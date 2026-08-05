@@ -50,6 +50,21 @@ the user cannot control:
 The record of what has been seeded lives in the `SearchEngines/seededPlugins`
 preference. Deleting that key makes the next launch restore the full bundled set.
 
+## Startup presentation and responsiveness
+
+Capability probing, catalog downloads, hashing, and runtime registration stay
+asynchronous. Catalog progress is published through its lightweight status
+property, while the expensive plugin inventory used by the live command palette
+is refreshed only after a batch settles. Ordinary plugin changes are coalesced
+on a short GUI-timer window, so a row-by-row catalog update cannot rebuild
+hundreds of QML command objects or re-hash every candidate on the GUI thread.
+The final catalog signal still refreshes the complete inventory immediately, so
+the Search Plugins dialog and palette do not trade freshness for responsiveness.
+
+If a runtime or catalog operation fails, the status and per-plugin diagnostic
+remain visible and retryable; a failed asynchronous operation never leaves the
+palette in a half-updated state.
+
 ## Documented exemption: the site-query field has no regex builder
 
 Every search bar in this application provides direct access to the full regex
@@ -109,7 +124,9 @@ Repository policy checks require the five runtime files to be present with
 intact `# VERSION:` headers, both resource paths to bundle them, the configure
 guard to exist, `Qt6::Xml` to be required, the engine to report each failure
 distinctly, Python detection to execute the interpreter, and the empty state to
-separate a blocked runtime from an empty plugin list.
+separate a blocked runtime from an empty plugin list. The catalog policy also
+requires progress coalescing and a clean overlay stack for the non-modal Search
+Plugins dialog.
 
 ## Related articles
 

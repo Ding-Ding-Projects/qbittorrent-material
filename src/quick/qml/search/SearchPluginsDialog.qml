@@ -163,6 +163,10 @@ Dialog {
     width: Math.min(720, (parent ? parent.width : 720) * 0.9)
     height: Math.min(560, (parent ? parent.height : 560) * 0.9)
     padding: Spacing.lg
+    // Keep the non-modal dialog above the notification host. The snackbar is
+    // intentionally persistent for runtime failures, but it must not paint
+    // across this dialog's table or action row while the user investigates.
+    z: 9100
 
     Material.elevation: 24
     Material.roundedScale: Material.MediumScale

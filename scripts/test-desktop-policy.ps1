@@ -1104,6 +1104,11 @@ Test-Policy ($snackbarSource.Contains('function onAllDismissed()') `
         -and $snackbarSource.Contains('onClicked: NotificationCenter.dismissAll()')) `
     "one primary snackbar host exposes truthful bulk dismissal and removes cards from every dismissal route"
 
+$mainSnackbarSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/Main.qml")
+Test-Policy ($mainSnackbarSource -match '(?s)Snackbar\s*\{\s*id:\s*snackbar[\s\S]{0,300}parent:\s*Overlay\.overlay') `
+    "the primary Snackbar shares the overlay stack so dialogs remain readable"
+
 $snackbarDismissAllIndex = $snackbarSource.IndexOf('id: dismissAllButton')
 $snackbarScrollIndex = $snackbarSource.IndexOf('id: notificationScroll')
 Test-Policy ($snackbarSource.Contains('id: snackbarViewport') `
@@ -1535,6 +1540,8 @@ $searchPluginManager = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/base/search/searchpluginmanager.cpp")
 $searchControllerSource = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/controllers/searchcontroller.cpp")
+$searchControllerHeader = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/controllers/searchcontroller.h")
 $searchEmptyPage = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/search/SearchNoPluginsPage.qml")
 Test-Policy ($searchPluginManager.Contains('setRuntimeError(') `
@@ -1549,6 +1556,13 @@ Test-Policy ($searchEmptyPage.Contains('SearchController.unavailableReason') `
         -and $searchEmptyPage.Contains('visible: !root.blocked') `
         -and $searchEmptyPage.Contains('SearchController.refreshPythonDetection()')) `
     "the search empty state separates a blocked runtime from having no plugins yet"
+Test-Policy ($searchControllerHeader.Contains('QTimer m_pluginsChangedTimer') `
+        -and $searchControllerSource.Contains('m_pluginsChangedTimer.setInterval(120)') `
+        -and $searchControllerSource.Contains('void SearchController::schedulePluginsChanged') `
+        -and $searchControllerSource -match 'unofficialCatalogStatusChanged[\s\S]{0,700}inProgress' `
+        -and $searchControllerSource -match 'unofficialCatalogStatusChanged[\s\S]{0,700}schedulePluginsChanged\(true\)' `
+        -and $searchControllerSource -notmatch 'unofficialCatalogStatusChanged[\s\S]{0,700}emit pluginsChanged\(\)') `
+    "catalog progress coalesces plugin inventory updates instead of rebuilding the command palette per downloaded row"
 Test-Policy (Test-Path -LiteralPath (Get-RepositoryPath "docs/features/transfers/search-runtime.md") -PathType Leaf) `
     "the bundled search runtime and its failure modes are documented"
 

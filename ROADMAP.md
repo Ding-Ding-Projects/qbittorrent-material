@@ -23,6 +23,10 @@
 - 2026-08-02: added scoped transfer-list export for all or selected torrents in
   ten text formats, with pre-save loss disclosures, escaped output, searchable
   row-menu and page entry points, and an offscreen startup gate.
+- 2026-08-04: coalesced verified search-catalog presentation updates so cold
+  startup no longer rebuilds the live command palette for every downloaded row;
+  moved the primary Snackbar into the shared overlay stack so Search Plugins
+  remains readable while persistent runtime warnings are present.
 
 ## Follow-up
 

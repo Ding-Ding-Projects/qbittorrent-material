@@ -19,6 +19,7 @@
 #include <QSet>
 #include <QString>
 #include <QStringList>
+#include <QTimer>
 #include <QVariantList>
 #include <QVariantMap>
 
@@ -344,6 +345,7 @@ private:
     void publishPluginOperationSummary(QVariantMap summary);
     void setPluginDiagnostic(const QString &id, const QString &reason);
     void importCatalogDiagnostics(const QVariantMap &status);
+    void schedulePluginsChanged(bool immediate = false);
 
     bool m_pythonAvailable = false;
     int m_nextTabId = 1;
@@ -353,6 +355,8 @@ private:
     PluginBatch m_pluginBatch;
     QVariantList m_pendingPluginOperationSummaries;
     qulonglong m_nextPluginOperationSerial = 1;
+    QTimer m_pluginsChangedTimer;
+    bool m_pluginsChangedPending = false;
 
     static SearchController *s_instance;
 };

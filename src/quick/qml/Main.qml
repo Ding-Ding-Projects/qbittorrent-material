@@ -886,7 +886,9 @@ ApplicationWindow {
 
     Snackbar {
         id: snackbar
-        parent: root.contentItem
+        // Keep the notification host in the same overlay stack as dialogs so
+        // its high local z value cannot paint across a dialog's surface.
+        parent: Overlay.overlay
         primaryHost: true
     }
 

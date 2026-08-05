@@ -60,16 +60,32 @@ SearchController *SearchController::s_instance = nullptr;
 SearchController::SearchController(QObject *parent)
     : QObject(parent)
 {
+    // Catalog bootstrap reports one status transition per verified plugin. A
+    // direct pluginsChanged() for every row forces the always-live command
+    // palette to rebuild hundreds of QML command objects and re-hash every
+    // candidate file on the GUI thread. Coalesce those presentation updates;
+    // the authoritative final signal still lands immediately after a batch.
+    m_pluginsChangedTimer.setSingleShot(true);
+    m_pluginsChangedTimer.setInterval(120);
+    connect(&m_pluginsChangedTimer, &QTimer::timeout, this, [this]
+    {
+        if (!m_pluginsChangedPending)
+            return;
+        m_pluginsChangedPending = false;
+        emit pluginsChanged();
+    });
+
     detectPython();
     loadHistory();
 
     if (auto *mgr = SearchPluginManager::instance())
     {
         // Keep the combos / empty-page in sync as plugins come and go.
-        connect(mgr, &SearchPluginManager::pluginEnabled, this, [this] { emit pluginsChanged(); });
+        connect(mgr, &SearchPluginManager::pluginEnabled, this,
+                [this] { schedulePluginsChanged(); });
         connect(mgr, &SearchPluginManager::pluginCatalogChanged, this, [this] {
             finishRuntimeRecovery();
-            emit pluginsChanged();
+            schedulePluginsChanged(true);
         });
 
         // Forward install/update/uninstall outcomes to QML (dialog feedback),
@@ -79,7 +95,7 @@ SearchController::SearchController(QObject *parent)
             setPluginDiagnostic(name, {});
             recordPluginBatchOutcome(name, true);
             emit pluginInstalled(name);
-            emit pluginsChanged();
+            schedulePluginsChanged();
         });
         connect(mgr, &SearchPluginManager::pluginInstallationFailed, this,
                 [this](const QString &name, const QString &reason) {
@@ -87,14 +103,14 @@ SearchController::SearchController(QObject *parent)
             setPluginDiagnostic(name, reason);
             recordPluginBatchOutcome(name, false, reason);
             emit pluginInstallFailed(name, reason);
-            emit pluginsChanged();
+            schedulePluginsChanged();
         });
         connect(mgr, &SearchPluginManager::pluginUpdated, this, [this](const QString &name) {
             qCInfo(lcSearch) << "Plugin updated:" << name;
             setPluginDiagnostic(name, {});
             recordPluginBatchOutcome(name, true);
             emit pluginUpdated(name);
-            emit pluginsChanged();
+            schedulePluginsChanged();
         });
         connect(mgr, &SearchPluginManager::pluginUpdateFailed, this,
                 [this](const QString &name, const QString &reason) {
@@ -102,12 +118,12 @@ SearchController::SearchController(QObject *parent)
             setPluginDiagnostic(name, reason);
             recordPluginBatchOutcome(name, false, reason);
             emit pluginUpdateFailed(name, reason);
-            emit pluginsChanged();
+            schedulePluginsChanged();
         });
         connect(mgr, &SearchPluginManager::pluginUninstalled, this, [this](const QString &name) {
             qCInfo(lcSearch) << "Plugin uninstalled:" << name;
             emit pluginUninstalled(name);
-            emit pluginsChanged();
+            schedulePluginsChanged();
         });
         connect(mgr, &SearchPluginManager::checkForUpdatesFinished, this,
                 [this, mgr](const QHash<QString, SearchPluginVersion> &updateInfo) {
@@ -184,21 +200,23 @@ SearchController::SearchController(QObject *parent)
                 finishPluginBatch(u"runtime-unavailable"_s, reason);
             }
             emit unavailableReasonChanged();
-            emit pluginsChanged();
+            schedulePluginsChanged();
         });
         connect(mgr, &SearchPluginManager::unofficialCatalogStatusChanged, this,
-                [this](const QVariantMap &)
+                [this](const QVariantMap &status)
                 {
-                    // The palette catalog contains disk/wait/retry state, so a
-                    // sync transition can change rows even before Python has
-                    // registered a plugin.
-                    emit pluginsChanged();
+                    // Progress belongs to its own lightweight status property.
+                    // Do not rebuild the command palette for every downloaded
+                    // row; the final sync signal below publishes the complete
+                    // inventory once the asynchronous batch is settled.
+                    if (!status.value(u"inProgress"_s).toBool())
+                        schedulePluginsChanged(true);
                     emit unofficialPluginStatusChanged();
                 });
         connect(mgr, &SearchPluginManager::unofficialCatalogSyncFinished, this,
                 [this](const QVariantMap &status) {
             importCatalogDiagnostics(status);
-            emit pluginsChanged();
+            schedulePluginsChanged(true);
             emit unofficialPluginStatusChanged();
             emit unofficialPluginSyncFinished(status);
             QVariantMap summary = status;
@@ -963,7 +981,7 @@ void SearchController::beginPluginBatch(const QString &kind, const QStringList &
     if (diagnosticsChanged)
     {
         emit pluginDiagnosticsChanged();
-        emit pluginsChanged();
+        schedulePluginsChanged();
     }
     emit pluginOperationInProgressChanged();
 }
@@ -1076,7 +1094,7 @@ void SearchController::finishRuntimeRecovery()
     if (diagnosticsChanged)
     {
         emit pluginDiagnosticsChanged();
-        emit pluginsChanged();
+        schedulePluginsChanged();
     }
     finishPluginBatch();
 }
@@ -1107,7 +1125,22 @@ void SearchController::setPluginDiagnostic(const QString &id, const QString &rea
     }
 
     emit pluginDiagnosticsChanged();
-    emit pluginsChanged();
+    schedulePluginsChanged();
+}
+
+void SearchController::schedulePluginsChanged(const bool immediate)
+{
+    if (immediate)
+    {
+        m_pluginsChangedPending = false;
+        m_pluginsChangedTimer.stop();
+        emit pluginsChanged();
+        return;
+    }
+
+    m_pluginsChangedPending = true;
+    if (!m_pluginsChangedTimer.isActive())
+        m_pluginsChangedTimer.start();
 }
 
 void SearchController::importCatalogDiagnostics(const QVariantMap &status)
@@ -1379,7 +1412,7 @@ void SearchController::refreshPythonDetection()
     }
 
     emit unavailableReasonChanged();
-    emit pluginsChanged();
+    schedulePluginsChanged(true);
 }
 
 QString SearchController::unavailableReason() const

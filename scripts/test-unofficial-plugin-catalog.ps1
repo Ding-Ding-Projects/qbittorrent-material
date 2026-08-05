@@ -127,6 +127,10 @@ if ($pluginsDialog -notmatch 'summary\.runtimeUnavailable' `
         -or $pluginsDialog -notmatch 'state === "waiting-runtime"') {
     throw 'The plugin UI must report one aggregate waiting-for-runtime warning and retain its retry path.'
 }
+if ($pluginsDialog -notmatch '(?m)^\s*z:\s*9100\s*$' `
+        -or $pluginsDialog -notmatch 'background:\s*Rectangle\s*\{[\s\S]{0,220}color:\s*Theme\.color\("surface"\)') {
+    throw 'The non-modal plugin dialog must paint an opaque surface above persistent notifications.'
+}
 if ($manager -notmatch 'm_capabilityStdOut\.clear\(\)' `
         -or $manager -notmatch 'm_capabilityStdErr\.clear\(\)' `
         -or $manager -match 'result\.standardOutput\s*=\s*QString::fromUtf8\(m_capabilityProcess->readAllStandardOutput\(\)\)') {
@@ -171,9 +175,9 @@ if ($paletteMethod -match 'QJson(?:Document|Object|Array)' `
 }
 if ($controller -notmatch 'QVariantList result = mgr->palettePluginCatalog\(\)' `
         -or $controllerHeader -notmatch 'installedOnDisk, registered, enabled' `
-        -or $controller -notmatch '&SearchPluginManager::runtimeErrorChanged[\s\S]{0,1200}emit pluginsChanged\(\)' `
-        -or $controller -notmatch '&SearchPluginManager::unofficialCatalogStatusChanged[\s\S]{0,360}emit pluginsChanged\(\)' `
-        -or $controller -notmatch '&SearchPluginManager::pluginEnabled[\s\S]{0,140}emit pluginsChanged\(\)') {
+        -or $controller -notmatch '&SearchPluginManager::runtimeErrorChanged[\s\S]{0,1200}(?:emit pluginsChanged\(\)|schedulePluginsChanged)' `
+        -or $controller -notmatch '&SearchPluginManager::unofficialCatalogStatusChanged[\s\S]{0,520}(?:emit pluginsChanged\(\)|schedulePluginsChanged)' `
+        -or $controller -notmatch '&SearchPluginManager::pluginEnabled[\s\S]{0,180}(?:emit pluginsChanged\(\)|schedulePluginsChanged)') {
     throw 'SearchController does not expose or notify every palette catalog state transition.'
 }
 if ($controllerHeader -notmatch 'Q_PROPERTY\(QVariantMap pluginDiagnostics' `

@@ -1,5 +1,41 @@
 # Handoff
 
+## 2026-08-04 — catalog bootstrap stops rebuilding the palette
+
+The verified unofficial search-plugin catalog used to emit a live palette
+inventory refresh for every downloaded row. Because `Main.qml` keeps the
+command palette model live, each progress transition rebuilt hundreds of QML
+command objects and re-hashed candidate files on the GUI thread. The cold
+startup burst was reproducible: private memory climbed toward 470–490 MB and
+one CPU core stayed busy while clicks waited.
+
+`SearchController` now publishes catalog progress through its lightweight
+status signal, coalesces ordinary plugin-inventory notifications on a 120 ms
+single-shot timer, and emits an immediate authoritative refresh when a catalog
+batch settles or a user-facing plugin operation completes. The palette remains
+fresh without making row-by-row network progress a GUI rebuild loop.
+
+The same cheap headless capture found the non-modal Search Plugins dialog below
+the persistent runtime-warning snackbar. The primary Snackbar now lives in the
+shared overlay stack, and the plugin dialog paints an opaque card at a higher
+overlay layer, leaving its table and footer readable while warnings remain
+dismissible.
+
+Verification for feature commit `4a0c032`:
+
+- `run.ps1 -NoRun -Jobs 8` built and deployed the Windows Release binary.
+- `scripts/test-desktop-policy.ps1 -SkipRuntimeStartup`: **445/445**.
+- `scripts/test-unofficial-plugin-catalog.ps1`: **100 rows, 97 sources, 92/92 canonical**.
+- `scripts/test-qml-startup.ps1` with the Qt 6.8.3 offscreen plugin: passed.
+- Fresh cheap headless startup settled at about **443 MB private memory** and
+  **0.03 CPU seconds over 10 seconds**, with handles and threads decreasing.
+- Fresh Search Plugins capture shows an opaque dialog card and the warning
+  snackbar below its footer rather than across it.
+
+The release-facing changelog entry is recorded in the follow-up documentation
+commit after this feature commit; remote CI and the exact published installer
+remain external checks after the default-branch dew.
+
 ## 2026-08-02 — transfer-list export handoff
 
 The Windows desktop transfer surface now offers a UTF-8/LF transfer-list

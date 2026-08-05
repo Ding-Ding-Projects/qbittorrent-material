@@ -2057,7 +2057,7 @@ if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {
     $releaseCreateOffset = $workflow.IndexOf('gh release create $env:RELEASE_TAG')
     $draftCreateOffset = $workflow.IndexOf('--draft', [Math]::Max(0, $releaseCreateOffset))
     $stagedAssetValidationOffset = $workflow.IndexOf(
-        'Assert-TagReleaseAssetsAndSignedFeed "staged draft"',
+        'Assert-ReleaseAssetsAndSignedFeed "staged draft"',
         [Math]::Max(0, $draftCreateOffset))
     $workflowCompletedOffset = $workflow.IndexOf(
         '$workflowCompleted = [DateTimeOffset]::FromUnixTimeSeconds',
@@ -2079,6 +2079,19 @@ if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {
         $workflow.Substring($publishErrorBlockEnd + "          }".Length)
     }
     else { '' }
+    $publishedMetadataOffset = $workflow.IndexOf(
+        'repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG',
+        [Math]::Max(0, $publishErrorBlockEnd))
+    $publishedAssetValidationOffset = $workflow.IndexOf(
+        'Assert-ReleaseAssetsAndSignedFeed "published immutable release" $publishedRelease',
+        [Math]::Max(0, $publishedMetadataOffset))
+    Test-Policy ($workflow -match 'function Get-DraftReleaseByTag' `
+            -and $workflow -match 'authenticated release inventory' `
+            -and $workflow -match 'releases\?per_page=100' `
+            -and $workflow -match '\[string\]\$_\.tag_name -eq \$env:RELEASE_TAG' `
+            -and $workflow -match 'The public tag endpoint remains' `
+            -and $workflow -match 'Get-DraftReleaseByTag') `
+        "the mutable draft is verified through authenticated inventory instead of the unavailable public tag endpoint"
     Test-Policy ($workflow -match '(?m)^\s*actions:\s*read\s*$' `
             -and $workflow -match 'gh run view \$env:GITHUB_RUN_ID' `
             -and $workflow -match '--json jobs' `
@@ -2097,8 +2110,12 @@ if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {
             -and $publishErrorOffset -gt $publishTransitionOffset `
             -and $publishErrorBlockEnd -gt $publishErrorOffset `
             -and $workflow -match '\$missingStagedTimingLines\.Count -ne 0' `
-            -and $postPublishTail -notmatch 'throw|Assert-TagReleaseAssetsAndSignedFeed|latestChannelStable|gh release download|gh api|gh release view') `
-        "release assets and final notes are validated in a mutable draft before one immutable publication transition"
+            -and $publishedMetadataOffset -gt $publishErrorBlockEnd `
+            -and $publishedAssetValidationOffset -gt $publishedMetadataOffset `
+            -and $postPublishTail -match 'Could not read published release metadata' `
+            -and $postPublishTail -match 'Published release failed status, immutability, tag, or target verification' `
+            -and $postPublishTail -match 'Assert-ReleaseAssetsAndSignedFeed "published immutable release" \$publishedRelease') `
+        "release assets and final notes are validated in a mutable draft before one immutable publication transition and exact public verification"
     Test-Policy ($workflow -match 'select-release-dim-sum\.ps1' `
             -and $workflow -match 'Stamp the selected public release identity into the desktop build' `
             -and $workflow -match 'DIM_SUM_CODE_NAME' `
@@ -2142,6 +2159,8 @@ if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {
     Test-Policy ($workflow -match '(?ms)name:\s*Check out the pushed commit.*?fetch-depth:\s*0') `
         "the release checkout includes full history for changelog commit validation"
     Test-Policy ($workflow -match '(?ms)gh release create\s+\$env:RELEASE_TAG.*?--draft' `
+            -and $workflow -match 'Get-DraftReleaseByTag' `
+            -and $workflow -match 'Assert-ReleaseAssetsAndSignedFeed "staged draft" \$stagedRelease' `
             -and $workflow -match 'Staged release failed asset, note, timing, signature, channel, or target verification.' `
             -and $workflow -match 'Validated staged draft \$env:RELEASE_TAG' `
             -and $workflow -match 'databaseId' `

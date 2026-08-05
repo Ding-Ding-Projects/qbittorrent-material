@@ -729,16 +729,54 @@ jobs:
             throw "Packaging outputs do not match the tested local release-asset bytes."
           }
 
-          function Assert-TagReleaseAssetsAndSignedFeed([string]$Phase) {
-            $releaseApiJson = gh api `
+          function Convert-ReleaseApiRecord([object]$ReleaseApi) {
+            if ($null -eq $ReleaseApi -or $null -eq $ReleaseApi.id) {
+              throw "Release API metadata is missing its numeric identifier."
+            }
+            return [pscustomobject]@{
+              body = [string]$ReleaseApi.body
+              databaseId = [int64]$ReleaseApi.id
+              isDraft = [bool]$ReleaseApi.draft
+              isImmutable = [bool]$ReleaseApi.immutable
+              isPrerelease = [bool]$ReleaseApi.prerelease
+              tagName = [string]$ReleaseApi.tag_name
+              targetCommitish = [string]$ReleaseApi.target_commitish
+              assets = @($ReleaseApi.assets)
+            }
+          }
+
+          function Get-DraftReleaseByTag {
+            # GitHub keeps a mutable draft reachable to its author through the
+            # authenticated release inventory. The public tag endpoint remains
+            # unavailable until the draft is published, so never use it here.
+            $inventoryJson = gh api --paginate --slurp `
               -H "Accept: application/vnd.github+json" `
               -H "X-GitHub-Api-Version: 2026-03-10" `
-              "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG"
+              "repos/$env:GITHUB_REPOSITORY/releases?per_page=100"
             if ($LASTEXITCODE -ne 0) {
+              throw "Could not enumerate draft releases for $env:RELEASE_TAG."
+            }
+            $inventory = @(
+              (($inventoryJson -join [Environment]::NewLine) | ConvertFrom-Json) |
+                ForEach-Object { $_ }
+            )
+            $matches = @($inventory | Where-Object {
+              [string]$_.tag_name -eq $env:RELEASE_TAG
+            })
+            if ($matches.Count -ne 1) {
+              throw "Expected exactly one authenticated draft-release record for $env:RELEASE_TAG; found $($matches.Count)."
+            }
+            return Convert-ReleaseApiRecord $matches[0]
+          }
+
+          function Assert-ReleaseAssetsAndSignedFeed(
+            [string]$Phase,
+            [object]$ReleaseApi
+          ) {
+            if ($null -eq $ReleaseApi) {
               throw "Could not read $Phase asset integrity metadata for $env:RELEASE_TAG."
             }
-            $releaseApi = $releaseApiJson | ConvertFrom-Json
-            $publishedAssets = @($releaseApi.assets)
+            $publishedAssets = @($ReleaseApi.assets)
             $verifiedDigestCount = 0
             foreach ($localAsset in $localAssets) {
               $publishedMatch = @(
@@ -769,6 +807,9 @@ jobs:
               throw "$Phase verification directory unexpectedly exists: $verificationRoot"
             }
             New-Item -ItemType Directory -Path $verificationRoot | Out-Null
+            $publishedSetupPath = Join-Path $verificationRoot $localInstaller[0].Name
+            $publishedReleasesPath = Join-Path $verificationRoot $localReleases[0].Name
+            $publishedSignaturePath = Join-Path $verificationRoot $localFeedSignature[0].Name
             gh release download $env:RELEASE_TAG `
               --repo $env:GITHUB_REPOSITORY `
               --pattern $localInstaller[0].Name `
@@ -778,7 +819,6 @@ jobs:
             if ($LASTEXITCODE -ne 0) {
               throw "Could not redownload the $Phase Squirrel Setup for byte verification."
             }
-            $publishedSetupPath = Join-Path $verificationRoot $localInstaller[0].Name
             if (-not (Test-Path -LiteralPath $publishedSetupPath -PathType Leaf)) {
               throw "Redownloaded Squirrel Setup is missing: $publishedSetupPath"
             }
@@ -790,8 +830,6 @@ jobs:
               throw "Redownloaded Squirrel Setup differs from the exact locally tested bytes."
             }
 
-            $publishedReleasesPath = Join-Path $verificationRoot $localReleases[0].Name
-            $publishedSignaturePath = Join-Path $verificationRoot $localFeedSignature[0].Name
             foreach ($downloadedFeedPath in @($publishedReleasesPath, $publishedSignaturePath)) {
               if (-not (Test-Path -LiteralPath $downloadedFeedPath -PathType Leaf)) {
                 throw "Redownloaded signed-feed asset is missing: $downloadedFeedPath"
@@ -1004,19 +1042,15 @@ jobs:
             throw "GitHub did not create draft release $env:RELEASE_TAG."
           }
 
-          $stagedRelease = gh release view $env:RELEASE_TAG `
-            --repo $env:GITHUB_REPOSITORY `
-            --json isDraft,isImmutable,isPrerelease,tagName,targetCommitish,assets |
-            ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0 `
-              -or -not $stagedRelease.isDraft `
+          $stagedRelease = Get-DraftReleaseByTag
+          if (-not $stagedRelease.isDraft `
               -or $stagedRelease.isImmutable `
               -or $stagedRelease.isPrerelease `
               -or $stagedRelease.tagName -ne $env:RELEASE_TAG `
               -or $stagedRelease.targetCommitish -ne $env:GITHUB_SHA) {
             throw "Staged release failed draft status, mutability, tag, or target verification."
           }
-          Assert-TagReleaseAssetsAndSignedFeed "staged draft"
+          Assert-ReleaseAssetsAndSignedFeed "staged draft" $stagedRelease
 
           # An immutable public release cannot be safely repaired. Record the
           # final timing in the still-mutable draft immediately after all asset
@@ -1042,20 +1076,25 @@ jobs:
             "@@WORKFLOW_DURATION@@", $workflowDuration)
           $finalNotes | Set-Content -LiteralPath $notesPath -Encoding utf8NoBOM
 
-          gh release edit $env:RELEASE_TAG `
-            --repo $env:GITHUB_REPOSITORY `
-            --notes-file $notesPath
+          $notesPayloadPath = Join-Path $env:RUNNER_TEMP `
+            "release-notes-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT.json"
+          if (Test-Path -LiteralPath $notesPayloadPath) {
+            throw "Release-notes payload unexpectedly exists: $notesPayloadPath"
+          }
+          [pscustomobject]@{ body = $finalNotes } |
+            ConvertTo-Json -Compress |
+            Set-Content -LiteralPath $notesPayloadPath -Encoding utf8NoBOM
+          gh api --method PATCH `
+            -H "Accept: application/vnd.github+json" `
+            -H "Content-Type: application/json" `
+            -H "X-GitHub-Api-Version: 2026-03-10" `
+            --input $notesPayloadPath `
+            "repos/$env:GITHUB_REPOSITORY/releases/$($stagedRelease.databaseId)" | Out-Null
           if ($LASTEXITCODE -ne 0) {
             throw "Could not write final timing evidence into staged release $env:RELEASE_TAG."
           }
 
-          $stagedRelease = gh release view $env:RELEASE_TAG `
-            --repo $env:GITHUB_REPOSITORY `
-            --json body,databaseId,isDraft,isImmutable,isPrerelease,tagName,targetCommitish,assets |
-            ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) {
-            throw "Could not read final staged release $env:RELEASE_TAG."
-          }
+          $stagedRelease = Get-DraftReleaseByTag
           $requiredAssetNames = @($releaseAssets | ForEach-Object { Split-Path -Leaf $_ })
           $stagedAssetNames = @($stagedRelease.assets | ForEach-Object { $_.name })
           $missingStagedAssetNames = @(
@@ -1109,3 +1148,22 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "GitHub did not publish verified draft release $env:RELEASE_TAG."
           }
+
+          $publishedReleaseJson = gh api `
+            -H "Accept: application/vnd.github+json" `
+            -H "X-GitHub-Api-Version: 2026-03-10" `
+            "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not read published release metadata for $env:RELEASE_TAG."
+          }
+          $publishedRelease = Convert-ReleaseApiRecord (
+            $publishedReleaseJson | ConvertFrom-Json)
+          if ($publishedRelease.isDraft `
+              -or -not $publishedRelease.isImmutable `
+              -or $publishedRelease.isPrerelease `
+              -or $publishedRelease.tagName -ne $env:RELEASE_TAG `
+              -or $publishedRelease.targetCommitish -ne $env:GITHUB_SHA) {
+            throw "Published release failed status, immutability, tag, or target verification."
+          }
+          Assert-ReleaseAssetsAndSignedFeed "published immutable release" $publishedRelease
+          Write-Host "Verified published immutable release $env:RELEASE_TAG against the triggering commit and exact Squirrel bytes."

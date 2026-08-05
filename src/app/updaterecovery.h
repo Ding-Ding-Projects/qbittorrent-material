@@ -38,6 +38,9 @@ struct Baseline
 /** Tell a detached watchdog to stop when Update.exe itself could not be launched. */
 void cancelRestartTransaction(const QString &squirrelRoot, const QString &token);
 
+/** Preserve only profile-selection arguments across an updater restart. */
+[[nodiscard]] QStringList preservedLaunchArguments(const QStringList &arguments);
+
 /** Run the old-binary watchdog before QApplication is constructed. */
 [[nodiscard]] std::optional<int> runWatchdogIfRequested(
         const QStringList &arguments, const QString &executablePath);

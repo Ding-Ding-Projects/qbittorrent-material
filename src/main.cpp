@@ -25,17 +25,73 @@
  * the very first line of the rotating log file.
  */
 
+#include <QCoreApplication>
+#include <QFileInfo>
 #include <QQuickStyle>
 #include <QString>
+#include <QStringList>
+
+#include <optional>
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <shellapi.h>
+#endif
 
 #include "base/logging.h"
 #include "app/application.h"
 #include "app/squirrellifecycle.h"
+#include "app/updaterecovery.h"
 
 using namespace Qt::StringLiterals;
 
+namespace
+{
+QStringList startupArguments(const int argc, char *argv[])
+{
+#ifdef Q_OS_WIN
+    // `main` receives the ANSI CRT argv on Windows. The watchdog needs the
+    // canonical executable path before QApplication exists, so obtain the
+    // original UTF-16 command line rather than corrupting a non-ASCII install
+    // or profile path through the active code page.
+    Q_UNUSED(argc)
+    Q_UNUSED(argv)
+    int wideArgumentCount = 0;
+    wchar_t **const wideArguments = CommandLineToArgvW(GetCommandLineW(), &wideArgumentCount);
+    if (wideArguments)
+    {
+        QStringList arguments;
+        arguments.reserve(wideArgumentCount);
+        for (int index = 0; index < wideArgumentCount; ++index)
+            arguments << QString::fromWCharArray(wideArguments[index]);
+        LocalFree(wideArguments);
+        return arguments;
+    }
+#endif
+
+    QStringList arguments;
+    arguments.reserve(argc);
+    for (int index = 0; index < argc; ++index)
+        arguments << QString::fromLocal8Bit(argv[index]);
+    return arguments;
+}
+}
+
 int main(int argc, char *argv[])
 {
+    // The detached rollback watchdog is the old app binary, not a normal app
+    // launch. It must run before QApplication creates a single-instance socket
+    // or initializes any UI state. Collect startup arguments through the
+    // platform's wide-aware pre-QCoreApplication path.
+    const QStringList earlyArguments = startupArguments(argc, argv);
+    const QString earlyExecutable = earlyArguments.isEmpty()
+            ? QString() : QFileInfo(earlyArguments.constFirst()).absoluteFilePath();
+    if (const std::optional<int> recoveryExit =
+                UpdateRecovery::runWatchdogIfRequested(earlyArguments, earlyExecutable))
+    {
+        return *recoveryExit;
+    }
+
     // --- 0. Style MUST be chosen before any QML/Quick object is created. ------
     // Do it even before the QApplication so the Material style is locked in.
     QQuickStyle::setStyle(u"Material"_qs);
@@ -68,6 +124,17 @@ int main(int argc, char *argv[])
         {
             qCInfo(lcApp) << "Another instance is already running; forwarding request and exiting";
             return app.notifyPrimaryInstance() ? 0 : 1;
+        }
+
+        // A restarted target confirms ownership only after it holds the
+        // single-instance lock. The old watchdog can then distinguish a real
+        // target start from a failed Update.exe handoff.
+        QString recoveryError;
+        if (!UpdateRecovery::acknowledgeStarted(QCoreApplication::arguments(), &recoveryError))
+        {
+            qCCritical(lcApp).noquote()
+                    << "Update recovery start acknowledgement failed:" << recoveryError;
+            return 1;
         }
 
         // --- 4. Boot the UI + event loop. ------------------------------------

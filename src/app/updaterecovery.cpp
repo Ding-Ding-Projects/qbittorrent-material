@@ -353,6 +353,11 @@ bool rollback(const QString &root, const QJsonObject &transaction, QString *erro
 
 namespace UpdateRecovery
 {
+QStringList preservedLaunchArguments(const QStringList &arguments)
+{
+    return preservedArguments(arguments);
+}
+
 bool prepareBaseline(const Baseline &baseline, QString *error)
 {
     if (!SquirrelReleaseValidator::isStrictVersion(baseline.currentVersion)
@@ -430,7 +435,7 @@ bool createRestartTransaction(const QString &squirrelRoot, const QString &fromVe
     }
 
     QJsonArray arguments;
-    for (const QString &argument : preservedArguments(originalArguments))
+    for (const QString &argument : preservedLaunchArguments(originalArguments))
         arguments.append(argument);
 
     QJsonObject object;

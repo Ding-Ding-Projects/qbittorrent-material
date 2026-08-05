@@ -749,14 +749,12 @@ Item {
                 text: qsTr("Cancel")
                 flat: true
                 DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
-                onClicked: deleteDialog.reject()
             }
             Button {
                 text: qsTr("Remove")
                 highlighted: true
                 Material.accent: Theme.color("error")
                 DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
-                onClicked: deleteDialog.accept()
             }
         }
 

@@ -28,6 +28,8 @@ DataTable               1.0 DataTable.qml
 ColumnHeaderMenu        1.0 ColumnHeaderMenu.qml
 ProgressCell            1.0 ProgressCell.qml
 Snackbar                1.0 Snackbar.qml
+UpdateReadyBanner       1.0 UpdateReadyBanner.qml
+UpdateOperationBanner   1.0 UpdateOperationBanner.qml
 ConfirmDialog           1.0 ConfirmDialog.qml
 SuperConfirmDialog      1.0 SuperConfirmDialog.qml
 TextInputDialog         1.0 TextInputDialog.qml

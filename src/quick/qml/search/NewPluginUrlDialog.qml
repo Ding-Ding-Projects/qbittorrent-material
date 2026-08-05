@@ -108,12 +108,11 @@ Dialog {
             text: qsTr("Cancel")
             flat: true
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
-            onClicked: root.reject()
         }
         Button {
             text: qsTr("OK")
             highlighted: true
-            DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+            DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
             onClicked: root._accept()
         }
     }

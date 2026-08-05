@@ -58,6 +58,21 @@ using namespace Utils::ForeignApps;
 
 namespace
 {
+    struct PythonDetectionCache
+    {
+        Path preferredPythonPath;
+        PythonInfo configuredInfo;
+        PythonInfo automaticInfo;
+        bool initialized = false;
+        bool automaticProbeComplete = false;
+    };
+
+    PythonDetectionCache &pythonDetectionCache()
+    {
+        static PythonDetectionCache cache;
+        return cache;
+    }
+
     bool testPythonInstallation(const Path &exePath, PythonInfo &info)
     {
         info = {};
@@ -191,24 +206,28 @@ bool Utils::ForeignApps::PythonInfo::isSupportedVersion() const
 
 PythonInfo Utils::ForeignApps::pythonInfo()
 {
-    static PythonInfo pyInfo;
+    PythonDetectionCache &cache = pythonDetectionCache();
 
     const Path preferredPythonPath = Preferences::instance()->getPythonExecutablePath();
-    if (pyInfo.isValid() && (preferredPythonPath == pyInfo.executablePath)
-            && (preferredPythonPath.isEmpty() || pyInfo.executablePath.exists()))
-        return pyInfo;
-
-    // An automatic detection result is not a durable preference. Clear a
-    // cached preferred result when the setting is switched back to automatic,
-    // otherwise the old interpreter suppresses a fresh PATH/registry scan.
-    if (preferredPythonPath.isEmpty())
-        pyInfo = {};
+    if (!cache.initialized || (cache.preferredPythonPath != preferredPythonPath))
+    {
+        // Treat a preference change as an explicit request to re-evaluate the
+        // interpreter. In particular, moving from a configured path back to
+        // automatic detection must not reuse the old configured executable.
+        cache = {};
+        cache.initialized = true;
+        cache.preferredPythonPath = preferredPythonPath;
+    }
 
     const QString invalidVersionMessage = QCoreApplication::translate("Utils::ForeignApps"
         , "Python failed to meet minimum version requirement. Path: \"%1\". Found version: \"%2\". Minimum supported version: \"%3\".");
 
     if (!preferredPythonPath.isEmpty())
     {
+        PythonInfo &pyInfo = cache.configuredInfo;
+        if (pyInfo.isValid() && (preferredPythonPath == pyInfo.executablePath) && pyInfo.executablePath.exists())
+            return pyInfo;
+
         if (testPythonInstallation(preferredPythonPath, pyInfo))
         {
             if (pyInfo.isSupportedVersion())
@@ -225,8 +244,28 @@ PythonInfo Utils::ForeignApps::pythonInfo()
     }
     else
     {
-        // auto detect only when there are no preferred python path
+        // Probe PATH and the registry at most once for one automatic
+        // configuration. Both a usable interpreter and an unavailable or
+        // unsupported environment are useful results: re-running the latter
+        // on every UI path can synchronously wait on multiple dead aliases.
+        if (cache.automaticProbeComplete)
+        {
+            // Keep a PATH alias cached: checking Path("python") against the
+            // filesystem would fail even while QProcess can still resolve it.
+            // A cached concrete path, however, may be removed between searches;
+            // discard that stale result and allow one bounded re-probe.
+            const Path &cachedAutomaticPath = cache.automaticInfo.executablePath;
+            if (!cache.automaticInfo.isValid() || !cachedAutomaticPath.isAbsolute()
+                    || cachedAutomaticPath.exists())
+            {
+                return cache.automaticInfo;
+            }
 
+            cache.automaticInfo = {};
+            cache.automaticProbeComplete = false;
+        }
+
+        PythonInfo &pyInfo = cache.automaticInfo;
         if (!pyInfo.isValid())
         {
             // search in `PATH` environment variable
@@ -264,7 +303,22 @@ PythonInfo Utils::ForeignApps::pythonInfo()
 
             LogMsg(QCoreApplication::translate("Utils::ForeignApps", "Failed to find Python executable"), Log::WARNING);
         }
+
+        cache.automaticProbeComplete = true;
     }
 
-    return pyInfo;
+    return preferredPythonPath.isEmpty() ? cache.automaticInfo : cache.configuredInfo;
+}
+
+void Utils::ForeignApps::resetAutomaticPythonDetection()
+{
+    PythonDetectionCache &cache = pythonDetectionCache();
+    // A configured interpreter is an explicit user choice and has its own
+    // validation lifecycle. Only invalidate automatic discovery, which can
+    // legitimately change after Python is installed while the app is open.
+    if (Preferences::instance()->getPythonExecutablePath().isEmpty())
+    {
+        cache.automaticInfo = {};
+        cache.automaticProbeComplete = false;
+    }
 }

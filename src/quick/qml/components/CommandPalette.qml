@@ -14,7 +14,7 @@ Popup {
     required property var commands
     signal commandInvoked(string commandId)
     signal pluginEnabledChanged(string pluginId, bool enabled)
-    signal pluginRetryRequested(string pluginId)
+    signal catalogRetryRequested()
     signal pluginTrustRequested(string pluginId)
     signal pluginManageRequested(string pluginId)
     signal pluginSourceRequested(string pluginId, string sourceUrl)
@@ -33,8 +33,14 @@ Popup {
     property bool fullWindow: false
     property string pendingCommandId: ""
     property string pendingPluginManageId: ""
+    property string pendingPluginTrustId: ""
     property string pendingSettingId: ""
     property var pendingSettingValue
+
+    function finishPluginTrust(pluginId) {
+        if (pendingPluginTrustId === pluginId)
+            pendingPluginTrustId = ""
+    }
 
     function filteredCommands() {
         var query = search.text.trim()
@@ -369,7 +375,8 @@ Popup {
                         enabled: modelData.runtimeWaiting !== true
                             && modelData.trusted !== false
                             && (modelData.integrityState === undefined
-                                || String(modelData.integrityState).indexOf("verified-") === 0)
+                                || String(modelData.integrityState).indexOf("verified-") === 0
+                                || modelData.integrityState === "user-managed")
                             && modelData.enabled !== false
                         Accessible.name: qsTr("Enable %1 search plugin").arg(modelData.title)
                         Accessible.description: modelData.runtimeWaiting === true
@@ -383,22 +390,30 @@ Popup {
 
                     Button {
                         visible: modelData.kind === "plugin" && modelData.canRetry === true
-                        text: qsTr("Retry setup")
+                        text: qsTr("Retry catalog setup")
                         flat: true
-                        Accessible.name: qsTr("Retry verified catalog and runtime setup for %1").arg(modelData.title)
+                        Accessible.name: qsTr("Retry shared search-plugin catalog setup")
+                        Accessible.description: qsTr("Retries verified catalog downloads and runtime validation for all catalog plugins, not only %1.")
+                            .arg(modelData.title)
                         onClicked: {
                             results.currentIndex = index
-                            root.pluginRetryRequested(modelData.pluginId)
+                            root.catalogRetryRequested()
                         }
                     }
 
                     Button {
                         visible: modelData.kind === "plugin" && modelData.canTrust === true
-                        text: qsTr("Trust")
+                        text: root.pendingPluginTrustId === modelData.pluginId
+                            ? qsTr("Trusting…") : qsTr("Trust")
                         flat: true
+                        enabled: root.pendingPluginTrustId !== modelData.pluginId
                         Accessible.name: qsTr("Review and trust %1 search plugin").arg(modelData.title)
+                        Accessible.description: root.pendingPluginTrustId === modelData.pluginId
+                            ? qsTr("Plugin trust validation is in progress.")
+                            : qsTr("Validate this quarantined plugin before allowing the search runtime to use it.")
                         onClicked: {
                             results.currentIndex = index
+                            root.pendingPluginTrustId = modelData.pluginId
                             root.pluginTrustRequested(modelData.pluginId)
                         }
                     }

@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <QByteArray>
 #include <QObject>
 #include <QString>
 
@@ -37,11 +38,21 @@ signals:
 
 private:
     void finishDownload(const QString &path, const QString &errorMessage);
+    void failDownload(const QString &errorMessage);
+    void readDownloadOutput(bool drainAll = false);
+    void readDownloadError(bool drainAll = false);
+    void scheduleDownloadOutputRead();
+    void scheduleDownloadErrorRead();
     void downloadProcessFinished(int exitcode);
 
     QString m_pluginName;
     QString m_url;
     SearchPluginManager *m_manager = nullptr;
     QProcess *m_downloadProcess = nullptr;
+    QByteArray m_downloadStdOut;
+    QByteArray m_downloadStdErr;
+    QString m_terminalError;
     bool m_finished = false;
+    bool m_downloadOutputReadScheduled = false;
+    bool m_downloadErrorReadScheduled = false;
 };

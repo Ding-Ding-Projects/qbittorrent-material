@@ -56,8 +56,6 @@ public:
     bool isActive() const;
     QString pattern() const;
     SearchPluginManager *manager() const;
-    /// All results accumulated so far.
-    QList<SearchResult> results() const;
 
     /// Aborts the search; `searchFinished(true)` follows.
     void cancelSearch();
@@ -68,7 +66,12 @@ signals:
     void newSearchResults(const QList<SearchResult> &results);
 
 private:
-    void readSearchOutput();
+    void readSearchOutput(bool drainAll = false);
+    void readSearchError(bool drainAll = false);
+    void scheduleSearchOutputRead();
+    void scheduleSearchErrorRead();
+    void failSearch(const QString &errorMessage);
+    void emitSearchFailureOnce();
     void processFinished(int exitcode);
     bool parseSearchResult(QByteArrayView line, SearchResult &searchResult);
 
@@ -79,6 +82,12 @@ private:
     QProcess *m_searchProcess = nullptr;
     QTimer *m_searchTimeout = nullptr;
     QByteArray m_searchResultLineTruncated;
+    QByteArray m_searchStdErr;
+    qsizetype m_searchStdOutBytesRead = 0;
+    qsizetype m_resultCount = 0;
     bool m_searchCancelled = false;
-    QList<SearchResult> m_results;
+    bool m_searchOutputReadScheduled = false;
+    bool m_searchErrorReadScheduled = false;
+    bool m_searchFailureEmitted = false;
+    QString m_terminalError;
 };

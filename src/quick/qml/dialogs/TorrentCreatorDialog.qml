@@ -478,7 +478,7 @@ Dialog {
         Button {
             text: qsTr("Cancel")
             flat: true
-            DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
             onClicked: {
                 if (TorrentCreatorController.creating) {
                     Log.info("ui", "TorrentCreatorDialog cancelling in-flight creation")
@@ -494,7 +494,7 @@ Dialog {
             text: qsTr("Create")
             highlighted: true
             enabled: !TorrentCreatorController.creating && (pathField.text.trim().length > 0)
-            DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+            DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
             onClicked: {
                 Log.debug("ui", "TorrentCreatorDialog Create clicked")
                 saveDialog.open()

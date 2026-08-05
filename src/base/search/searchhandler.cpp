@@ -37,6 +37,15 @@ using namespace std::chrono_literals;
 
 namespace
 {
+    // Search plugins are third-party Python code. Bound every stream and the
+    // result bridge so one noisy or malformed plugin cannot retain arbitrary
+    // process output or rows in the desktop process.
+    constexpr qsizetype MAX_SEARCH_STDOUT_BYTES = 8 * 1024 * 1024;
+    constexpr qsizetype MAX_SEARCH_STDERR_BYTES = 512 * 1024;
+    constexpr qsizetype MAX_SEARCH_RESULT_LINE_BYTES = 64 * 1024;
+    constexpr qsizetype MAX_SEARCH_RESULTS = 10000;
+    constexpr qint64 SEARCH_READ_CHUNK_BYTES = 64 * 1024;
+
     /// Column layout of a `nova2.py` result line (pipe-separated).
     enum SearchResultColumn
     {
@@ -107,27 +116,23 @@ SearchHandler::SearchHandler(const QString &pattern, const QString &category
 
     connect(m_searchProcess, &QProcess::errorOccurred, this, [this](const QProcess::ProcessError error)
     {
-        if (!m_searchCancelled)
+        if (m_searchCancelled || !m_terminalError.isEmpty())
         {
-            const QString errMsg = toString(error);
-            qCWarning(lcSearch).noquote() << tr("Search process failed. Search query: \"%1\". Category: \"%2\". Engines: \"%3\". Error: \"%4\".")
-                .arg(m_pattern, m_category, m_usedPlugins.join(u", "_s), errMsg);
-            emit searchFailed(errMsg);
+            qCDebug(lcSearch) << "Ignoring search process error after terminal state" << error;
+            return;
         }
-        else
-        {
-            qCDebug(lcSearch) << "Ignoring search process error after cancellation" << error;
-        }
+
+        failSearch(toString(error));
     });
-    connect(m_searchProcess, &QProcess::readyReadStandardOutput, this, &SearchHandler::readSearchOutput);
+    connect(m_searchProcess, &QProcess::readyReadStandardOutput, this, [this] { readSearchOutput(); });
+    connect(m_searchProcess, &QProcess::readyReadStandardError, this, [this] { readSearchError(); });
     connect(m_searchProcess, qOverload<int, QProcess::ExitStatus>(&QProcess::finished)
             , this, &SearchHandler::processFinished);
 
     m_searchTimeout->setSingleShot(true);
     connect(m_searchTimeout, &QTimer::timeout, this, [this]
     {
-        qCWarning(lcSearch).noquote() << tr("Search timed out after 3 minutes. Search query: \"%1\".").arg(m_pattern);
-        cancelSearch();
+        failSearch(tr("Search timed out after 3 minutes."));
     });
     m_searchTimeout->start(3min);
 
@@ -155,13 +160,16 @@ void SearchHandler::cancelSearch()
 
     qCInfo(lcSearch).noquote() << QStringLiteral("Cancelling search. Query: \"%1\".").arg(m_pattern);
 
+    // Set state before signalling the process so a synchronous platform error
+    // cannot turn an intentional cancel into a spurious failure.
+    m_searchCancelled = true;
+    m_searchTimeout->stop();
+
 #ifdef Q_OS_WIN
     m_searchProcess->kill();
 #else
     m_searchProcess->terminate();
 #endif
-    m_searchCancelled = true;
-    m_searchTimeout->stop();
 }
 
 // Slot called when QProcess is finished.
@@ -171,7 +179,54 @@ void SearchHandler::processFinished(const int exitcode)
 {
     m_searchTimeout->stop();
 
-    const auto errMsg = QString::fromUtf8(m_searchProcess->readAllStandardError()).trimmed();
+    // QProcess can emit finished while it still has buffered bytes. Drain the
+    // bounded streams first so a normal final batch is not lost.
+    if (!m_searchCancelled && m_terminalError.isEmpty())
+    {
+        readSearchOutput(true);
+        readSearchError(true);
+    }
+
+    if (!m_terminalError.isEmpty())
+    {
+        m_searchResultLineTruncated.clear();
+        m_searchStdErr.clear();
+        emitSearchFailureOnce();
+        return;
+    }
+
+    // nova2 normally terminates every result with a newline, but third-party
+    // engines are not allowed to silently lose a valid final row when they
+    // omit that delimiter. It has already passed the same bounded-line check
+    // in readSearchOutput(); parse it once now that EOF makes it complete.
+    if (!m_searchCancelled && !m_searchResultLineTruncated.isEmpty())
+    {
+        const QByteArray trailingLine = m_searchResultLineTruncated;
+        m_searchResultLineTruncated.clear();
+        if (SearchResult finalSearchResult; parseSearchResult(trailingLine, finalSearchResult))
+        {
+            if (m_resultCount >= MAX_SEARCH_RESULTS)
+            {
+                failSearch(tr("Search stopped after collecting %1 results.").arg(MAX_SEARCH_RESULTS));
+            }
+            else
+            {
+                ++m_resultCount;
+                emit newSearchResults({std::move(finalSearchResult)});
+            }
+        }
+    }
+
+    if (!m_terminalError.isEmpty())
+    {
+        m_searchStdErr.clear();
+        emitSearchFailureOnce();
+        return;
+    }
+
+    const QString errMsg = QString::fromUtf8(m_searchStdErr).trimmed();
+    m_searchResultLineTruncated.clear();
+    m_searchStdErr.clear();
     if (!errMsg.isEmpty())
     {
         qCWarning(lcSearch).noquote() << tr("Error occurred in search engine. Search query: \"%1\". Category: \"%2\". Engines: \"%3\". Error: \"%4\".")
@@ -181,50 +236,198 @@ void SearchHandler::processFinished(const int exitcode)
     if (m_searchCancelled)
     {
         qCInfo(lcSearch).noquote() << QStringLiteral("Search cancelled. Query: \"%1\". Total results: %2.")
-            .arg(m_pattern, QString::number(m_results.size()));
+            .arg(m_pattern, QString::number(m_resultCount));
         emit searchFinished(true);
     }
     else if ((m_searchProcess->exitStatus() == QProcess::NormalExit) && (exitcode == 0))
     {
         qCInfo(lcSearch).noquote() << QStringLiteral("Search finished. Query: \"%1\". Total results: %2.")
-            .arg(m_pattern, QString::number(m_results.size()));
+            .arg(m_pattern, QString::number(m_resultCount));
         emit searchFinished(false);
     }
     else
     {
+        const QString failure = errMsg.isEmpty()
+            ? tr("The search process exited with code %1.").arg(exitcode)
+            : errMsg;
         qCWarning(lcSearch).noquote() << QStringLiteral("Search failed. Query: \"%1\". Exit code: %2. Exit status: %3.")
             .arg(m_pattern, QString::number(exitcode), QString::number(m_searchProcess->exitStatus()));
-        emit searchFailed(errMsg);
+        failSearch(failure);
     }
 }
 
-// The search QProcess returns output as soon as it has new stuff to read. We
-// split it into lines and parse each line into a SearchResult, buffering any
-// trailing partial line for the next chunk.
-void SearchHandler::readSearchOutput()
+void SearchHandler::scheduleSearchOutputRead()
 {
-    const QByteArray output = m_searchResultLineTruncated + m_searchProcess->readAllStandardOutput();
-    QList<QByteArrayView> lines = Utils::ByteArray::splitToViews(output, "\n", Qt::KeepEmptyParts);
+    if (m_searchOutputReadScheduled || m_searchCancelled || !m_terminalError.isEmpty())
+        return;
 
-    // The last item is either an empty part or a truncated (incomplete) line; keep it.
-    m_searchResultLineTruncated = lines.takeLast().trimmed().toByteArray();
-
-    QList<SearchResult> searchResultList;
-    searchResultList.reserve(lines.size());
-
-    for (const QByteArrayView &line : asConst(lines))
+    m_searchOutputReadScheduled = true;
+    QMetaObject::invokeMethod(this, [this]
     {
-        if (SearchResult searchResult; parseSearchResult(line, searchResult))
-            searchResultList.append(std::move(searchResult));
+        m_searchOutputReadScheduled = false;
+        readSearchOutput();
+    }, Qt::QueuedConnection);
+}
+
+void SearchHandler::scheduleSearchErrorRead()
+{
+    if (m_searchErrorReadScheduled || m_searchCancelled || !m_terminalError.isEmpty())
+        return;
+
+    m_searchErrorReadScheduled = true;
+    QMetaObject::invokeMethod(this, [this]
+    {
+        m_searchErrorReadScheduled = false;
+        readSearchError();
+    }, Qt::QueuedConnection);
+}
+
+void SearchHandler::failSearch(const QString &errorMessage)
+{
+    if (m_searchCancelled || !m_terminalError.isEmpty() || m_searchFailureEmitted)
+        return;
+
+    m_terminalError = errorMessage.isEmpty() ? tr("The search process failed.") : errorMessage;
+    m_searchTimeout->stop();
+    qCWarning(lcSearch).noquote() << tr("Search process failed. Search query: \"%1\". Category: \"%2\". Engines: \"%3\". Error: \"%4\".")
+        .arg(m_pattern, m_category, m_usedPlugins.join(u", "_s), m_terminalError);
+
+    if ((m_searchProcess->state() == QProcess::NotRunning)
+        || (m_searchProcess->error() == QProcess::FailedToStart))
+    {
+        emitSearchFailureOnce();
+        return;
     }
 
-    if (!searchResultList.isEmpty())
+    m_searchProcess->kill();
+}
+
+void SearchHandler::emitSearchFailureOnce()
+{
+    if (m_searchFailureEmitted)
+        return;
+
+    m_searchFailureEmitted = true;
+    emit searchFailed(m_terminalError.isEmpty() ? tr("The search process failed.") : m_terminalError);
+}
+
+// The search QProcess returns output as soon as it has new data. Read in small
+// chunks so Qt's process buffer and this parser have natural pipe backpressure.
+// Keep one trailing partial line only; every complete row streams straight to the
+// owning SearchResultsModel rather than being retained a second time here.
+void SearchHandler::readSearchOutput(const bool drainAll)
+{
+    if (m_searchCancelled || !m_terminalError.isEmpty())
+        return;
+
+    do
     {
-        m_results.append(searchResultList);
-        qCDebug(lcSearch) << "Parsed" << searchResultList.size() << "new result(s) for query" << m_pattern
-            << "(total" << m_results.size() << ')';
-        emit newSearchResults(searchResultList);
+        m_searchProcess->setReadChannel(QProcess::StandardOutput);
+        const QByteArray chunk = m_searchProcess->read(SEARCH_READ_CHUNK_BYTES);
+        if (chunk.isEmpty())
+            break;
+
+        m_searchStdOutBytesRead += chunk.size();
+        if (m_searchStdOutBytesRead > MAX_SEARCH_STDOUT_BYTES)
+        {
+            m_searchResultLineTruncated.clear();
+            failSearch(tr("Search output exceeded the %1 MiB safety limit.")
+                .arg(MAX_SEARCH_STDOUT_BYTES / (1024 * 1024)));
+            return;
+        }
+
+        QByteArray output = m_searchResultLineTruncated;
+        output.append(chunk);
+        QList<QByteArrayView> lines = Utils::ByteArray::splitToViews(output, "\n", Qt::KeepEmptyParts);
+
+        // The last item is either empty or an incomplete line for the next
+        // chunk. Check its untrimmed length before storing it.
+        const QByteArrayView trailingLine = lines.takeLast();
+        if (trailingLine.size() > MAX_SEARCH_RESULT_LINE_BYTES)
+        {
+            m_searchResultLineTruncated.clear();
+            failSearch(tr("Search output contains a line longer than %1 KiB.")
+                .arg(MAX_SEARCH_RESULT_LINE_BYTES / 1024));
+            return;
+        }
+        m_searchResultLineTruncated = trailingLine.trimmed().toByteArray();
+
+        QList<SearchResult> searchResultList;
+        searchResultList.reserve(lines.size());
+
+        for (const QByteArrayView &line : asConst(lines))
+        {
+            if (line.size() > MAX_SEARCH_RESULT_LINE_BYTES)
+            {
+                failSearch(tr("Search output contains a line longer than %1 KiB.")
+                    .arg(MAX_SEARCH_RESULT_LINE_BYTES / 1024));
+                return;
+            }
+
+            if (SearchResult searchResult; parseSearchResult(line, searchResult))
+            {
+                searchResultList.append(std::move(searchResult));
+                if ((m_resultCount + searchResultList.size()) > MAX_SEARCH_RESULTS)
+                {
+                    // A read chunk can contain many rows after the final free
+                    // slot. Trim that batch before emitting so the advertised
+                    // cap is an actual maximum rather than an off-by-a-chunk
+                    // best effort.
+                    const qsizetype remainingResultSlots = MAX_SEARCH_RESULTS - m_resultCount;
+                    if (searchResultList.size() > remainingResultSlots)
+                        searchResultList.resize(remainingResultSlots);
+                    if (!searchResultList.isEmpty())
+                    {
+                        m_resultCount += searchResultList.size();
+                        emit newSearchResults(searchResultList);
+                    }
+                    failSearch(tr("Search stopped after collecting %1 results.").arg(MAX_SEARCH_RESULTS));
+                    return;
+                }
+            }
+        }
+
+        if (!searchResultList.isEmpty())
+        {
+            m_resultCount += searchResultList.size();
+            qCDebug(lcSearch) << "Parsed" << searchResultList.size() << "new result(s) for query" << m_pattern
+                << "(total" << m_resultCount << ')';
+            emit newSearchResults(searchResultList);
+        }
     }
+    while (drainAll && (m_searchProcess->bytesAvailable() > 0));
+
+    if (!drainAll && (m_searchProcess->bytesAvailable() > 0))
+        scheduleSearchOutputRead();
+}
+
+void SearchHandler::readSearchError(const bool drainAll)
+{
+    if (m_searchCancelled || !m_terminalError.isEmpty())
+        return;
+
+    do
+    {
+        m_searchProcess->setReadChannel(QProcess::StandardError);
+        const QByteArray chunk = m_searchProcess->read(SEARCH_READ_CHUNK_BYTES);
+        if (chunk.isEmpty())
+            break;
+
+        const qsizetype remaining = MAX_SEARCH_STDERR_BYTES - m_searchStdErr.size();
+        if (chunk.size() > remaining)
+        {
+            if (remaining > 0)
+                m_searchStdErr.append(chunk.constData(), remaining);
+            failSearch(tr("Search diagnostic output exceeded the %1 KiB safety limit.")
+                .arg(MAX_SEARCH_STDERR_BYTES / 1024));
+            return;
+        }
+        m_searchStdErr.append(chunk);
+    }
+    while (drainAll && (m_searchProcess->bytesAvailable() > 0));
+
+    if (!drainAll && (m_searchProcess->bytesAvailable() > 0))
+        scheduleSearchErrorRead();
 }
 
 // Parse one line of the search results list.
@@ -272,11 +475,6 @@ bool SearchHandler::parseSearchResult(const QByteArrayView line, SearchResult &s
 SearchPluginManager *SearchHandler::manager() const
 {
     return m_manager;
-}
-
-QList<SearchResult> SearchHandler::results() const
-{
-    return m_results;
 }
 
 QString SearchHandler::pattern() const

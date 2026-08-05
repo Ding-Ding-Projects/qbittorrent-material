@@ -84,9 +84,22 @@ Dialog {
     }
 
     function openPlugin(pluginId) {
+        if (pluginId === "__command-palette-install-search-plugin__") {
+            pendingPluginId = ""
+            open()
+            Qt.callLater(function() { root.openInstaller() })
+            return
+        }
         pendingPluginId = pluginId || ""
         open()
         Qt.callLater(function() { root.revealPlugin(root.pendingPluginId) })
+    }
+
+    function openInstaller() {
+        if (SearchController.pluginOperationInProgress)
+            return
+        Log.info("search", "Install a new plugin requested")
+        sourceDialog.open()
     }
 
     function notifyPluginOperationSummary(summary) {
@@ -377,10 +390,7 @@ Dialog {
             text: qsTr("Install a new one")
             enabled: !SearchController.pluginOperationInProgress
             DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
-            onClicked: {
-                Log.info("search", "Install a new plugin requested")
-                sourceDialog.open()
-            }
+            onClicked: root.openInstaller()
         }
         Button {
             text: qsTr("Check for updates")
@@ -406,7 +416,6 @@ Dialog {
             text: qsTr("Close")
             flat: true
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
-            onClicked: root.close()
         }
     }
 

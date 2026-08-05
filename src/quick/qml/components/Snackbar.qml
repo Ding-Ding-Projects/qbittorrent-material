@@ -24,7 +24,9 @@ import qBittorrent
 Item {
     id: root
     anchors.fill: parent
-    z: 9000
+    // This host belongs to Overlay.overlay, but must remain beneath modal
+    // dialogs and their dimmer rather than intercepting a required decision.
+    z: -1
     visible: primaryHost && activeModel.count > 0
 
     property bool primaryHost: false
@@ -117,6 +119,9 @@ Item {
         readonly property real desiredHeight: dismissAllRow.implicitHeight
                                                   + Spacing.sm
                                                   + cardsColumn.implicitHeight
+        // A focused global action is still keyboard interaction with this
+        // notification surface, so transient cards must not disappear under it.
+        readonly property bool keyboardInteractionActive: dismissAllButton.activeFocus
 
         anchors.right: parent.right
         anchors.bottom: parent.bottom
@@ -188,6 +193,8 @@ Item {
 
                             readonly property bool persistent: notificationSeverity === "warning"
                                                                || notificationSeverity === "error"
+                            readonly property bool keyboardInteractionActive:
+                                notificationAction.activeFocus || notificationDismiss.activeFocus
                             readonly property color accent: notificationSeverity === "error" ? Theme.color("error")
                                                             : notificationSeverity === "warning" ? Theme.color("warning")
                                                             : notificationSeverity === "success" ? Theme.color("success")
@@ -246,6 +253,7 @@ Item {
                                         elide: Text.ElideRight
                                     }
                                     Button {
+                                        id: notificationAction
                                         visible: card.notificationActionLabel.length > 0
                                         text: card.notificationActionLabel
                                         flat: true
@@ -261,6 +269,7 @@ Item {
                                 }
 
                                 IconButton {
+                                    id: notificationDismiss
                                     Layout.alignment: Qt.AlignTop
                                     symbol: Icons.close
                                     size: Spacing.iconSizeSmall
@@ -277,7 +286,11 @@ Item {
                             Timer {
                                 interval: card.notificationSeverity === "success" ? 4000
                                         : card.notificationSeverity === "progress" ? 6500 : 5000
+                                // A keyboard user needs time to invoke the
+                                // focused action before a transient card goes.
                                 running: !card.persistent
+                                         && !snackbarViewport.keyboardInteractionActive
+                                         && !card.keyboardInteractionActive
                                 onTriggered: {
                                     var id = card.notificationId
                                     NotificationCenter.dismiss(id)

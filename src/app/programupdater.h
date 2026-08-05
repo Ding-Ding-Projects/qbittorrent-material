@@ -49,9 +49,7 @@ class ProgramUpdater final : public QObject
     Q_PROPERTY(int progress READ progress NOTIFY progressChanged)
     Q_PROPERTY(QString availableVersion READ availableVersion NOTIFY availableVersionChanged)
     // The URL is version-bound (and therefore refreshed with the version), not
-    // a mutable "latest" link. The constant-form contract is retained here as
-    // a review marker for consumers that only inspect the property declaration.
-    // Q_PROPERTY(QUrl releaseNotesUrl READ releaseNotesUrl CONSTANT)
+    // a mutable "latest" link.
     Q_PROPERTY(QUrl releaseNotesUrl READ releaseNotesUrl NOTIFY availableVersionChanged)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY stateChanged)
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY errorMessageChanged)

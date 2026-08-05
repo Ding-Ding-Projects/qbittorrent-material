@@ -162,14 +162,12 @@ Dialog {
             flat: true
             focus: true
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
-            onClicked: root.reject()
         }
 
         Button {
             text: root._okLabel()
             highlighted: true
             DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
-            onClicked: root.accept()
         }
     }
 

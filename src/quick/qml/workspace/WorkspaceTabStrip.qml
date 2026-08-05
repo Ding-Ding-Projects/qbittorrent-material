@@ -46,6 +46,62 @@ Rectangle {
     color: Theme.color("surfaceVariant")
     border.width: 0
 
+    function mergeAppearance(result, values) {
+        if (!values)
+            return result
+        var keys = Object.keys(values)
+        for (var i = 0; i < keys.length; ++i)
+            result[keys[i]] = values[keys[i]]
+        return result
+    }
+
+    function resolveGroupAppearance(group) {
+        var result = mergeAppearance({}, WorkspaceManager.globalAppearance || ({}))
+        return mergeAppearance(result, group && group.appearance ? group.appearance : ({}))
+    }
+
+    function resolveTabAppearance(tab) {
+        // Read the groups property directly so this binding also refreshes when
+        // a group-level sparse override changes. The editor previews the same
+        // global → group → tab order; the strip must render that order too.
+        var groups = WorkspaceManager.groups || []
+        var result = mergeAppearance({}, WorkspaceManager.globalAppearance || ({}))
+        if (tab && tab.groupId) {
+            for (var i = 0; i < groups.length; ++i) {
+                if (groups[i].groupId === tab.groupId) {
+                    mergeAppearance(result, groups[i].appearance || ({}))
+                    break
+                }
+            }
+        }
+        return mergeAppearance(result, tab && tab.appearance ? tab.appearance : ({}))
+    }
+
+    function appearanceValue(appearance, key, fallback) {
+        if (!appearance || appearance[key] === undefined || appearance[key] === null)
+            return fallback
+        return appearance[key]
+    }
+
+    function appearanceNumber(appearance, key, fallback) {
+        var value = appearanceValue(appearance, key, fallback)
+        var parsed = Number(value)
+        return isFinite(parsed) ? parsed : fallback
+    }
+
+    function appearanceBool(appearance, key, fallback) {
+        var value = appearanceValue(appearance, key, fallback)
+        return value === true || value === "true" || value === 1
+    }
+
+    function capitalization(value) {
+        if (value === "AllUppercase" || value === "Uppercase") return Font.AllUppercase
+        if (value === "AllLowercase" || value === "Lowercase") return Font.AllLowercase
+        if (value === "SmallCaps") return Font.SmallCaps
+        if (value === "Capitalize") return Font.Capitalize
+        return Font.MixedCase
+    }
+
     /*! Scrolls the tab with workspace index \a index into view without stealing
         focus. Pinned tabs are always on screen, so only the ordinary list moves. */
     function positionTabInView(index) {
@@ -82,11 +138,12 @@ Rectangle {
         required property var tabData
         property bool compact: false
         property alias dragActive: dragHandler.active
+        readonly property var resolvedAppearance: root.resolveTabAppearance(tabData)
 
         width: compact ? 54 : Math.max(132, Math.min(230, implicitWidth))
         height: ListView.view ? ListView.view.height : Spacing.controlHeight
-        leftPadding: Spacing.sm
-        rightPadding: Spacing.xs
+        leftPadding: root.appearanceNumber(resolvedAppearance, "padding", Spacing.sm)
+        rightPadding: root.appearanceNumber(resolvedAppearance, "padding", Spacing.xs)
         checked: tabData.index === WorkspaceManager.activeIndex
         activeFocusOnTab: true
         objectName: "workspaceTab_" + tabData.tabId
@@ -137,19 +194,25 @@ Rectangle {
         }
 
         background: Rectangle {
-            radius: tabData.appearance.radius !== undefined
-                ? tabData.appearance.radius : Spacing.radiusControl
+            radius: root.appearanceNumber(control.resolvedAppearance, "radius",
+                Spacing.radiusControl)
             // Every state needs its own fill or the tabs read as one flat band.
             // Unselected tabs were "transparent", which on a same-coloured strip
             // meant browser-style tab shapes were never drawn at all.
             color: control.checked
-                ? (tabData.appearance.checkedColor || Theme.color("primaryContainer"))
+                ? root.appearanceValue(control.resolvedAppearance, "checkedColor",
+                    Theme.color("primaryContainer"))
                 : (control.hovered
-                    ? (tabData.appearance.hoverColor || Theme.color("surfaceContainerHigh"))
-                    : (tabData.appearance.backgroundColor || Theme.color("surface")))
-            border.width: tabData.appearance.borderWidth
-                || (control.checked ? 0 : Spacing.outlineWidth)
-            border.color: tabData.appearance.borderColor || Theme.color("outlineVariant")
+                    ? root.appearanceValue(control.resolvedAppearance, "hoverColor",
+                        Theme.color("surfaceContainerHigh"))
+                    : root.appearanceValue(control.resolvedAppearance, "backgroundColor",
+                        Theme.color("surface")))
+            // Zero is a real saved border width, not a request to fall back to
+            // the state default.
+            border.width: root.appearanceNumber(control.resolvedAppearance, "borderWidth",
+                control.checked ? 0 : Spacing.outlineWidth)
+            border.color: root.appearanceValue(control.resolvedAppearance, "borderColor",
+                Theme.color("outlineVariant"))
             Behavior on color { ColorAnimation { duration: Spacing.motionFast } }
         }
 
@@ -158,26 +221,37 @@ Rectangle {
             MDIcon {
                 icon: control.tabData.pinned ? Icons.lock : Icons.article
                 size: 16
-                color: control.checked
-                    ? Theme.color("primary") : Theme.color("onSurfaceVariant")
+                color: root.appearanceValue(control.resolvedAppearance, "textColor",
+                    control.checked ? Theme.color("primary") : Theme.color("onSurfaceVariant"))
             }
             Label {
                 visible: !control.compact
                 text: control.tabData.name
                 textFormat: Text.PlainText
                 elide: Text.ElideRight
-                font.family: control.tabData.appearance.fontFamily || Typography.family
-                font.pixelSize: control.tabData.appearance.fontPointSize
-                    ? control.tabData.appearance.fontPointSize * 1.333 : Typography.titleSmall.pixelSize
-                font.weight: control.tabData.appearance.fontWeight || Typography.titleSmall.weight
-                font.bold: !!control.tabData.appearance.bold
-                font.italic: !!control.tabData.appearance.italic
-                font.underline: !!control.tabData.appearance.underline
-                font.strikeout: !!control.tabData.appearance.strikeout
-                font.letterSpacing: control.tabData.appearance.letterSpacing || 0
-                font.wordSpacing: control.tabData.appearance.wordSpacing || 0
-                color: control.tabData.appearance.textColor || (control.checked
-                    ? Theme.color("primary") : Theme.color("onSurfaceVariant"))
+                font.family: root.appearanceValue(control.resolvedAppearance, "fontFamily",
+                    Typography.family)
+                font.styleName: root.appearanceValue(control.resolvedAppearance, "fontStyle", "")
+                font.pixelSize: root.appearanceNumber(control.resolvedAppearance,
+                    "fontPointSize", Typography.titleSmall.pixelSize / 1.333) * 1.333
+                font.weight: root.appearanceNumber(control.resolvedAppearance, "fontWeight",
+                    Typography.titleSmall.weight)
+                font.bold: root.appearanceBool(control.resolvedAppearance, "bold", false)
+                font.italic: root.appearanceBool(control.resolvedAppearance, "italic", false)
+                font.underline: root.appearanceBool(control.resolvedAppearance, "underline", false)
+                font.strikeout: root.appearanceBool(control.resolvedAppearance, "strikeout", false)
+                    || root.appearanceBool(control.resolvedAppearance, "doubleStrike", false)
+                font.overline: root.appearanceBool(control.resolvedAppearance, "overline", false)
+                font.capitalization: root.capitalization(root.appearanceValue(
+                    control.resolvedAppearance, "capitalization", "MixedCase"))
+                font.letterSpacing: root.appearanceNumber(control.resolvedAppearance,
+                    "letterSpacing", 0)
+                font.wordSpacing: root.appearanceNumber(control.resolvedAppearance,
+                    "wordSpacing", 0)
+                LayoutMirroring.enabled: root.appearanceValue(control.resolvedAppearance,
+                    "direction", "Auto") === "RightToLeft"
+                color: root.appearanceValue(control.resolvedAppearance, "textColor",
+                    control.checked ? Theme.color("primary") : Theme.color("onSurfaceVariant"))
                 Layout.fillWidth: true
             }
             IconButton {
@@ -341,18 +415,20 @@ Rectangle {
                 Rectangle {
                     id: groupHeader
                     visible: visualItem.modelData.kind === "group"
+                    readonly property var resolvedAppearance: root.resolveGroupAppearance(
+                        visible ? visualItem.modelData.group : null)
                     width: visible ? Math.max(96, groupRow.implicitWidth + Spacing.sm * 2) : 0
                     height: parent.height
-                    radius: visualItem.modelData.kind === "group"
-                        && visualItem.modelData.group.appearance.radius !== undefined
-                        ? visualItem.modelData.group.appearance.radius : Spacing.radiusControl
+                    radius: root.appearanceNumber(resolvedAppearance, "radius",
+                        Spacing.radiusControl)
                     color: visualItem.modelData.kind === "group"
-                        ? (visualItem.modelData.group.appearance.backgroundColor
-                            || Theme.color("surfaceVariant")) : "transparent"
-                    border.width: 1
+                        ? root.appearanceValue(resolvedAppearance, "backgroundColor",
+                            Theme.color("surfaceVariant")) : "transparent"
+                    border.width: visible ? root.appearanceNumber(resolvedAppearance,
+                        "borderWidth", 1) : 0
                     border.color: visualItem.modelData.kind === "group"
-                        ? (visualItem.modelData.group.appearance.borderColor
-                            || visualItem.modelData.group.color) : "transparent"
+                        ? root.appearanceValue(resolvedAppearance, "borderColor",
+                            visualItem.modelData.group.color) : "transparent"
                     activeFocusOnTab: visible
                     Accessible.name: visible ? qsTr("Tab group %1, %2")
                         .arg(visualItem.modelData.group.name)
@@ -408,12 +484,37 @@ Rectangle {
                             text: visualItem.modelData.kind === "group"
                                 ? visualItem.modelData.group.name : ""
                             color: visualItem.modelData.kind === "group"
-                                ? (visualItem.modelData.group.appearance.textColor
-                                    || visualItem.modelData.group.color) : Theme.color("onSurface")
+                                ? root.appearanceValue(groupHeader.resolvedAppearance,
+                                    "textColor", visualItem.modelData.group.color)
+                                : Theme.color("onSurface")
                             font.family: visualItem.modelData.kind === "group"
-                                ? (visualItem.modelData.group.appearance.fontFamily
-                                    || Typography.family) : Typography.family
-                            font.bold: true
+                                ? root.appearanceValue(groupHeader.resolvedAppearance,
+                                    "fontFamily", Typography.family) : Typography.family
+                            font.styleName: root.appearanceValue(groupHeader.resolvedAppearance,
+                                "fontStyle", "")
+                            font.pixelSize: root.appearanceNumber(groupHeader.resolvedAppearance,
+                                "fontPointSize", Typography.labelLarge.pixelSize / 1.333) * 1.333
+                            font.weight: root.appearanceNumber(groupHeader.resolvedAppearance,
+                                "fontWeight", Typography.labelLarge.weight)
+                            font.bold: root.appearanceBool(groupHeader.resolvedAppearance,
+                                "bold", true)
+                            font.italic: root.appearanceBool(groupHeader.resolvedAppearance,
+                                "italic", false)
+                            font.underline: root.appearanceBool(groupHeader.resolvedAppearance,
+                                "underline", false)
+                            font.strikeout: root.appearanceBool(groupHeader.resolvedAppearance,
+                                "strikeout", false) || root.appearanceBool(
+                                groupHeader.resolvedAppearance, "doubleStrike", false)
+                            font.overline: root.appearanceBool(groupHeader.resolvedAppearance,
+                                "overline", false)
+                            font.capitalization: root.capitalization(root.appearanceValue(
+                                groupHeader.resolvedAppearance, "capitalization", "MixedCase"))
+                            font.letterSpacing: root.appearanceNumber(groupHeader.resolvedAppearance,
+                                "letterSpacing", 0)
+                            font.wordSpacing: root.appearanceNumber(groupHeader.resolvedAppearance,
+                                "wordSpacing", 0)
+                            LayoutMirroring.enabled: root.appearanceValue(
+                                groupHeader.resolvedAppearance, "direction", "Auto") === "RightToLeft"
                             elide: Text.ElideRight
                             Layout.maximumWidth: 130
                         }

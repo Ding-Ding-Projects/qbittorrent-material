@@ -137,7 +137,6 @@ Dialog {
             flat: true
             focus: true
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
-            onClicked: root.reject()
         }
 
         Button {
@@ -152,10 +151,8 @@ Dialog {
             DialogButtonBox.buttonRole: removeContent.checked
                 ? DialogButtonBox.ActionRole : DialogButtonBox.AcceptRole
             onClicked: {
-                if (!removeContent.checked) {
-                    root.accept()
+                if (!removeContent.checked)
                     return
-                }
                 Log.info("ui", "DeletionConfirmationDialog escalating to super confirmation")
                 superConfirm.originatingControl = confirmButton
                 superConfirm.open()

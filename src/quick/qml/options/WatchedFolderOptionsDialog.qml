@@ -147,26 +147,24 @@ Dialog {
             text: qsTr("Cancel")
             flat: true
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
-            onClicked: root.reject()
         }
         Button {
             text: qsTr("OK")
             highlighted: true
             enabled: root.folderPath.length > 0
             DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
-            onClicked: {
-                var options = {
-                    path: root.folderPath,
-                    recursive: recursiveSwitch.checked,
-                    params: paramsForm.params
-                }
-                Log.info("ui", "WatchedFolderOptionsDialog OK for row " + root.row + " path=" + root.folderPath)
-                root.committed(root.row, options)
-                root.close()
-            }
         }
     }
 
+    onAccepted: {
+        var options = {
+            path: root.folderPath,
+            recursive: recursiveSwitch.checked,
+            params: paramsForm.params
+        }
+        Log.info("ui", "WatchedFolderOptionsDialog OK for row " + root.row + " path=" + root.folderPath)
+        root.committed(root.row, options)
+    }
     onRejected: Log.debug("ui", "WatchedFolderOptionsDialog cancelled")
     Component.onCompleted: Log.debug("ui", "WatchedFolderOptionsDialog constructed")
 }

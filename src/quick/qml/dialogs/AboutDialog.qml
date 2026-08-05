@@ -418,10 +418,8 @@ Dialog {
             text: qsTr("Close")
             highlighted: true
             DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
-            onClicked: {
-                Log.debug("ui", "AboutDialog Close clicked")
-                root.close()
-            }
         }
     }
+
+    onAccepted: Log.debug("ui", "AboutDialog closed")
 }

@@ -35,6 +35,7 @@
 #include "base/settingsstorage.h"
 #include "app/appcontroller.h"
 #include "app/desktopintegration.h"
+#include "app/updaterecovery.h"
 #include "quick/theme/iconprovider.h"
 
 // --- Optional cross-team engine headers (tolerant coupling) ------------------
@@ -91,6 +92,10 @@
 #endif
 
 using namespace Qt::StringLiterals;
+
+#ifndef QBT_PACKAGE_VERSION
+#define QBT_PACKAGE_VERSION "5.3.0"
+#endif
 
 namespace
 {
@@ -169,8 +174,9 @@ Application::Application(int &argc, char **argv)
     setApplicationName(u"qBittorrent"_qs);
     setOrganizationName(u"qBittorrent"_qs);
     setOrganizationDomain(u"qbittorrent.org"_qs);
-    setApplicationVersion(QCoreApplication::applicationVersion().isEmpty()
-            ? u"5.3.0-material"_qs : QCoreApplication::applicationVersion());
+    // The Squirrel package version is the one update UI and support reports
+    // must share. Do not inherit a stale Windows resource version here.
+    setApplicationVersion(QString::fromUtf8(QBT_PACKAGE_VERSION));
     setApplicationDisplayName(u"qBittorrent"_qs);
     const QIcon brandIcon(u":/branding/logo-mark.png"_qs);
     if (!brandIcon.isNull())
@@ -325,6 +331,27 @@ int Application::run()
     m_engine->addImageProvider(u"flags"_qs, new FlagImageProvider);
     registerContext();
     loadMainQml();
+
+    // This is deliberately queued: a health-ready marker means Main.qml exists
+    // and the event loop completed a turn, not merely that the target process
+    // was spawned. A failed marker lets the detached old-binary watchdog roll
+    // back without ever terminating a live process that might hold user work.
+    if (!m_engine->rootObjects().isEmpty())
+    {
+        QTimer::singleShot(0, this,
+                [this]
+                {
+                    QString recoveryError;
+                    if (UpdateRecovery::acknowledgeReady(
+                                QCoreApplication::arguments(), &recoveryError))
+                    {
+                        return;
+                    }
+                    qCCritical(lcApp).noquote()
+                            << "Update recovery ready acknowledgement failed:" << recoveryError;
+                    QCoreApplication::exit(1);
+                });
+    }
 
     // Documentation captures are intentionally self-terminating. QML performs
     // the page/theme/dialog setup and normally captures after the scene has

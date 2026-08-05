@@ -46,6 +46,10 @@ Popup {
         (passwordField.text.length >= minLength)
         && (passwordField.text === confirmField.text)
 
+    // Popup.CloseOnEscape calls close() directly, so track the terminal path
+    // and notify the caller exactly once for every cancellation route.
+    property bool terminalHandled: false
+
     modal: true
     focus: true
     closePolicy: Popup.CloseOnEscape
@@ -64,17 +68,33 @@ Popup {
     }
 
     onOpened: {
+        terminalHandled = false
         Log.debug("ui", "LockPasswordDialog opened")
         passwordField.clear()
         confirmField.clear()
         passwordField.forceActiveFocus()
     }
 
+    onClosed: {
+        if (!terminalHandled) {
+            terminalHandled = true
+            Log.debug("ui", "LockPasswordDialog dismissed")
+            root.rejected()
+        }
+
+        // The popup instance persists after closing; never retain the secret
+        // fields until the next time the user opens it.
+        passwordField.clear()
+        confirmField.clear()
+    }
+
     function _accept() {
-        if (!root._valid) {
+        if (terminalHandled || !root._valid) {
             Log.warning("ui", "LockPasswordDialog: invalid password (too short or mismatched)")
             return
         }
+
+        terminalHandled = true
         // Deliberately never log the password value itself.
         Log.info("ui", "LockPasswordDialog accepted; new UI lock password set")
         root.accepted(passwordField.text)
@@ -82,6 +102,10 @@ Popup {
     }
 
     function _reject() {
+        if (terminalHandled)
+            return
+
+        terminalHandled = true
         Log.debug("ui", "LockPasswordDialog rejected")
         root.rejected()
         root.close()
@@ -128,6 +152,7 @@ Popup {
                 echoMode: TextInput.Password
                 placeholderText: qsTr("Enter a password")
                 selectByMouse: true
+                Accessible.name: qsTr("Password")
                 onAccepted: confirmField.forceActiveFocus()
             }
         }
@@ -143,6 +168,7 @@ Popup {
                 echoMode: TextInput.Password
                 placeholderText: qsTr("Re-enter the password")
                 selectByMouse: true
+                Accessible.name: qsTr("Confirm password")
                 onAccepted: root._accept()
             }
         }

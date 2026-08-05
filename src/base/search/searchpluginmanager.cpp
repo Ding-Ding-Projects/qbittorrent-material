@@ -294,6 +294,7 @@ QVariantList SearchPluginManager::palettePluginCatalog() const
     {
         const auto catalogIt = m_catalogEntries.constFind(id);
         const bool catalogDefault = catalogIt != m_catalogEntries.cend();
+        const bool catalogUnavailable = catalogDefault && catalogIt.value().sources.isEmpty();
         const bool bundledDefault = m_bundledPluginIDs.contains(id);
         const bool defaultPlugin = catalogDefault || bundledDefault;
         const Path activePath = pluginPath(id);
@@ -345,6 +346,8 @@ QVariantList SearchPluginManager::palettePluginCatalog() const
             }
             else if (activeOnDisk)
                 integrityState = u"user-managed"_s;
+            else if (catalogUnavailable)
+                integrityState = u"unavailable"_s;
             else
                 integrityState = userRemoved ? u"user-removed"_s : u"missing"_s;
         }
@@ -358,6 +361,8 @@ QVariantList SearchPluginManager::palettePluginCatalog() const
             runtimeState = u"quarantined"_s;
         else if (activeOnDisk && runtimeState.isEmpty())
             runtimeState = u"import-failed"_s;
+        else if (catalogUnavailable && runtimeState.isEmpty())
+            runtimeState = u"unavailable"_s;
         else if (runtimeState.isEmpty())
             runtimeState = userRemoved ? u"user-removed"_s : u"not-installed"_s;
 
@@ -373,6 +378,12 @@ QVariantList SearchPluginManager::palettePluginCatalog() const
         QString diagnostic = ledger.diagnostic;
         if (diagnostic.isEmpty() && runtimeWaiting)
             diagnostic = m_runtimeError;
+        else if (diagnostic.isEmpty() && catalogUnavailable && !activeOnDisk)
+        {
+            diagnostic = catalogIt.value().unavailableReason.isEmpty()
+                ? tr("No verified source compatible with the bundled search runtime is available.")
+                : catalogIt.value().unavailableReason;
+        }
 
         QVariantMap item;
         item.insert(u"id"_s, id);
@@ -396,6 +407,7 @@ QVariantList SearchPluginManager::palettePluginCatalog() const
             && (runtimeWaiting || !installedOnDisk || (!registered && !canTrust)));
         item.insert(u"canManage"_s, registered || installedOnDisk);
         item.insert(u"catalogDefault"_s, catalogDefault);
+        item.insert(u"catalogUnavailable"_s, catalogUnavailable);
         item.insert(u"bundledDefault"_s, bundledDefault);
         item.insert(u"userRemoved"_s, userRemoved);
         result.append(item);
@@ -1120,6 +1132,10 @@ void SearchPluginManager::retryUnofficialCatalogSync()
     m_catalogStatus[u"state"_s] = u"probing-runtime"_s;
     m_catalogStatus[u"inProgress"_s] = true;
     emit unofficialCatalogStatusChanged(m_catalogStatus);
+    // The automatic detector intentionally caches a missing interpreter to
+    // avoid repeated synchronous PATH probes. A user-triggered retry is the
+    // explicit recovery point after Python may have been installed.
+    Utils::ForeignApps::resetAutomaticPythonDetection();
     update(true, [this]
     {
         m_catalogRetryPending = false;
@@ -1476,6 +1492,9 @@ void SearchPluginManager::startUnofficialCatalogSync()
     m_currentCatalogFailure.clear();
     m_currentCatalogSource = 0;
     m_catalogPreexisting = false;
+    m_catalogAutoActivationAttempted = false;
+    m_catalogAutoActivationInProgress = false;
+    m_catalogActivationTransactions.clear();
 
     QFile manifest {UNOFFICIAL_MANIFEST_PATH};
     if (!manifest.open(QIODevice::ReadOnly))
@@ -1571,11 +1590,15 @@ void SearchPluginManager::startUnofficialCatalogSync()
         if (!entryIndexes.contains(canonicalID))
         {
             entryIndexes.insert(canonicalID, entries.size());
-            entries.append({canonicalID, {}});
+            entries.append(CatalogEntry {canonicalID, {}, {}});
         }
 
         if (!object.value(u"available"_s).toBool(false))
         {
+            const QString unavailableReason = object.value(u"unavailableReason"_s).toString().trimmed().left(512);
+            CatalogEntry &entry = entries[entryIndexes.value(canonicalID)];
+            if (entry.unavailableReason.isEmpty() && !unavailableReason.isEmpty())
+                entry.unavailableReason = unavailableReason;
             ++unavailableSources;
             continue;
         }
@@ -1643,6 +1666,9 @@ void SearchPluginManager::startUnofficialCatalogSync()
         {u"runtimeUnavailable"_s, false},
         {u"runtimeError"_s, QString {}},
         {u"awaitingRuntime"_s, 0},
+        {u"unavailable"_s, 0},
+        {u"automaticallyActivated"_s, 0},
+        {u"automaticActivationPending"_s, 0},
         {u"errors"_s, QStringList {}}
     };
     m_catalogSyncInProgress = true;
@@ -1663,8 +1689,11 @@ void SearchPluginManager::startUnofficialCatalogSync()
     {
         if (entry.sources.isEmpty())
         {
-            m_catalogFailures.append(tr("%1 has no available verified source.").arg(entry.id));
-            m_catalogStatus[u"failed"_s] = m_catalogStatus.value(u"failed"_s).toInt() + 1;
+            // A manifest may intentionally retain a canonical wiki entry that
+            // cannot run against our bundled Nova ABI. Keep it searchable with
+            // a concrete unavailable state, but do not turn one unavailable
+            // source into a startup installation failure or retry storm.
+            m_catalogStatus[u"unavailable"_s] = m_catalogStatus.value(u"unavailable"_s).toInt() + 1;
             m_catalogStatus[u"completed"_s] = m_catalogStatus.value(u"completed"_s).toInt() + 1;
             continue;
         }
@@ -1751,7 +1780,6 @@ void SearchPluginManager::startUnofficialCatalogSync()
                 m_catalogStatus[u"quarantined"_s] = m_catalogStatus.value(u"quarantined"_s).toInt() + 1;
                 m_catalogStatus[u"awaitingTrust"_s] = m_catalogStatus.value(u"awaitingTrust"_s).toInt() + 1;
                 m_catalogStatus[u"completed"_s] = m_catalogStatus.value(u"completed"_s).toInt() + 1;
-                m_catalogPendingSeeded.append(entry.id);
             }
             else
             {
@@ -1799,7 +1827,6 @@ void SearchPluginManager::startUnofficialCatalogSync()
             m_catalogStatus[u"quarantined"_s] = m_catalogStatus.value(u"quarantined"_s).toInt() + 1;
             m_catalogStatus[u"awaitingTrust"_s] = m_catalogStatus.value(u"awaitingTrust"_s).toInt() + 1;
             m_catalogStatus[u"completed"_s] = m_catalogStatus.value(u"completed"_s).toInt() + 1;
-            m_catalogPendingSeeded.append(entry.id);
             continue;
         }
 
@@ -1947,7 +1974,6 @@ void SearchPluginManager::unofficialPluginDownloadFinished(const Net::DownloadRe
                     failure = tr("The verified plugin was quarantined, but its trust ledger could not be persisted.");
                 else
                 {
-                    m_catalogPendingSeeded.append(m_currentCatalogEntry.id);
                     m_catalogStatus[u"quarantined"_s] = m_catalogStatus.value(u"quarantined"_s).toInt() + 1;
                     m_catalogStatus[u"awaitingTrust"_s] = m_catalogStatus.value(u"awaitingTrust"_s).toInt() + 1;
                 }
@@ -1970,10 +1996,285 @@ void SearchPluginManager::unofficialPluginDownloadFinished(const Net::DownloadRe
     downloadNextUnofficialPlugin();
 }
 
+void SearchPluginManager::recordUnofficialCatalogActivationFailure(const QString &id, const QString &reason)
+{
+    const QString detail = u"%1: %2"_s.arg(id, reason);
+    m_catalogFailures.append(detail);
+    m_catalogStatus[u"failed"_s] = m_catalogStatus.value(u"failed"_s).toInt() + 1;
+    qCWarning(lcSearch).noquote() << QStringLiteral("Verified catalog plugin \"%1\" was not activated: %2")
+        .arg(id, reason);
+}
+
+void SearchPluginManager::startUnofficialCatalogActivation()
+{
+    if (m_catalogAutoActivationInProgress || !runtimeReady())
+        return;
+
+    for (const QString &id : std::as_const(m_catalogCanonicalIDs))
+    {
+        const auto catalogIt = m_catalogEntries.constFind(id);
+        auto ledgerIt = m_catalogLedger.find(id);
+        if ((catalogIt == m_catalogEntries.cend()) || (ledgerIt == m_catalogLedger.end()))
+            continue;
+
+        const CatalogEntry &entry = catalogIt.value();
+        CatalogLedgerEntry &state = ledgerIt.value();
+        if (entry.sources.isEmpty() || state.userRemoved
+            || (state.integrityState == u"runtime-incompatible"_s))
+        {
+            continue;
+        }
+
+        const bool pinStillCurrent = std::ranges::any_of(entry.sources,
+            [&state](const CatalogSource &source)
+            {
+                return (source.sha256 == state.expectedHash) && (source.url == state.sourceUrl);
+            });
+        const Path candidatePath = catalogQuarantinePath(id, state.expectedHash);
+        const QByteArray candidateHash = candidatePath.exists() ? fileSha256(candidatePath) : QByteArray {};
+        if (!pinStillCurrent || !isSha256(state.expectedHash)
+            || (state.expectedHash != state.observedHash) || (candidateHash != state.expectedHash))
+        {
+            continue;
+        }
+
+        const Path activePath = pluginPath(id);
+        const bool hadActive = activePath.exists();
+        const QByteArray previousActiveHash = hadActive ? fileSha256(activePath) : QByteArray {};
+        const bool activeIsCatalogOwned = hadActive && state.catalogOwned && state.trusted
+            && isSha256(state.activeHash) && (previousActiveHash == state.activeHash);
+        if (hadActive && !activeIsCatalogOwned)
+        {
+            // Never replace a manual/custom plugin just because an identically
+            // named catalog candidate is available.
+            continue;
+        }
+
+        if (hadActive && (previousActiveHash == candidateHash) && m_plugins.contains(id))
+        {
+            state.catalogOwned = true;
+            state.trusted = true;
+            state.userRemoved = false;
+            state.activeHash = candidateHash;
+            state.integrityState = u"verified-current"_s;
+            state.runtimeState = u"ready"_s;
+            state.diagnostic.clear();
+            if (candidatePath.exists())
+                Utils::Fs::removeFile(candidatePath);
+            if (!m_catalogPendingSeeded.contains(id))
+                m_catalogPendingSeeded.append(id);
+            continue;
+        }
+
+        const quint64 generation = state.generation + 1;
+        const Path backupPath = hadActive
+            ? (catalogQuarantineLocation() / Path(u"%1-active-backup-%2-%3.py"_s
+                .arg(id, QString::number(generation), QString::fromLatin1(previousActiveHash))))
+            : Path {};
+        state.generation = generation;
+        state.runtimeState = u"validating"_s;
+        state.integrityState = hadActive ? u"validating-update"_s : u"validating"_s;
+        state.diagnostic = tr("Automatically validating this SHA-256-verified catalog plugin.");
+        state.userRemoved = false;
+        if (!saveCatalogLedger())
+        {
+            state.runtimeState = u"quarantined"_s;
+            state.integrityState = hadActive ? u"pending-update-trust"_s : u"pending-trust"_s;
+            state.diagnostic = tr("The automatic activation transaction could not be persisted, so the active file was not changed.");
+            recordUnofficialCatalogActivationFailure(id, state.diagnostic);
+            continue;
+        }
+
+        if (hadActive)
+        {
+            if (backupPath.exists())
+            {
+                state.runtimeState = u"quarantined"_s;
+                state.integrityState = u"pending-update-trust"_s;
+                state.diagnostic = tr("An automatic activation backup already exists. The active file was preserved.");
+                saveCatalogLedger();
+                recordUnofficialCatalogActivationFailure(id, state.diagnostic);
+                continue;
+            }
+
+            QString backupError;
+            if (!atomicCopyFile(activePath, backupPath, &backupError)
+                || (fileSha256(backupPath) != previousActiveHash))
+            {
+                state.runtimeState = u"quarantined"_s;
+                state.integrityState = u"pending-update-trust"_s;
+                state.diagnostic = tr("The current catalog plugin could not be backed up before automatic activation: %1")
+                    .arg(backupError);
+                saveCatalogLedger();
+                recordUnofficialCatalogActivationFailure(id, state.diagnostic);
+                continue;
+            }
+        }
+
+        QString promotionError;
+        if (!atomicCopyFile(candidatePath, activePath, &promotionError)
+            || (fileSha256(activePath) != candidateHash))
+        {
+            state.runtimeState = u"quarantined"_s;
+            state.integrityState = hadActive ? u"pending-update-trust"_s : u"pending-trust"_s;
+            state.diagnostic = tr("The SHA-256-verified catalog file could not be activated automatically: %1")
+                .arg(promotionError);
+            if (hadActive && backupPath.exists() && (fileSha256(backupPath) == previousActiveHash))
+                Utils::Fs::removeFile(backupPath);
+            saveCatalogLedger();
+            recordUnofficialCatalogActivationFailure(id, state.diagnostic);
+            continue;
+        }
+
+        m_catalogActivationTransactions.insert(id, CatalogActivationTransaction {
+            candidateHash, previousActiveHash, backupPath, generation, hadActive
+        });
+    }
+
+    if (m_catalogActivationTransactions.isEmpty())
+        return;
+
+    m_catalogAutoActivationInProgress = true;
+    m_catalogStatus[u"state"_s] = u"validating"_s;
+    m_catalogStatus[u"automaticActivationPending"_s] = m_catalogActivationTransactions.size();
+    emit unofficialCatalogStatusChanged(m_catalogStatus);
+
+    // All candidates have already passed their immutable SHA-256 pins. Run one
+    // capability process for the entire batch so default setup does not launch
+    // a Python interpreter once per catalog row or emit per-plugin feedback.
+    clearPythonCache(engineLocation());
+    update(true, [this] { finishUnofficialCatalogActivation(); });
+}
+
+void SearchPluginManager::finishUnofficialCatalogActivation()
+{
+    if (!m_catalogAutoActivationInProgress)
+        return;
+
+    m_catalogAutoActivationInProgress = false;
+    bool requiresReconciliation = false;
+    for (auto transactionIt = m_catalogActivationTransactions.cbegin();
+         transactionIt != m_catalogActivationTransactions.cend(); ++transactionIt)
+    {
+        const QString &id = transactionIt.key();
+        const CatalogActivationTransaction &transaction = transactionIt.value();
+        auto ledgerIt = m_catalogLedger.find(id);
+        if (ledgerIt == m_catalogLedger.end())
+            continue;
+
+        CatalogLedgerEntry &state = ledgerIt.value();
+        const Path activePath = pluginPath(id);
+        const QByteArray activeHash = activePath.exists() ? fileSha256(activePath) : QByteArray {};
+        if (state.userRemoved || (state.generation != transaction.generation)
+            || (activeHash != transaction.candidateHash))
+        {
+            // The user removed or replaced this engine while the aggregate
+            // capability process ran. The generation and hash guard must run
+            // before every ledger mutation, rollback copy, or active-file
+            // deletion so a catalog transaction can never resurrect or erase
+            // a newer user decision.
+            qCInfo(lcSearch) << "Skipping stale automatic catalog activation transaction:" << id;
+            requiresReconciliation = true;
+            continue;
+        }
+        if ((activeHash == transaction.candidateHash) && runtimeReady() && m_plugins.contains(id))
+        {
+            state.catalogOwned = true;
+            state.trusted = true;
+            state.userRemoved = false;
+            state.activeHash = transaction.candidateHash;
+            state.integrityState = u"verified-current"_s;
+            state.runtimeState = u"ready"_s;
+            state.diagnostic.clear();
+
+            const Path candidatePath = catalogQuarantinePath(id, transaction.candidateHash);
+            if (candidatePath.exists() && (fileSha256(candidatePath) == transaction.candidateHash))
+                Utils::Fs::removeFile(candidatePath);
+            if (transaction.hadActive && transaction.backupPath.exists()
+                && (fileSha256(transaction.backupPath) == transaction.previousActiveHash))
+            {
+                Utils::Fs::removeFile(transaction.backupPath);
+            }
+            if (!m_catalogPendingSeeded.contains(id))
+                m_catalogPendingSeeded.append(id);
+            m_catalogStatus[u"automaticallyActivated"_s] = m_catalogStatus.value(u"automaticallyActivated"_s).toInt() + 1;
+            continue;
+        }
+
+        const QString importDiagnostic = m_pluginImportErrors.value(id);
+        QString reason = !m_runtimeError.isEmpty()
+            ? m_runtimeError
+            : (!importDiagnostic.isEmpty()
+                ? tr("The plugin failed to import: %1").arg(importDiagnostic)
+                : tr("The runtime did not register an engine named \"%1\".").arg(id));
+
+        bool restored = false;
+        if (transaction.hadActive && transaction.backupPath.exists()
+            && (fileSha256(transaction.backupPath) == transaction.previousActiveHash))
+        {
+            QString restoreError;
+            restored = atomicCopyFile(transaction.backupPath, activePath, &restoreError)
+                && (fileSha256(activePath) == transaction.previousActiveHash);
+            if (!restored)
+                reason += tr(" The prior catalog file could not be restored: %1").arg(restoreError);
+        }
+        else if (!transaction.hadActive && (activeHash == transaction.candidateHash))
+        {
+            // This exact candidate is transaction-owned. Removing it cannot
+            // discard a manual replacement that arrived during validation.
+            Utils::Fs::removeFile(activePath);
+        }
+
+        if (!restored && activePath.exists() && (fileSha256(activePath) == transaction.candidateHash))
+        {
+            Utils::Fs::removeFile(activePath);
+            reason += tr(" The unsupported transaction bytes were removed from the active engine directory.");
+        }
+        if (transaction.hadActive && restored && transaction.backupPath.exists()
+            && (fileSha256(transaction.backupPath) == transaction.previousActiveHash))
+        {
+            Utils::Fs::removeFile(transaction.backupPath);
+        }
+
+        state.catalogOwned = transaction.hadActive && restored;
+        state.trusted = transaction.hadActive && restored;
+        state.userRemoved = false;
+        state.activeHash = (transaction.hadActive && restored) ? transaction.previousActiveHash : QByteArray {};
+        state.integrityState = u"runtime-incompatible"_s;
+        state.runtimeState = transaction.hadActive && restored ? u"stale-registration"_s : u"unavailable"_s;
+        state.diagnostic = reason;
+        recordUnofficialCatalogActivationFailure(id, reason);
+        requiresReconciliation = requiresReconciliation || transaction.hadActive;
+    }
+    m_catalogActivationTransactions.clear();
+    m_catalogStatus[u"automaticActivationPending"_s] = 0;
+    saveCatalogLedger();
+
+    if (requiresReconciliation)
+    {
+        clearPythonCache(engineLocation());
+        update(true, [this] { finishUnofficialCatalogSync(); });
+        return;
+    }
+
+    finishUnofficialCatalogSync();
+}
+
 void SearchPluginManager::finishUnofficialCatalogSync()
 {
     if (!m_catalogSyncInProgress)
         return;
+
+    if (!m_catalogAutoActivationAttempted)
+    {
+        m_catalogAutoActivationAttempted = true;
+        if (runtimeReady())
+        {
+            startUnofficialCatalogActivation();
+            if (m_catalogAutoActivationInProgress)
+                return;
+        }
+    }
 
     m_catalogStatus[u"state"_s] = u"finalizing"_s;
     emit unofficialCatalogStatusChanged(m_catalogStatus);
@@ -1996,28 +2297,32 @@ void SearchPluginManager::finishUnofficialCatalogSync()
     {
         const Path activePath = pluginPath(id);
         const bool activeExists = activePath.exists();
-        if (runtimeUnavailable && activeExists)
-            ++awaitingRuntime;
-        else if (!runtimeUnavailable && activeExists && m_plugins.contains(id))
-            ++registered;
 
         auto ledgerIt = m_catalogLedger.find(id);
         if (ledgerIt == m_catalogLedger.end())
+        {
+            if (!runtimeUnavailable && activeExists && m_plugins.contains(id))
+                ++registered;
             continue;
+        }
 
         CatalogLedgerEntry &state = ledgerIt.value();
         const Path candidatePath = catalogQuarantinePath(id, state.expectedHash);
         const bool candidateVerified = !state.userRemoved && !candidatePath.isEmpty()
             && candidatePath.exists() && (state.expectedHash == state.observedHash)
             && (fileSha256(candidatePath) == state.expectedHash);
+        if (runtimeUnavailable && (activeExists || candidateVerified))
+            ++awaitingRuntime;
+        else if (!runtimeUnavailable && activeExists && m_plugins.contains(id))
+            ++registered;
         const QByteArray activeHash = activeExists ? fileSha256(activePath) : QByteArray {};
         const bool activeOwned = activeExists && state.catalogOwned && state.trusted
             && isSha256(state.activeHash) && (activeHash == state.activeHash);
         const bool promotable = candidateVerified && (!activeExists || activeOwned);
-        if (promotable && (!state.trusted || (state.activeHash != state.expectedHash)))
+        if (!runtimeUnavailable && promotable && (!state.trusted || (state.activeHash != state.expectedHash)))
             ++awaitingTrust;
 
-        if (runtimeUnavailable && activeExists)
+        if (runtimeUnavailable && (activeExists || candidateVerified))
         {
             state.runtimeState = m_registrationStale ? u"stale-registration"_s : u"waiting-python"_s;
             if (state.diagnostic.isEmpty())

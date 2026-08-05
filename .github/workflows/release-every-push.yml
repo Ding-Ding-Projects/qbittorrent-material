@@ -165,7 +165,6 @@ jobs:
           if ($latestStatus -eq 404) {
             Write-Host "GitHub proved that no latest release is available; this is the first feed migration."
             "directory=" >> $env:GITHUB_OUTPUT
-            "installer=" >> $env:GITHUB_OUTPUT
             "hasFeed=false" >> $env:GITHUB_OUTPUT
             "packageVersion=" >> $env:GITHUB_OUTPUT
             exit 0
@@ -191,7 +190,6 @@ jobs:
           if ($manifestName.Count -eq 0 -and $fullPackageNames.Count -eq 0) {
             Write-Host "Latest release $($latest.tagName) predates the Squirrel feed; delta/upgrade smoke is not applicable."
             "directory=" >> $env:GITHUB_OUTPUT
-            "installer=" >> $env:GITHUB_OUTPUT
             "hasFeed=false" >> $env:GITHUB_OUTPUT
             "packageVersion=" >> $env:GITHUB_OUTPUT
             exit 0
@@ -215,7 +213,10 @@ jobs:
           }
           $previousVersion = $fullMatch.Groups['version'].Value
 
-          foreach ($assetName in @($manifestName[0], $fullPackageNames[0], $installerNames[0])) {
+          # The prior manifest and full package are sufficient to generate a
+          # current delta. Never download or execute the historical Setup.exe
+          # from a token-bearing release job.
+          foreach ($assetName in @($manifestName[0], $fullPackageNames[0])) {
             gh release download $latest.tagName --repo $env:GITHUB_REPOSITORY `
               --pattern $assetName --dir $previousRoot
             if ($LASTEXITCODE -ne 0) {
@@ -224,11 +225,9 @@ jobs:
           }
           $previousManifest = Join-Path $previousRoot $manifestName[0]
           $previousFullPackage = Join-Path $previousRoot $fullPackageNames[0]
-          $previousInstaller = Join-Path $previousRoot $installerNames[0]
           foreach ($requiredPreviousAsset in @(
             $previousManifest,
-            $previousFullPackage,
-            $previousInstaller
+            $previousFullPackage
           )) {
             if (-not (Test-Path -LiteralPath $requiredPreviousAsset -PathType Leaf) `
                 -or (Get-Item -LiteralPath $requiredPreviousAsset).Length -le 0) {
@@ -241,10 +240,9 @@ jobs:
           }
 
           "directory=$previousRoot" >> $env:GITHUB_OUTPUT
-          "installer=$previousInstaller" >> $env:GITHUB_OUTPUT
           "hasFeed=true" >> $env:GITHUB_OUTPUT
           "packageVersion=$previousVersion" >> $env:GITHUB_OUTPUT
-          Write-Host "Recovered complete Squirrel feed $previousVersion from $($latest.tagName)."
+          Write-Host "Recovered prior Squirrel feed metadata and full package $previousVersion from $($latest.tagName) without executing its installer."
 
       - name: Count project lines for the release record
         id: lines
@@ -417,7 +415,6 @@ jobs:
         shell: pwsh
         env:
           PREVIOUS_RELEASE_DIRECTORY: ${{ steps.previous.outputs.directory }}
-          PREVIOUS_INSTALLER_PATH: ${{ steps.previous.outputs.installer }}
           PREVIOUS_FEED_AVAILABLE: ${{ steps.previous.outputs.hasFeed }}
           SQUIRREL_SIGN_WITH_PARAMS: ${{ secrets.SQUIRREL_SIGN_WITH_PARAMS }}
         run: |
@@ -450,13 +447,14 @@ jobs:
             PackageVersion = $env:QBT_PACKAGE_VERSION
             ReleaseDirectory = $releaseDirectory
           }
-          if (-not [string]::IsNullOrWhiteSpace($env:PREVIOUS_INSTALLER_PATH)) {
-            $smokeArguments.PreviousInstallerPath = $env:PREVIOUS_INSTALLER_PATH
+          if ($env:PREVIOUS_FEED_AVAILABLE -notin @("true", "false")) {
+            throw "Prior Squirrel feed availability is missing or invalid."
           }
           if ($env:PREVIOUS_FEED_AVAILABLE -eq "true" `
-              -and [string]::IsNullOrWhiteSpace($env:PREVIOUS_INSTALLER_PATH)) {
-            throw "A validated prior Squirrel feed cannot skip the released-Setup upgrade smoke."
+              -and [string]::IsNullOrWhiteSpace($env:PREVIOUS_RELEASE_DIRECTORY)) {
+            throw "A validated prior Squirrel feed must provide its manifest and full package for delta generation."
           }
+          $smokeArguments.ExpectDelta = ($env:PREVIOUS_FEED_AVAILABLE -eq "true")
           & ./scripts/test-squirrel-package.ps1 @smokeArguments
           if ($LASTEXITCODE -ne 0) {
             throw "The installed Squirrel application smoke test failed."
@@ -731,6 +729,112 @@ jobs:
             throw "Packaging outputs do not match the tested local release-asset bytes."
           }
 
+          function Assert-TagReleaseAssetsAndSignedFeed([string]$Phase) {
+            $releaseApiJson = gh api `
+              -H "Accept: application/vnd.github+json" `
+              -H "X-GitHub-Api-Version: 2026-03-10" `
+              "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not read $Phase asset integrity metadata for $env:RELEASE_TAG."
+            }
+            $releaseApi = $releaseApiJson | ConvertFrom-Json
+            $publishedAssets = @($releaseApi.assets)
+            $verifiedDigestCount = 0
+            foreach ($localAsset in $localAssets) {
+              $publishedMatch = @(
+                $publishedAssets | Where-Object { $_.name -eq $localAsset.Name }
+              )
+              if ($publishedMatch.Count -ne 1) {
+                throw "$Phase does not contain exactly one $($localAsset.Name) asset."
+              }
+              $publishedAsset = $publishedMatch[0]
+              if ([int64]$publishedAsset.size -ne $localAsset.Size `
+                  -or [string]$publishedAsset.state -ne 'uploaded') {
+                throw "$Phase asset size/state differs from tested local asset $($localAsset.Name)."
+              }
+              $publishedDigest = [string]$publishedAsset.digest
+              if (-not [string]::IsNullOrWhiteSpace($publishedDigest)) {
+                if ($publishedDigest -notmatch '^sha256:(?<sha>[0-9a-fA-F]{64})$' `
+                    -or $Matches.sha.ToLowerInvariant() -ne $localAsset.Sha256) {
+                  throw "$Phase SHA-256 digest differs from tested local asset $($localAsset.Name)."
+                }
+                $verifiedDigestCount++
+              }
+            }
+            Write-Host "Verified size/state for $($localAssets.Count) $Phase assets and API SHA-256 evidence for $verifiedDigestCount."
+
+            $verificationRoot = Join-Path $env:RUNNER_TEMP `
+              "qbt-material-$($Phase.Replace(' ', '-'))-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+            if (Test-Path -LiteralPath $verificationRoot) {
+              throw "$Phase verification directory unexpectedly exists: $verificationRoot"
+            }
+            New-Item -ItemType Directory -Path $verificationRoot | Out-Null
+            gh release download $env:RELEASE_TAG `
+              --repo $env:GITHUB_REPOSITORY `
+              --pattern $localInstaller[0].Name `
+              --pattern $localReleases[0].Name `
+              --pattern $localFeedSignature[0].Name `
+              --dir $verificationRoot
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not redownload the $Phase Squirrel Setup for byte verification."
+            }
+            $publishedSetupPath = Join-Path $verificationRoot $localInstaller[0].Name
+            if (-not (Test-Path -LiteralPath $publishedSetupPath -PathType Leaf)) {
+              throw "Redownloaded Squirrel Setup is missing: $publishedSetupPath"
+            }
+            $publishedSetupItem = Get-Item -LiteralPath $publishedSetupPath
+            $publishedSetupSha256 = (Get-FileHash -Algorithm SHA256 `
+              -LiteralPath $publishedSetupPath).Hash.ToLowerInvariant()
+            if ([int64]$publishedSetupItem.Length -ne $localInstaller[0].Size `
+                -or $publishedSetupSha256 -ne $localInstaller[0].Sha256) {
+              throw "Redownloaded Squirrel Setup differs from the exact locally tested bytes."
+            }
+
+            $publishedReleasesPath = Join-Path $verificationRoot $localReleases[0].Name
+            $publishedSignaturePath = Join-Path $verificationRoot $localFeedSignature[0].Name
+            foreach ($downloadedFeedPath in @($publishedReleasesPath, $publishedSignaturePath)) {
+              if (-not (Test-Path -LiteralPath $downloadedFeedPath -PathType Leaf)) {
+                throw "Redownloaded signed-feed asset is missing: $downloadedFeedPath"
+              }
+            }
+            $publishedReleasesBytes = [IO.File]::ReadAllBytes($publishedReleasesPath)
+            $publishedSignatureBytes = [IO.File]::ReadAllBytes($publishedSignaturePath)
+            $publishedReleasesSha256 = [Convert]::ToHexString(
+              [Security.Cryptography.SHA256]::HashData($publishedReleasesBytes)).ToLowerInvariant()
+            $publishedSignatureSha256 = [Convert]::ToHexString(
+              [Security.Cryptography.SHA256]::HashData($publishedSignatureBytes)).ToLowerInvariant()
+            if ($publishedReleasesBytes.Length -ne $localReleases[0].Size `
+                -or $publishedReleasesSha256 -ne $localReleases[0].Sha256 `
+                -or $publishedSignatureBytes.Length -ne $localFeedSignature[0].Size `
+                -or $publishedSignatureBytes.Length -gt 1024 `
+                -or $publishedSignatureSha256 -ne $localFeedSignature[0].Sha256) {
+              throw "Redownloaded RELEASES/signature bytes differ from the exact locally verified feed."
+            }
+            $publishedKeyRecord = Get-Content -Raw -LiteralPath `
+              (Join-Path $env:GITHUB_WORKSPACE 'resources/updates/squirrel-feed-public-key.json') |
+              ConvertFrom-Json
+            $publishedPublicDer = [Convert]::FromBase64String(
+              [string]$publishedKeyRecord.spkiDerBase64)
+            $publishedPublicRsa = [Security.Cryptography.RSA]::Create()
+            try {
+              $publishedPublicBytesRead = 0
+              $publishedPublicRsa.ImportSubjectPublicKeyInfo(
+                $publishedPublicDer, [ref]$publishedPublicBytesRead)
+              if ($publishedPublicBytesRead -ne $publishedPublicDer.Length `
+                  -or -not $publishedPublicRsa.VerifyData(
+                    $publishedReleasesBytes,
+                    $publishedSignatureBytes,
+                    [Security.Cryptography.HashAlgorithmName]::SHA256,
+                    [Security.Cryptography.RSASignaturePadding]::Pkcs1)) {
+                throw "Redownloaded RELEASES.sig failed committed-public-key verification."
+              }
+            }
+            finally {
+              $publishedPublicRsa.Dispose()
+            }
+            Write-Host "Verified redownloaded Setup and exact signed RELEASES assets against local SHA-256, size, and RSA evidence for $Phase."
+          }
+
           $tagRefs = @(& git ls-remote --tags origin "refs/tags/$env:RELEASE_TAG")
           $tagLookupExitCode = $LASTEXITCODE
           if ($tagLookupExitCode -ne 0) {
@@ -860,8 +964,9 @@ jobs:
           and ``magnet:`` ownership, exact restoration of seeded per-user
           association values, offscreen launch, workspace recovery, Git
           integrity, and Update.exe uninstall all completed before this release
-          was published. When a previous Squirrel Setup was available, the local
-          update-feed upgrade smoke completed as well.
+          was published. When a prior Squirrel feed was available, its manifest
+          and the generated current delta package were validated without
+          executing a historical installer.
           "@
           $pendingNotes = $releaseNotesTemplate.Replace(
             "@@WORKFLOW_STARTED@@", $workflowStartedText)
@@ -881,29 +986,42 @@ jobs:
           $isNewestMasterPackage = $env:GITHUB_REF_NAME -eq 'master' `
             -and ($highestMasterBeforePublish.Count -eq 0 `
               -or $currentPackageVersion -gt $highestMasterBeforePublish[0].PackageVersion)
-          $latestOption = if ($isNewestMasterPackage) { '--latest' } else { '--latest=false' }
           if ($highestMasterBeforePublish.Count -eq 0) {
             Write-Host "No earlier master-channel Squirrel release participates in latest arbitration."
           }
           else {
             Write-Host "Highest master-channel package before publication: $($highestMasterBeforePublish[0].PackageVersionText) ($($highestMasterBeforePublish[0].TagName))."
           }
-          Write-Host "Publishing $env:PACKAGE_VERSION on $releaseChannel with $latestOption."
+          Write-Host "Staging $env:PACKAGE_VERSION on $releaseChannel; latest-channel selection is deferred until publication."
           gh release create $env:RELEASE_TAG `
             $releaseAssets `
             --repo $env:GITHUB_REPOSITORY `
             --target $env:GITHUB_SHA `
             --title $env:RELEASE_TITLE `
             --notes-file $notesPath `
-            $latestOption
+            --draft
           if ($LASTEXITCODE -ne 0) {
-            throw "GitHub did not create release $env:RELEASE_TAG."
+            throw "GitHub did not create draft release $env:RELEASE_TAG."
           }
 
-          # `gh release create` with assets creates a draft, uploads every asset,
-          # then publishes it. Capture completion only after that command returns
-          # so this duration covers the full release-publication operation rather
-          # than estimating from the release's server-side publishedAt alone.
+          $stagedRelease = gh release view $env:RELEASE_TAG `
+            --repo $env:GITHUB_REPOSITORY `
+            --json isDraft,isImmutable,isPrerelease,tagName,targetCommitish,assets |
+            ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 `
+              -or -not $stagedRelease.isDraft `
+              -or $stagedRelease.isImmutable `
+              -or $stagedRelease.isPrerelease `
+              -or $stagedRelease.tagName -ne $env:RELEASE_TAG `
+              -or $stagedRelease.targetCommitish -ne $env:GITHUB_SHA) {
+            throw "Staged release failed draft status, mutability, tag, or target verification."
+          }
+          Assert-TagReleaseAssetsAndSignedFeed "staged draft"
+
+          # An immutable public release cannot be safely repaired. Record the
+          # final timing in the still-mutable draft immediately after all asset
+          # validation, validate that exact final body, then perform the single
+          # draft-to-public transition below.
           $workflowCompleted = [DateTimeOffset]::FromUnixTimeSeconds(
             [DateTimeOffset]::UtcNow.ToUnixTimeSeconds())
           if ($workflowCompleted -lt $workflowStarted) {
@@ -924,195 +1042,33 @@ jobs:
             "@@WORKFLOW_DURATION@@", $workflowDuration)
           $finalNotes | Set-Content -LiteralPath $notesPath -Encoding utf8NoBOM
 
-          # Immutable releases protect tags and assets while still allowing the
-          # title and notes to receive this post-publication timing evidence.
           gh release edit $env:RELEASE_TAG `
             --repo $env:GITHUB_REPOSITORY `
             --notes-file $notesPath
           if ($LASTEXITCODE -ne 0) {
-            throw "Release $env:RELEASE_TAG was published, but its verified workflow timing could not be recorded."
+            throw "Could not write final timing evidence into staged release $env:RELEASE_TAG."
           }
 
-          # A per-SHA concurrency group prevents cancellation but does not order
-          # completion. Stabilize the master updater pointer after publication
-          # so an older, slower run cannot make latest/download regress.
-          $latestChannelStable = $false
-          foreach ($latestAttempt in 1..6) {
-            $masterSnapshotBefore = @(
-              Get-PublishedMasterSquirrelReleases |
-                Sort-Object PackageVersion -Descending
-            )
-            if ($masterSnapshotBefore.Count -eq 0) {
-              if ($env:GITHUB_REF_NAME -eq 'master') {
-                throw "The published master release was missing from channel arbitration."
-              }
-              Write-Host "No master-channel Squirrel release exists; feature release remains non-latest."
-              $latestChannelStable = $true
-              break
-            }
-            $expectedLatest = $masterSnapshotBefore[0]
-            gh release edit $expectedLatest.TagName `
-              --repo $env:GITHUB_REPOSITORY `
-              --latest
-            if ($LASTEXITCODE -ne 0) {
-              throw "Could not point latest at highest master package $($expectedLatest.PackageVersionText)."
-            }
-
-            $masterSnapshotAfter = @(
-              Get-PublishedMasterSquirrelReleases |
-                Sort-Object PackageVersion -Descending
-            )
-            if ($masterSnapshotAfter.Count -eq 0 `
-                -or $masterSnapshotAfter[0].TagName -ne $expectedLatest.TagName) {
-              Write-Host "Master release inventory changed during latest arbitration ($latestAttempt/6); retrying."
-              Start-Sleep -Seconds 2
-              continue
-            }
-            $latestReleaseJson = gh api `
-              -H "Accept: application/vnd.github+json" `
-              -H "X-GitHub-Api-Version: 2026-03-10" `
-              "repos/$env:GITHUB_REPOSITORY/releases/latest"
-            if ($LASTEXITCODE -ne 0) {
-              throw "Could not resolve /releases/latest after channel arbitration."
-            }
-            $latestRelease = $latestReleaseJson | ConvertFrom-Json
-            if ([string]$latestRelease.tag_name -ne $expectedLatest.TagName) {
-              Write-Host "Latest pointer did not settle on $($expectedLatest.TagName) ($latestAttempt/6); retrying."
-              Start-Sleep -Seconds 2
-              continue
-            }
-            Write-Host "Verified latest master package $($expectedLatest.PackageVersionText) at $($expectedLatest.TagName)."
-            $latestChannelStable = $true
-            break
-          }
-          if (-not $latestChannelStable) {
-            throw "The master updater channel did not stabilize on its highest published package version."
-          }
-
-          $releaseApiJson = gh api `
-            -H "Accept: application/vnd.github+json" `
-            -H "X-GitHub-Api-Version: 2026-03-10" `
-            "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG"
-          if ($LASTEXITCODE -ne 0) {
-            throw "Could not read published asset integrity metadata for $env:RELEASE_TAG."
-          }
-          $releaseApi = $releaseApiJson | ConvertFrom-Json
-          $publishedAssets = @($releaseApi.assets)
-          $verifiedDigestCount = 0
-          foreach ($localAsset in $localAssets) {
-            $publishedMatch = @(
-              $publishedAssets | Where-Object { $_.name -eq $localAsset.Name }
-            )
-            if ($publishedMatch.Count -ne 1) {
-              throw "Published release does not contain exactly one $($localAsset.Name) asset."
-            }
-            $publishedAsset = $publishedMatch[0]
-            if ([int64]$publishedAsset.size -ne $localAsset.Size `
-                -or [string]$publishedAsset.state -ne 'uploaded') {
-              throw "Published asset size/state differs from tested local asset $($localAsset.Name)."
-            }
-            $publishedDigest = [string]$publishedAsset.digest
-            if (-not [string]::IsNullOrWhiteSpace($publishedDigest)) {
-              if ($publishedDigest -notmatch '^sha256:(?<sha>[0-9a-fA-F]{64})$' `
-                  -or $Matches.sha.ToLowerInvariant() -ne $localAsset.Sha256) {
-                throw "Published SHA-256 digest differs from tested local asset $($localAsset.Name)."
-              }
-              $verifiedDigestCount++
-            }
-          }
-          Write-Host "Verified size/state for $($localAssets.Count) published assets and API SHA-256 evidence for $verifiedDigestCount."
-
-          $publishedSetupRoot = Join-Path $env:RUNNER_TEMP `
-            "qbt-material-published-setup-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
-          if (Test-Path -LiteralPath $publishedSetupRoot) {
-            throw "Published-Setup verification directory unexpectedly exists: $publishedSetupRoot"
-          }
-          New-Item -ItemType Directory -Path $publishedSetupRoot | Out-Null
-          gh release download $env:RELEASE_TAG `
+          $stagedRelease = gh release view $env:RELEASE_TAG `
             --repo $env:GITHUB_REPOSITORY `
-            --pattern $localInstaller[0].Name `
-            --pattern $localReleases[0].Name `
-            --pattern $localFeedSignature[0].Name `
-            --dir $publishedSetupRoot
-          if ($LASTEXITCODE -ne 0) {
-            throw "Could not redownload the published Squirrel Setup for byte verification."
-          }
-          $publishedSetupPath = Join-Path $publishedSetupRoot $localInstaller[0].Name
-          if (-not (Test-Path -LiteralPath $publishedSetupPath -PathType Leaf)) {
-            throw "Redownloaded Squirrel Setup is missing: $publishedSetupPath"
-          }
-          $publishedSetupItem = Get-Item -LiteralPath $publishedSetupPath
-          $publishedSetupSha256 = (Get-FileHash -Algorithm SHA256 `
-            -LiteralPath $publishedSetupPath).Hash.ToLowerInvariant()
-          if ([int64]$publishedSetupItem.Length -ne $localInstaller[0].Size `
-              -or $publishedSetupSha256 -ne $localInstaller[0].Sha256) {
-            throw "Redownloaded Squirrel Setup differs from the exact locally tested bytes."
-          }
-          $publishedReleasesPath = Join-Path $publishedSetupRoot $localReleases[0].Name
-          $publishedSignaturePath = Join-Path $publishedSetupRoot $localFeedSignature[0].Name
-          foreach ($downloadedFeedPath in @($publishedReleasesPath, $publishedSignaturePath)) {
-            if (-not (Test-Path -LiteralPath $downloadedFeedPath -PathType Leaf)) {
-              throw "Redownloaded signed-feed asset is missing: $downloadedFeedPath"
-            }
-          }
-          $publishedReleasesBytes = [IO.File]::ReadAllBytes($publishedReleasesPath)
-          $publishedSignatureBytes = [IO.File]::ReadAllBytes($publishedSignaturePath)
-          $publishedReleasesSha256 = [Convert]::ToHexString(
-            [Security.Cryptography.SHA256]::HashData($publishedReleasesBytes)).ToLowerInvariant()
-          $publishedSignatureSha256 = [Convert]::ToHexString(
-            [Security.Cryptography.SHA256]::HashData($publishedSignatureBytes)).ToLowerInvariant()
-          if ($publishedReleasesBytes.Length -ne $localReleases[0].Size `
-              -or $publishedReleasesSha256 -ne $localReleases[0].Sha256 `
-              -or $publishedSignatureBytes.Length -ne $localFeedSignature[0].Size `
-              -or $publishedSignatureBytes.Length -gt 1024 `
-              -or $publishedSignatureSha256 -ne $localFeedSignature[0].Sha256) {
-            throw "Redownloaded RELEASES/signature bytes differ from the exact locally verified feed."
-          }
-          $publishedKeyRecord = Get-Content -Raw -LiteralPath `
-            (Join-Path $env:GITHUB_WORKSPACE 'resources/updates/squirrel-feed-public-key.json') |
+            --json body,databaseId,isDraft,isImmutable,isPrerelease,tagName,targetCommitish,assets |
             ConvertFrom-Json
-          $publishedPublicDer = [Convert]::FromBase64String(
-            [string]$publishedKeyRecord.spkiDerBase64)
-          $publishedPublicRsa = [Security.Cryptography.RSA]::Create()
-          try {
-            $publishedPublicBytesRead = 0
-            $publishedPublicRsa.ImportSubjectPublicKeyInfo(
-              $publishedPublicDer, [ref]$publishedPublicBytesRead)
-            if ($publishedPublicBytesRead -ne $publishedPublicDer.Length `
-                -or -not $publishedPublicRsa.VerifyData(
-                  $publishedReleasesBytes,
-                  $publishedSignatureBytes,
-                  [Security.Cryptography.HashAlgorithmName]::SHA256,
-                  [Security.Cryptography.RSASignaturePadding]::Pkcs1)) {
-              throw "Redownloaded RELEASES.sig failed committed-public-key verification."
-            }
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not read final staged release $env:RELEASE_TAG."
           }
-          finally {
-            $publishedPublicRsa.Dispose()
-          }
-          Write-Host "Verified redownloaded Setup and exact signed RELEASES assets against local SHA-256, size, and RSA evidence."
-
-          $release = $null
-          foreach ($attempt in 1..6) {
-            $release = gh release view $env:RELEASE_TAG `
-              --repo $env:GITHUB_REPOSITORY `
-              --json body,isDraft,isImmutable,isPrerelease,tagName,targetCommitish,assets | ConvertFrom-Json
-            if ($LASTEXITCODE -ne 0) {
-              throw "Could not verify release $env:RELEASE_TAG."
-            }
-            if ($release.isImmutable) { break }
-            Write-Host "Waiting for GitHub release immutability attestation ($attempt/6)."
-            Start-Sleep -Seconds 5
-          }
-          $assetNames = @($release.assets | ForEach-Object { $_.name })
           $requiredAssetNames = @($releaseAssets | ForEach-Object { Split-Path -Leaf $_ })
-          $missingAssetNames = @($requiredAssetNames | Where-Object { $assetNames -notcontains $_ })
+          $stagedAssetNames = @($stagedRelease.assets | ForEach-Object { $_.name })
+          $missingStagedAssetNames = @(
+            $requiredAssetNames | Where-Object { $stagedAssetNames -notcontains $_ }
+          )
           $timingLines = @(
             "- Workflow started: ``$workflowStartedText``",
             "- Workflow completed: ``$workflowCompletedText``",
             "- Workflow duration: ``$workflowDuration``"
           )
-          $missingTimingLines = @($timingLines | Where-Object { -not $release.body.Contains($_) })
+          $missingStagedTimingLines = @(
+            $timingLines | Where-Object { -not $stagedRelease.body.Contains($_) }
+          )
           $releaseEvidenceLines = @(
             "- Squirrel package: ``$env:PACKAGE_VERSION``",
             "- Branch: ``$env:GITHUB_REF_NAME``",
@@ -1125,16 +1081,31 @@ jobs:
             "- Public dim-sum photo: $photoEvidence",
             "- Dim-sum catalog evidence: $catalogEvidence"
           )
-          $missingReleaseEvidence = @(
-            $releaseEvidenceLines | Where-Object { -not $release.body.Contains($_) }
+          $missingStagedEvidence = @(
+            $releaseEvidenceLines | Where-Object { -not $stagedRelease.body.Contains($_) }
           )
-          if ($release.isDraft -or -not $release.isImmutable -or $release.isPrerelease `
-              -or $release.tagName -ne $env:RELEASE_TAG `
-              -or $release.targetCommitish -ne $env:GITHUB_SHA `
-              -or $missingAssetNames.Count -ne 0 `
-              -or $missingTimingLines.Count -ne 0 `
-              -or $missingReleaseEvidence.Count -ne 0) {
-            throw "Published release failed immutability, status, asset, signature, channel, or workflow-timing verification."
+          if (-not $stagedRelease.isDraft `
+              -or $stagedRelease.isImmutable `
+              -or $stagedRelease.isPrerelease `
+              -or $stagedRelease.tagName -ne $env:RELEASE_TAG `
+              -or $stagedRelease.targetCommitish -ne $env:GITHUB_SHA `
+              -or $missingStagedAssetNames.Count -ne 0 `
+              -or $missingStagedTimingLines.Count -ne 0 `
+              -or $missingStagedEvidence.Count -ne 0) {
+            throw "Staged release failed asset, note, timing, signature, channel, or target verification."
           }
+          Write-Host "Validated staged draft $env:RELEASE_TAG; publishing its verified assets and notes exactly once."
 
-          Write-Host "Verified full release $env:RELEASE_TAG with assets: $($requiredAssetNames -join ', ')."
+          if ($null -eq $stagedRelease.databaseId -or [int64]$stagedRelease.databaseId -le 0) {
+            throw "Staged release is missing its numeric GitHub release identifier."
+          }
+          $makeLatest = if ($isNewestMasterPackage) { 'true' } else { 'false' }
+          gh api --method PATCH `
+            -H "Accept: application/vnd.github+json" `
+            -H "X-GitHub-Api-Version: 2026-03-10" `
+            "repos/$env:GITHUB_REPOSITORY/releases/$($stagedRelease.databaseId)" `
+            -f draft=false `
+            --raw-field "make_latest=$makeLatest" | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub did not publish verified draft release $env:RELEASE_TAG."
+          }

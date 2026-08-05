@@ -206,14 +206,13 @@ Dialog {
             text: qsTr("Cancel")
             flat: true
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
-            onClicked: root.reject()
         }
 
         Button {
             text: qsTr("Choose file…")
             highlighted: true
             enabled: root.formats.length > 0
-            DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+            DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
             onClicked: {
                 root.close()
                 saveDialog.defaultSuffix = root.selectedFormat.extension

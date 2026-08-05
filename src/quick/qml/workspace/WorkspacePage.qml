@@ -36,11 +36,22 @@ Item {
     }
 
     function capitalization(value) {
-        if (value === "Uppercase") return Font.AllUppercase
-        if (value === "Lowercase") return Font.AllLowercase
+        // The appearance editor persists the Qt-facing AllUppercase and
+        // AllLowercase names. Keep the shorter legacy spellings readable so
+        // imported older workspace manifests remain compatible.
+        if (value === "AllUppercase" || value === "Uppercase") return Font.AllUppercase
+        if (value === "AllLowercase" || value === "Lowercase") return Font.AllLowercase
         if (value === "SmallCaps") return Font.SmallCaps
         if (value === "Capitalize") return Font.Capitalize
         return Font.MixedCase
+    }
+
+    function appearanceNumber(key, fallback) {
+        var value = effectiveAppearance[key]
+        if (value === undefined || value === null)
+            return fallback
+        var parsed = Number(value)
+        return isFinite(parsed) ? parsed : fallback
     }
 
     function alignment(value) {
@@ -136,11 +147,14 @@ Item {
                     wrapMode: TextEdit.Wrap
                     selectByMouse: true
                     persistentSelection: true
-                    leftPadding: root.effectiveAppearance.padding || Spacing.xl
-                    rightPadding: root.effectiveAppearance.padding || Spacing.xl
-                    topPadding: (root.effectiveAppearance.padding || Spacing.lg)
-                        + (root.effectiveAppearance.baselineOffset || 0)
-                    bottomPadding: root.effectiveAppearance.padding || Spacing.lg
+                    // A sparse override may intentionally be zero. Do not use
+                    // truthiness here, or an explicit zero padding silently
+                    // turns back into the default spacing.
+                    leftPadding: root.appearanceNumber("padding", Spacing.xl)
+                    rightPadding: root.appearanceNumber("padding", Spacing.xl)
+                    topPadding: root.appearanceNumber("padding", Spacing.lg)
+                        + root.appearanceNumber("baselineOffset", 0)
+                    bottomPadding: root.appearanceNumber("padding", Spacing.lg)
                     placeholderText: WorkspaceManager.writable
                         ? qsTr("Write anything on this page. Changes save automatically to local Git.")
                         : qsTr("Workspace recovery is required before this page can be edited.")

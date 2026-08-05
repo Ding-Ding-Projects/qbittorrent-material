@@ -97,6 +97,51 @@ bool isImmediateChild(const QString &root, const QString &child)
     return !canonicalRoot.isEmpty() && !canonicalChild.isEmpty()
             && samePath(QFileInfo(canonicalChild).absolutePath(), canonicalRoot);
 }
+
+QString quoteWindowsCommandLineArgument(const QString &argument)
+{
+    if (argument.isEmpty())
+        return u"\"\""_s;
+
+    const bool needsQuotes = std::ranges::any_of(argument,
+            [](const QChar character) { return character.isSpace() || (character == u'\"'); });
+    if (!needsQuotes)
+        return argument;
+
+    QString quoted;
+    quoted.reserve(argument.size() + 2);
+    quoted += u'\"';
+    qsizetype consecutiveBackslashes = 0;
+    for (const QChar character : argument)
+    {
+        if (character == u'\\')
+        {
+            ++consecutiveBackslashes;
+            continue;
+        }
+
+        if (character == u'\"')
+            quoted += QString((consecutiveBackslashes * 2) + 1, u'\\');
+        else
+            quoted += QString(consecutiveBackslashes, u'\\');
+        quoted += character;
+        consecutiveBackslashes = 0;
+    }
+    // Backslashes immediately before a closing quote must themselves be
+    // escaped for CommandLineToArgvW-compatible parsing in Update.exe.
+    quoted += QString(consecutiveBackslashes * 2, u'\\');
+    quoted += u'\"';
+    return quoted;
+}
+
+QString joinWindowsCommandLine(const QStringList &arguments)
+{
+    QStringList quotedArguments;
+    quotedArguments.reserve(arguments.size());
+    for (const QString &argument : arguments)
+        quotedArguments << quoteWindowsCommandLineArgument(argument);
+    return quotedArguments.join(u' ');
+}
 } // namespace
 
 ProgramUpdater *ProgramUpdater::s_instance = nullptr;
@@ -1459,10 +1504,18 @@ void ProgramUpdater::restartToUpdate()
         return;
     }
 
+    // Update.exe accepts one Windows command-line string for the target. Carry
+    // only the same allowlisted profile/configuration arguments captured for
+    // rollback, so a custom-profile instance never restarts into the default
+    // profile and arbitrary launch arguments cannot cross the updater boundary.
+    QStringList targetArguments{u"--update-health-token="_s + healthToken};
+    targetArguments << UpdateRecovery::preservedLaunchArguments(
+            QCoreApplication::arguments());
+
     qint64 updaterPid = 0;
     const QStringList arguments{
         u"--processStartAndWait="_s + m_executableRelativePath,
-        u"--process-start-args=--update-health-token="_s + healthToken
+        u"--process-start-args="_s + joinWindowsCommandLine(targetArguments)
     };
     const bool started =
             QProcess::startDetached(m_updateExecutable, arguments, m_squirrelRoot, &updaterPid);

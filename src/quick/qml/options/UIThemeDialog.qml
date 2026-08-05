@@ -139,14 +139,12 @@ Dialog {
             text: qsTr("Close")
             flat: true
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
-            onClicked: root.reject()
         }
         Button {
             text: qsTr("Apply")
             highlighted: true
             enabled: root.themePath.length > 0
             DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
-            onClicked: root.accept()
         }
     }
 

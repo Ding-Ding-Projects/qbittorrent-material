@@ -74,10 +74,20 @@ Dialog {
     readonly property bool authorizing: confirmSlider.value >= confirmSlider.to
     readonly property bool reducedMotion: ThemeManager.reducedMotion === true
 
+    // A delayed completion must never outlive an Escape, emergency exit, or
+    // programmatic dismissal. Terminal outcomes are deliberately one-shot.
+    property bool terminalHandled: false
+    property bool authorizationPending: false
+
     title: qsTr("Confirm an irreversible action")
     modal: true
     parent: Overlay.overlay
     width: Math.min(560, (parent ? parent.width : 560) * 0.92)
+    // Keep the entire dialog inside the overlay. The body below scrolls while
+    // the header and Emergency exit stay on screen at narrow heights.
+    readonly property real viewportBoundHeight: Math.max(0,
+        (parent ? parent.height : 640) - Spacing.lg * 2)
+    height: Math.min(implicitHeight, viewportBoundHeight)
     padding: Spacing.xl
 
     // Anchored beside the originating control where it fits; centred only when
@@ -120,6 +130,8 @@ Dialog {
     }
 
     function _reset() {
+        finishTimer.stop()
+        authorizationPending = false
         keyOne.checked = false
         keyTwo.checked = false
         confirmSlider.value = 0
@@ -131,18 +143,26 @@ Dialog {
             root.originatingControl.forceActiveFocus()
     }
 
-    onOpened: {
-        Log.info("ui", "SuperConfirmDialog opened for: " + root.actionText)
-        root._reset()
-        keyOne.forceActiveFocus()
-    }
+    function _cancel() {
+        if (terminalHandled)
+            return
 
-    onRejected: {
+        terminalHandled = true
         Log.info("ui", "SuperConfirmDialog cancelled: " + root.actionText)
         root._reset()
         root.cancelled()
         root._restoreFocus()
     }
+
+    onOpened: {
+        terminalHandled = false
+        Log.info("ui", "SuperConfirmDialog opened for: " + root.actionText)
+        root._reset()
+        keyOne.forceActiveFocus()
+    }
+
+    onRejected: root._cancel()
+    onClosed: root._cancel()
 
     header: RowLayout {
         spacing: Spacing.sm
@@ -165,8 +185,21 @@ Dialog {
         }
     }
 
-    contentItem: ColumnLayout {
-        spacing: Spacing.md
+    contentItem: ScrollView {
+        id: confirmationScroll
+        clip: true
+        contentWidth: availableWidth
+        contentHeight: confirmationBody.implicitHeight
+        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+        ScrollBar.vertical.policy: ScrollBar.AsNeeded
+        Accessible.role: Accessible.Pane
+        Accessible.name: qsTr("Destructive action confirmation details")
+        Accessible.description: qsTr("Scroll to review the action, turn both keys, and reach the confirmation slider.")
+
+        ColumnLayout {
+            id: confirmationBody
+            width: Math.max(0, confirmationScroll.availableWidth)
+            spacing: Spacing.md
 
         // ---- The facts, verbatim -------------------------------------------
         Label {
@@ -284,25 +317,32 @@ Dialog {
             }
         }
 
-        Label {
-            id: completion
-            property bool done: false
-            Layout.fillWidth: true
-            visible: done
-            text: qsTr("Authorized.")
-            font: Typography.titleMedium
-            color: Theme.color("success")
-            horizontalAlignment: Text.AlignHCenter
-            opacity: done ? 1 : 0
+            Label {
+                id: completion
+                property bool done: false
+                Layout.fillWidth: true
+                visible: done
+                text: qsTr("Authorized.")
+                font: Typography.titleMedium
+                color: Theme.color("success")
+                horizontalAlignment: Text.AlignHCenter
+                opacity: done ? 1 : 0
 
-            Behavior on opacity {
-                enabled: !root.reducedMotion
-                NumberAnimation { duration: Spacing.motionBase }
+                Behavior on opacity {
+                    enabled: !root.reducedMotion
+                    NumberAnimation { duration: Spacing.motionBase }
+                }
             }
         }
     }
 
     function _authorize() {
+        if (terminalHandled || authorizationPending || !bothKeysTurned
+                || confirmSlider.value < confirmSlider.to) {
+            return
+        }
+
+        authorizationPending = true
         completion.done = true
         Log.info("ui", "SuperConfirmDialog authorized: " + root.actionText)
         // Let the completion state render before the dialog goes away; with
@@ -315,6 +355,11 @@ Dialog {
     }
 
     function _finish() {
+        if (terminalHandled || !authorizationPending || !completion.done)
+            return
+
+        terminalHandled = true
+        authorizationPending = false
         root.authorized()
         root.close()
         root._reset()
@@ -339,7 +384,6 @@ Dialog {
             flat: true
             Accessible.name: qsTr("Emergency exit. Cancels without doing anything.")
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
-            onClicked: root.reject()
         }
     }
 }

@@ -167,6 +167,16 @@ private:
     {
         QString id;
         QList<CatalogSource> sources;
+        QString unavailableReason;
+    };
+
+    struct CatalogActivationTransaction
+    {
+        QByteArray candidateHash;
+        QByteArray previousActiveHash;
+        Path backupPath;
+        quint64 generation = 0;
+        bool hadActive = false;
     };
 
     struct CapabilityRequest
@@ -216,6 +226,9 @@ private:
     void downloadNextUnofficialPlugin();
     void downloadCurrentUnofficialSource();
     void unofficialPluginDownloadFinished(const Net::DownloadResult &result);
+    void startUnofficialCatalogActivation();
+    void finishUnofficialCatalogActivation();
+    void recordUnofficialCatalogActivationFailure(const QString &id, const QString &reason);
     void finishUnofficialCatalogSync();
     void failUnofficialCatalogSync(const QString &reason);
     void parseVersionInfo(const QByteArray &info);
@@ -256,12 +269,15 @@ private:
     QStringList m_catalogFailures;
     QString m_currentCatalogFailure;
     QVariantMap m_catalogStatus;
+    QHash<QString, CatalogActivationTransaction> m_catalogActivationTransactions;
     // True when at least one catalog entry was already present on disk before
     // this synchronization. Kept separately from the counters so the UI and
     // diagnostics can distinguish a no-op bootstrap from a fresh install.
     bool m_catalogPreexisting = false;
     bool m_catalogSyncInProgress = false;
     bool m_catalogRetryPending = false;
+    bool m_catalogAutoActivationAttempted = false;
+    bool m_catalogAutoActivationInProgress = false;
 
     QQueue<CapabilityRequest> m_capabilityRequests;
     CapabilityRequest m_activeCapabilityRequest;

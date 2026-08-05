@@ -169,21 +169,18 @@ Dialog {
             text: qsTr("Cancel")
             flat: true
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
-            onClicked: {
-                Log.debug("ui", "CookiesDialog cancelled")
-                root.close()
-            }
         }
 
         Button {
             text: qsTr("OK")
             highlighted: true
             DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
-            onClicked: {
-                Log.info("ui", "CookiesDialog accepted; saving cookies")
-                cookiesModel.save()
-                root.close()
-            }
         }
     }
+
+    onAccepted: {
+        Log.info("ui", "CookiesDialog accepted; saving cookies")
+        cookiesModel.save()
+    }
+    onRejected: Log.debug("ui", "CookiesDialog cancelled")
 }

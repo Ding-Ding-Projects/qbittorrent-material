@@ -107,7 +107,6 @@ Dialog {
             text: qsTr("Cancel")
             flat: true
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
-            onClicked: root.reject()
         }
 
         Button {
@@ -115,7 +114,6 @@ Dialog {
             highlighted: true
             enabled: peersArea.text.trim().length > 0
             DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
-            onClicked: root.accept()
         }
     }
 

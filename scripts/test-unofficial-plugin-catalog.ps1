@@ -15,6 +15,8 @@ $mainQmlPath = Join-Path $repoRoot 'src/quick/qml/Main.qml'
 $pluginsDialogPath = Join-Path $repoRoot 'src/quick/qml/search/SearchPluginsDialog.qml'
 $novaPath = Join-Path $repoRoot 'resources/searchengine/nova3/nova2.py'
 $downloadHandlerPath = Join-Path $repoRoot 'src/base/net/downloadhandlerimpl.cpp'
+$foreignAppsPath = Join-Path $repoRoot 'src/base/utils/foreignapps.cpp'
+$foreignAppsHeaderPath = Join-Path $repoRoot 'src/base/utils/foreignapps.h'
 $cmakePath = Join-Path $repoRoot 'src/CMakeLists.txt'
 $qrcPath = Join-Path $repoRoot 'resources/resources.qrc'
 
@@ -41,12 +43,25 @@ $availableRows = @($rows | Where-Object { $_.available -eq $true })
 $unavailableRows = @($rows | Where-Object { $_.available -ne $true })
 $canonicalIds = @($rows | ForEach-Object { & $canonical ([string]$_.id) } | Sort-Object -Unique)
 $availableCanonicalIds = @($availableRows | ForEach-Object { & $canonical ([string]$_.id) } | Sort-Object -Unique)
+$unavailableCanonicalIds = @($canonicalIds | Where-Object { $availableCanonicalIds -notcontains $_ } | Sort-Object)
+$unavailableCanonicalRows = @($unavailableRows | Where-Object {
+    $unavailableCanonicalIds -contains (& $canonical ([string]$_.id))
+})
+$expectedUnavailableCanonicalIds = @('kinozal', 'nnmclub', 'rutor', 'tapochek')
 
 if ($rows.Count -ne 100) { throw "Expected 100 wiki rows, found $($rows.Count)." }
-if ($availableRows.Count -ne 97) { throw "Expected 97 available pinned sources, found $($availableRows.Count)." }
-if ($unavailableRows.Count -ne 3) { throw "Expected three unavailable duplicate variants, found $($unavailableRows.Count)." }
+if ($availableRows.Count -ne 92) { throw "Expected 92 supported pinned sources, found $($availableRows.Count)." }
+if ($unavailableRows.Count -ne 8) { throw "Expected eight unavailable rows, found $($unavailableRows.Count)." }
 if ($canonicalIds.Count -ne 92) { throw "Expected 92 canonical plugins, found $($canonicalIds.Count)." }
-if ($availableCanonicalIds.Count -ne 92) { throw "Every canonical plugin needs a source; found $($availableCanonicalIds.Count) of 92." }
+if ($availableCanonicalIds.Count -ne 88) { throw "Expected 88 supported canonical plugins, found $($availableCanonicalIds.Count)." }
+if (($unavailableCanonicalIds -join ',') -ne ($expectedUnavailableCanonicalIds -join ',')) {
+    throw "Unexpected unavailable canonical plugins: $($unavailableCanonicalIds -join ', ')"
+}
+foreach ($row in $unavailableCanonicalRows) {
+    if ([string]::IsNullOrWhiteSpace([string]$row.unavailableReason)) {
+        throw "Unavailable canonical plugin $($row.id) must explain why it cannot run with the bundled Nova runtime."
+    }
+}
 
 foreach ($row in $availableRows) {
     $uri = [Uri]([string]$row.url)
@@ -60,7 +75,10 @@ foreach ($row in $availableRows) {
 
 foreach ($row in $unavailableRows) {
     $base = & $canonical ([string]$row.id)
-    if ($base -eq [string]$row.id -or $availableCanonicalIds -notcontains $base) {
+    $coveredByAlternative = $availableCanonicalIds -contains $base
+    $declaredUnavailableCanonical = ($unavailableCanonicalIds -contains $base) `
+        -and -not [string]::IsNullOrWhiteSpace([string]$row.unavailableReason)
+    if (-not $coveredByAlternative -and -not $declaredUnavailableCanonical) {
         throw "Unavailable row $($row.id) is not covered by a verified canonical alternative."
     }
 }
@@ -74,6 +92,8 @@ $mainQml = Get-Content -Raw -LiteralPath $mainQmlPath
 $pluginsDialog = Get-Content -Raw -LiteralPath $pluginsDialogPath
 $nova = Get-Content -Raw -LiteralPath $novaPath
 $downloadHandler = Get-Content -Raw -LiteralPath $downloadHandlerPath
+$foreignApps = Get-Content -Raw -LiteralPath $foreignAppsPath
+$foreignAppsHeader = Get-Content -Raw -LiteralPath $foreignAppsHeaderPath
 $cmake = Get-Content -Raw -LiteralPath $cmakePath
 $qrc = Get-Content -Raw -LiteralPath $qrcPath
 
@@ -86,6 +106,10 @@ $requiredManagerEvidence = @(
     'unofficialCatalogSyncFinished',
     'm_catalogPreexisting',
     'retryUnofficialCatalogSync',
+    'startUnofficialCatalogActivation',
+    'finishUnofficialCatalogActivation',
+    'm_catalogActivationTransactions',
+    'm_catalogAutoActivationAttempted',
     'DownloadRequest(source.url).limit(MAX_UNOFFICIAL_PLUGIN_BYTES)',
     'MAX_CAPABILITY_STDOUT_BYTES',
     'MAX_CAPABILITY_STDERR_BYTES',
@@ -116,11 +140,53 @@ if ($manager -match 'if \(!m_runtimeError\.isEmpty\(\) && !m_catalogQueue\.isEmp
         -or $manager -match 'Automatic plugin installation is waiting for the search runtime') {
     throw 'A missing search runtime must not abort verified catalog downloads or count every queued file as failed.'
 }
+$retryMethodStart = $manager.IndexOf('void SearchPluginManager::retryUnofficialCatalogSync()', [StringComparison]::Ordinal)
+$retryMethodEnd = if ($retryMethodStart -ge 0) {
+    $manager.IndexOf('void SearchPluginManager::trustUnofficialPlugin', $retryMethodStart, [StringComparison]::Ordinal)
+} else {
+    -1
+}
+if ($retryMethodStart -lt 0 -or $retryMethodEnd -le $retryMethodStart) {
+    throw 'The catalog retry implementation is missing or malformed.'
+}
+$retryMethod = $manager.Substring($retryMethodStart, $retryMethodEnd - $retryMethodStart)
+if ($foreignAppsHeader -notmatch 'void resetAutomaticPythonDetection\(\)' `
+        -or $foreignApps -notmatch 'void Utils::ForeignApps::resetAutomaticPythonDetection\(\)' `
+        -or $retryMethod -notmatch 'Utils::ForeignApps::resetAutomaticPythonDetection\(\)' `
+        -or [regex]::Matches($manager, 'Utils::ForeignApps::resetAutomaticPythonDetection\(\)').Count -ne 1) {
+    throw 'A user-requested catalog retry must invalidate only cached automatic Python discovery before probing again.'
+}
 if ($manager -notmatch 'catalogQuarantinePath\(m_currentCatalogEntry\.id, source\.sha256\)' `
         -or $manager -notmatch 'state\.integrityState = preserveOwnedActive \? u"pending-update-trust"_s : u"pending-trust"_s' `
-        -or $manager -notmatch 'A user-managed active file was preserved; the pinned catalog file is quarantined' `
-        -or $manager -notmatch 'state\.runtimeState = u"import-failed"_s') {
-    throw 'Verified downloads must remain quarantined until explicit trust, preserve user-managed active files, and retain real import diagnostics.'
+        -or $manager -notmatch 'Automatically validating this SHA-256-verified catalog plugin' `
+        -or $manager -notmatch 'm_catalogActivationTransactions\.insert' `
+        -or $manager -notmatch 'runtime-incompatible' `
+        -or $manager -notmatch 'catalogUnavailable' `
+        -or $manager -match 'has no available verified source') {
+    throw 'Verified supported catalog sources must activate in one aggregate validation pass, preserve user-managed files, and expose unavailable entries without a startup error flood.'
+}
+$activationFinishStart = $manager.IndexOf('void SearchPluginManager::finishUnofficialCatalogActivation()', [StringComparison]::Ordinal)
+$activationFinishEnd = if ($activationFinishStart -ge 0) {
+    $manager.IndexOf('void SearchPluginManager::finishUnofficialCatalogSync()', $activationFinishStart, [StringComparison]::Ordinal)
+} else {
+    -1
+}
+if ($activationFinishStart -lt 0 -or $activationFinishEnd -le $activationFinishStart) {
+    throw 'The automatic catalog activation completion implementation is missing or malformed.'
+}
+$activationFinish = $manager.Substring($activationFinishStart, $activationFinishEnd - $activationFinishStart)
+$generationGuardIndex = $activationFinish.IndexOf('state.userRemoved || (state.generation != transaction.generation)', [StringComparison]::Ordinal)
+$successIndex = $activationFinish.IndexOf('if ((activeHash == transaction.candidateHash)', [StringComparison]::Ordinal)
+$rollbackIndex = $activationFinish.IndexOf('bool restored = false;', [StringComparison]::Ordinal)
+if ($managerHeader -notmatch 'struct CatalogActivationTransaction[\s\S]{0,260}quint64 generation' `
+        -or $generationGuardIndex -lt 0 `
+        -or $successIndex -lt 0 `
+        -or $rollbackIndex -lt 0 `
+        -or $generationGuardIndex -gt $successIndex `
+        -or $generationGuardIndex -gt $rollbackIndex `
+        -or $activationFinish -notmatch 'activeHash != transaction\.candidateHash' `
+        -or $activationFinish -notmatch 'requiresReconciliation = true') {
+    throw 'Automatic catalog activation must guard the ledger generation, user-removal state, and active-file hash before it mutates or rolls back a transaction.'
 }
 if ($pluginsDialog -notmatch 'summary\.runtimeUnavailable' `
         -or $pluginsDialog -notmatch 'summary\.awaitingRuntime' `
@@ -243,4 +309,4 @@ if ($cmake -notmatch 'searchengine/\*\.json' -or $qrc -notmatch 'searchengine/un
     throw 'The verified manifest is not wired into both resource build paths.'
 }
 
-Write-Host 'Unofficial plugin catalog policy passed: 100 rows, 97 available sources, 92/92 canonical plugins covered.'
+Write-Host 'Unofficial plugin catalog policy passed: 100 rows, 92 supported sources, 88/92 canonical plugins auto-activatable.'

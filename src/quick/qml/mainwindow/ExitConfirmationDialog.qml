@@ -78,10 +78,6 @@ Dialog {
             text: qsTr("No")
             flat: true
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
-            onClicked: {
-                Log.debug("ui", "Exit dialog: No")
-                dialog.reject()
-            }
         }
         Button {
             text: qsTr("Always Yes")

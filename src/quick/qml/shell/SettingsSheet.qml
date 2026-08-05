@@ -742,7 +742,12 @@ Sheet {
                         GridLayout {
                             id: seedColorLayout
                             Layout.fillWidth: true
-                            columns: width >= 300 ? 3 : 1
+                            // Keep the editable value usable before placing a
+                            // second control alongside it.  A compact sheet
+                            // used to show only an unlabeled 42 px swatch (or
+                            // clip it entirely), which made the continuous
+                            // picker effectively undiscoverable.
+                            columns: width >= 360 ? 2 : 1
                             columnSpacing: Spacing.sm
                             rowSpacing: Spacing.xs
 
@@ -752,6 +757,8 @@ Sheet {
                                 property bool userEdited: false
                                 readonly property bool validColor: ThemeManager.isValidColor(text)
                                 Layout.fillWidth: true
+                                Layout.minimumWidth: seedColorLayout.columns === 1 ? 0 : 148
+                                Layout.preferredHeight: 40
                                 text: ThemeManager.seedColor
                                 maximumLength: 32
                                 Accessible.name: qsTr("Material seed color")
@@ -769,14 +776,15 @@ Sheet {
                             Button {
                                 id: seedColorPickerButton
                                 objectName: "settingsSeedColorPickerButton"
-                                Layout.preferredWidth: 42
+                                Layout.preferredWidth: 156
                                 Layout.preferredHeight: 40
                                 Layout.fillWidth: seedColorLayout.columns === 1
-                                padding: 8
+                                text: qsTr("Open color picker")
                                 Accessible.name: qsTr("Open Material seed color picker")
-                                Accessible.description: qsTr("Current color %1").arg(String(ThemeManager.seedColor))
+                                Accessible.description: qsTr("Open the continuous color picker. Current color %1.")
+                                    .arg(String(ThemeManager.seedColor))
                                 ToolTip.visible: hovered
-                                ToolTip.text: qsTr("Choose color")
+                                ToolTip.text: qsTr("Choose a Material color from the continuous picker")
                                 ToolTip.delay: 500
                                 onClicked: {
                                     seedColorPreviewDebounce.stop()
@@ -785,18 +793,12 @@ Sheet {
                                     seedColorPicker.openFor(seedColorPickerButton,
                                         ThemeManager.seedColor, Theme.color("surface"))
                                 }
-                                contentItem: Item { }
-                                background: Rectangle {
-                                    radius: 12
-                                    color: ThemeManager.seedColor
-                                    border.width: seedColorPickerButton.visualFocus ? 3 : 1
-                                    border.color: seedColorPickerButton.visualFocus
-                                        ? Theme.color("onSurface") : Theme.color("outline")
-                                }
                             }
                             Button {
-                                Layout.fillWidth: seedColorLayout.columns === 1
-                                text: qsTr("Apply")
+                                Layout.columnSpan: seedColorLayout.columns
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 40
+                                text: qsTr("Apply color")
                                 enabled: seedColorField.validColor
                                 onClicked: root.applySeedColor(seedColorField.text)
                             }

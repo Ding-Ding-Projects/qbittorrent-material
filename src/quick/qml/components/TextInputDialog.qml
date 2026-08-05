@@ -65,6 +65,10 @@ Popup {
     /*! Emitted on cancel / dismiss. */
     signal rejected()
 
+    // Popup.CloseOnEscape calls close() directly, so terminal state is tracked
+    // here to deliver one rejection for Escape, Cancel, or external dismissal.
+    property bool terminalHandled: false
+
     modal: true
     focus: true
     closePolicy: Popup.CloseOnEscape
@@ -85,20 +89,36 @@ Popup {
     }
 
     onOpened: {
+        terminalHandled = false
         Log.debug("ui", "TextInputDialog opened: " + title)
         field.forceActiveFocus()
         field.selectAll()
     }
 
-    function _accept() {
-        if (!field.acceptableInput)
+    onClosed: {
+        if (terminalHandled)
             return
+
+        terminalHandled = true
+        Log.debug("ui", "TextInputDialog dismissed")
+        root.rejected()
+    }
+
+    function _accept() {
+        if (terminalHandled || !field.acceptableInput)
+            return
+
+        terminalHandled = true
         Log.info("ui", "TextInputDialog accepted: '" + field.text + "'")
         root.accepted(field.text)
         root.close()
     }
 
     function _reject() {
+        if (terminalHandled)
+            return
+
+        terminalHandled = true
         Log.debug("ui", "TextInputDialog rejected")
         root.rejected()
         root.close()
@@ -131,6 +151,9 @@ Popup {
             selectByMouse: true
             validator: root.validator
             implicitHeight: Spacing.controlHeight
+            Accessible.name: root.label.length > 0 ? root.label
+                                                   : (root.title.length > 0 ? root.title : qsTr("Text input"))
+            Accessible.description: root.placeholder
             onAccepted: root._accept()
         }
 

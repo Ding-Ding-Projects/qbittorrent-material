@@ -54,4 +54,8 @@ namespace Utils::ForeignApps
     };
 
     PythonInfo pythonInfo();
+    /// Discard only the cached automatic PATH/registry probe. Call this from a
+    /// deliberate recovery action after the environment may have changed; it
+    /// intentionally leaves a user-configured interpreter untouched.
+    void resetAutomaticPythonDetection();
 }

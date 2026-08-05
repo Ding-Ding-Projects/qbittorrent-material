@@ -154,21 +154,19 @@ Dialog {
             text: qsTr("Cancel")
             flat: true
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
-            onClicked: {
-                Log.debug("ui", "PreviewSelectDialog cancelled")
-                root.close()
-            }
         }
 
         Button {
             text: qsTr("Preview")
             highlighted: true
             enabled: table.currentRow >= 0
-            DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+            DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
             onClicked: {
                 Log.debug("ui", "PreviewSelectDialog Preview clicked for row " + table.currentRow)
                 root._preview(table.currentRow)
             }
         }
     }
+
+    onRejected: Log.debug("ui", "PreviewSelectDialog cancelled")
 }

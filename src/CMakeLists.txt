@@ -115,7 +115,7 @@ if (WIN32)
     # Embed the product mark in qbittorrent.exe so Explorer, shortcuts, file
     # associations, and the Squirrel installer all display the same identity.
     target_sources(qbittorrent PRIVATE
-        "${CMAKE_SOURCE_DIR}/resources/branding/qbittorrent-material.rc"
+        "${QBT_WINDOWS_VERSION_RESOURCE}"
     )
     target_link_libraries(qbittorrent PRIVATE Advapi32 Shell32)
 endif()
@@ -136,6 +136,7 @@ target_include_directories(qbittorrent PRIVATE
 target_compile_features(qbittorrent PRIVATE cxx_std_20)
 target_compile_definitions(qbittorrent PRIVATE
     QBT_BUILD_ID=\"${QBT_BUILD_ID}\"
+    QBT_PACKAGE_VERSION=\"${QBT_PACKAGE_VERSION}\"
 )
 
 if (QBT_DBUS AND TARGET Qt6::DBus)

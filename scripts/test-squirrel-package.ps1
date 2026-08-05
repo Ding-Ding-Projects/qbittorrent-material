@@ -10,13 +10,17 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $ReleaseDirectory,
 
-    [string] $PreviousInstallerPath = "",
+    [switch] $ExpectDelta,
 
     [switch] $SkipNormalSetupLaunchAssertion
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+if (-not ("System.IO.Compression.ZipFile" -as [type])) {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+}
 
 function Resolve-RequiredFile([string] $Path, [string] $Label) {
     $resolved = Resolve-Path -LiteralPath $Path -ErrorAction SilentlyContinue
@@ -66,6 +70,44 @@ function Assert-ReleaseManifestPackage(
         throw "$Label byte length does not match its RELEASES entry."
     }
     return $entry
+}
+
+function Assert-PackagedExecutableVersion(
+    [string] $PackagePath,
+    [string] $ExpectedPackageVersion,
+    [string] $ScratchRoot
+) {
+    $extractRoot = Join-Path $ScratchRoot "qbt-material-version-resource-$([guid]::NewGuid().ToString('N'))"
+    $executablePath = Join-Path $extractRoot "qbittorrent.exe"
+    $expectedWindowsVersion = "$ExpectedPackageVersion.0"
+    try {
+        New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
+        $archive = [IO.Compression.ZipFile]::OpenRead($PackagePath)
+        try {
+            $entries = @($archive.Entries | Where-Object {
+                $_.FullName -eq "lib/net45/qbittorrent.exe"
+            })
+            if ($entries.Count -ne 1) {
+                throw "Squirrel full package must contain exactly one lib/net45/qbittorrent.exe; found $($entries.Count)."
+            }
+            [IO.Compression.ZipFileExtensions]::ExtractToFile($entries[0], $executablePath, $false)
+        }
+        finally {
+            $archive.Dispose()
+        }
+
+        $versionInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo($executablePath)
+        if ($versionInfo.FileVersion -ne $expectedWindowsVersion `
+            -or $versionInfo.ProductVersion -ne $expectedWindowsVersion) {
+            throw "Packaged qbittorrent.exe version resource is FileVersion '$($versionInfo.FileVersion)' / ProductVersion '$($versionInfo.ProductVersion)', expected '$expectedWindowsVersion' from Squirrel package $ExpectedPackageVersion."
+        }
+        Write-Host "Verified packaged qbittorrent.exe FileVersion/ProductVersion $expectedWindowsVersion from Squirrel package $ExpectedPackageVersion."
+    }
+    finally {
+        if (Test-Path -LiteralPath $extractRoot) {
+            Remove-Item -Recurse -Force -LiteralPath $extractRoot
+        }
+    }
 }
 
 function Invoke-CheckedProcess(
@@ -660,10 +702,7 @@ function Invoke-WorkspaceRecoverySmoke([string] $InstalledExecutable) {
     }
 }
 
-$upgradeExpected = -not [string]::IsNullOrWhiteSpace($PreviousInstallerPath)
-if ($upgradeExpected) {
-    $PreviousInstallerPath = Resolve-RequiredFile $PreviousInstallerPath "Previous Squirrel Setup"
-}
+$hasPriorFeed = $ExpectDelta.IsPresent
 
 $InstallerPath = Resolve-RequiredFile $InstallerPath "Current Squirrel Setup"
 $ReleaseDirectory = (Resolve-Path -LiteralPath $ReleaseDirectory -ErrorAction Stop).Path
@@ -685,11 +724,11 @@ $currentDeltaManifestLines = @(
     Get-Content -LiteralPath $releaseManifest |
         Where-Object { $_ -match $deltaEntryPattern }
 )
-$expectedDeltaCount = if ($upgradeExpected) { 1 } else { 0 }
+$expectedDeltaCount = if ($hasPriorFeed) { 1 } else { 0 }
 if ($currentDeltaFiles.Count -ne $expectedDeltaCount `
     -or $currentDeltaManifestLines.Count -ne $expectedDeltaCount) {
-    $feedDescription = if ($upgradeExpected) {
-        "a release with a previous Squirrel Setup"
+    $feedDescription = if ($hasPriorFeed) {
+        "a release with a prior Squirrel feed"
     }
     else {
         "the first Squirrel release"
@@ -698,7 +737,7 @@ if ($currentDeltaFiles.Count -ne $expectedDeltaCount `
 }
 $currentDeltaPackage = $null
 $deltaEntry = $null
-if ($upgradeExpected) {
+if ($hasPriorFeed) {
     $currentDeltaPackage = Resolve-RequiredFile $currentDeltaPath "Current Squirrel delta package"
     $deltaEntry = Assert-ReleaseManifestPackage `
         $releaseManifest $currentDeltaPackage "Current Squirrel delta package"
@@ -729,6 +768,7 @@ $script:ScratchRoot = if (-not [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
 else {
     [IO.Path]::GetTempPath()
 }
+Assert-PackagedExecutableVersion $currentFullPackage $PackageVersion $script:ScratchRoot
 
 if (Test-Path -LiteralPath $script:InstallRoot) {
     $existingNames = @(Get-ChildItem -LiteralPath $script:InstallRoot -Force | Select-Object -ExpandProperty Name)
@@ -765,103 +805,15 @@ if ($env:GITHUB_ACTIONS -eq "true") {
     $script:AssociationBaseline = Get-AssociationSnapshot
 }
 
-if ($upgradeExpected) {
-    Invoke-CheckedProcess $PreviousInstallerPath @("--silent") "Previous silent Setup"
-    $previousAppDirectories = @(
-        Get-ChildItem -LiteralPath $script:InstallRoot -Directory -Filter "app-*" |
-            Where-Object { $_.Name -ne "app-$PackageVersion" }
-    )
-    if ($previousAppDirectories.Count -lt 1) {
-        throw "The previous Setup did not install an older app version."
-    }
-
-    # A successful update from this deliberately delta-only feed is a
-    # fail-closed proof: Squirrel cannot retry with the current full package
-    # because that package is intentionally absent. The full entry remains in
-    # RELEASES so normal update selection semantics still apply.
-    $deltaOnlyFeed = Join-Path $script:ScratchRoot `
-        "qbt-material-delta-only-$([guid]::NewGuid().ToString('N'))"
-    New-Item -ItemType Directory -Force -Path $deltaOnlyFeed | Out-Null
-    $updater = Join-Path $script:InstallRoot "Update.exe"
-    $updateLog = Join-Path $script:InstallRoot "Squirrel-Update.log"
-    try {
-        Copy-Item -LiteralPath $releaseManifest -Destination (Join-Path $deltaOnlyFeed "RELEASES")
-        Copy-Item -LiteralPath $currentDeltaPackage -Destination $deltaOnlyFeed
-        $deltaOnlyFullPath = Join-Path $deltaOnlyFeed (Split-Path -Leaf $currentFullPackage)
-        if (Test-Path -LiteralPath $deltaOnlyFullPath) {
-            throw "The delta-only upgrade proof feed unexpectedly contains the current full package."
-        }
-        Assert-ReleaseManifestPackage `
-            (Join-Path $deltaOnlyFeed "RELEASES") `
-            (Join-Path $deltaOnlyFeed $currentDeltaName) `
-            "Delta-only proof feed package" |
-            Out-Null
-
-        if (Test-Path -LiteralPath $updateLog) {
-            Remove-Item -Force -LiteralPath $updateLog
-        }
-        Invoke-CheckedProcess $updater @("--update=$deltaOnlyFeed", "--silent") `
-            "Squirrel delta-only local-feed update"
-    }
-    finally {
-        $scratchRootWithSeparator = [IO.Path]::GetFullPath($script:ScratchRoot).TrimEnd('\', '/') + `
-            [IO.Path]::DirectorySeparatorChar
-        $deltaOnlyFeedPath = [IO.Path]::GetFullPath($deltaOnlyFeed)
-        if (-not $deltaOnlyFeedPath.StartsWith(
-            $scratchRootWithSeparator,
-            [StringComparison]::OrdinalIgnoreCase)) {
-            throw "Refusing to remove a delta proof directory outside the smoke-test scratch root."
-        }
-        Remove-Item -Recurse -Force -LiteralPath $deltaOnlyFeedPath
-    }
-
-    $reconstructedPackageName = [regex]::Replace(
-        $currentDeltaName,
-        '-delta\.nupkg$',
-        '.nupkg',
-        [Text.RegularExpressions.RegexOptions]::IgnoreCase)
-    $updateLog = Resolve-RequiredFile $updateLog "Squirrel delta update log"
-    $updateLogText = Get-Content -Raw -LiteralPath $updateLog
-    if ($updateLogText.Contains("Failed to apply updates, falling back to full updates")) {
-        throw "Squirrel attempted a forbidden full-package fallback during the delta upgrade proof."
-    }
-    if ($updateLogText.Contains("Really couldn't apply updates!")) {
-        throw "Squirrel recorded a failed full-package retry during the delta upgrade proof."
-    }
-    if (-not $updateLogText.Contains("Starting update, downloading from $deltaOnlyFeed")) {
-        throw "The Squirrel update log does not identify the isolated delta-only proof feed."
-    }
-    $repackLogPattern = "Repacking into full package: .*?[\\/]packages[\\/]$([regex]::Escape($reconstructedPackageName))"
-    if ($updateLogText -notmatch $repackLogPattern) {
-        throw "The Squirrel update log does not prove that the current delta was repacked into a full package."
-    }
-
-    $installedPackagesRoot = Join-Path $script:InstallRoot "packages"
-    $cachedDeltaPackage = Resolve-RequiredFile `
-        (Join-Path $installedPackagesRoot $currentDeltaName) `
-        "Downloaded current delta package"
-    Assert-ReleaseManifestPackage `
-        $releaseManifest $cachedDeltaPackage "Downloaded current delta package" |
-        Out-Null
-    $reconstructedPackage = Resolve-RequiredFile `
-        (Join-Path $installedPackagesRoot $reconstructedPackageName) `
-        "Full package reconstructed from the current delta"
-    if ((Get-Item -LiteralPath $reconstructedPackage).Length -le 0) {
-        throw "The full package reconstructed from the current delta is empty."
-    }
-    if (Test-Path -LiteralPath `
-        (Join-Path $installedPackagesRoot (Split-Path -Leaf $currentFullPackage))) {
-        throw "The upgrade cache contains the current -full package, so delta-only application was not proven."
-    }
-
-    $updatedInstall = Assert-Installed $PackageVersion
-    Invoke-IsolatedLaunch $updatedInstall.Stub $updatedInstall.Executable `
-        "Updated execution stub"
-    Invoke-SquirrelUninstall
-    Write-Host "Verified the previous release downloaded and applied the current delta without a full-package fallback."
+if ($hasPriorFeed) {
+    # The prior public feed is input to Squirrel's delta generator, but a
+    # token-bearing CI job must not execute an old Setup.exe merely to exercise
+    # an upgrade path. The delta and RELEASES assertions above prove the exact
+    # current feed shape without trusting that historical executable.
+    Write-Host "Verified the current delta package and RELEASES entry from a prior feed without executing a prior Setup."
 }
 else {
-    Write-Host "Verified the first Squirrel release has no delta; upgrade smoke is not applicable without a previous Setup."
+    Write-Host "Verified the first Squirrel release has no delta; prior-feed delta validation is not applicable."
 }
 
 Invoke-CheckedProcess $InstallerPath @("--silent") "Current silent Setup"
@@ -907,9 +859,8 @@ Invoke-SquirrelUninstall
 
 if ($script:SeededAssociationBaseline) {
     Write-Host "Verified exact restoration of pre-existing per-user .torrent and magnet association values."
-    # Run the current-installer key-shape cycles only after the previous-version
-    # upgrade path, so the smoke never asks an older Setup to replace a newer
-    # Squirrel Update.exe retained after uninstall.
+    # Run the current-installer key-shape cycles after the primary setup checks
+    # so every executed installer is the exact artifact built in this job.
     Restore-AssociationSnapshot $script:OriginalAssociationBaseline
     Assert-AssociationSnapshot $script:OriginalAssociationBaseline `
         "Association key-presence smoke setup"
@@ -919,7 +870,7 @@ if ($script:SeededAssociationBaseline) {
 Write-Host "Verified normal Setup launch, Desktop/Start Menu shortcuts, and clean Update.exe uninstall."
 Write-Host "RELEASES: $releaseManifest"
 Write-Host "Full package: $currentFullPackage"
-if ($upgradeExpected) {
+if ($hasPriorFeed) {
     Write-Host "Delta package: $currentDeltaPackage"
 }
 }

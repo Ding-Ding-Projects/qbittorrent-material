@@ -649,6 +649,20 @@ ApplicationWindow {
         text: qsTr("Manage Plugins...")
         onTriggered: root.managePlugins()
     }
+    property alias actionInstallSearchPlugin: actionInstallSearchPlugin
+    Action {
+        id: actionInstallSearchPlugin
+        text: qsTr("Install Search Plugin…")
+        enabled: !SearchController.pluginOperationInProgress
+        onTriggered: root.installSearchPlugin()
+    }
+    property alias actionCheckSearchPluginUpdates: actionCheckSearchPluginUpdates
+    Action {
+        id: actionCheckSearchPluginUpdates
+        text: qsTr("Check Search Plugin Updates")
+        enabled: !SearchController.pluginOperationInProgress
+        onTriggered: root.checkForSearchPluginUpdates()
+    }
 
     // --- Help ---
     property alias actionDocumentation: actionDocumentation
@@ -670,6 +684,27 @@ ApplicationWindow {
         id: actionCheckForUpdates
         text: qsTr("Check for Updates")
         onTriggered: root.checkForUpdates()
+    }
+    property alias actionCancelUpdate: actionCancelUpdate
+    Action {
+        id: actionCancelUpdate
+        text: qsTr("Cancel update")
+        enabled: ProgramUpdater.cancellable
+        onTriggered: root.cancelProgramUpdate()
+    }
+    property alias actionRetryUpdate: actionRetryUpdate
+    Action {
+        id: actionRetryUpdate
+        text: qsTr("Retry update")
+        enabled: ProgramUpdater.retryAvailable
+        onTriggered: root.retryProgramUpdate()
+    }
+    property alias actionRestartToInstallUpdate: actionRestartToInstallUpdate
+    Action {
+        id: actionRestartToInstallUpdate
+        text: qsTr("Restart to install version %1").arg(ProgramUpdater.availableVersion)
+        enabled: ProgramUpdater.readyToRestart
+        onTriggered: root.requestUpdateRestart(root.activeFocusItem)
     }
     property alias actionDonateMoney: actionDonateMoney
     Action {
@@ -735,6 +770,13 @@ ApplicationWindow {
             onNavRequested: (index) => root.switchToTab(index)
             onPanelRequested: (panel) => root.togglePanel(panel)
             onRegexBuilderRequested: root.togglePanel("regex")
+        }
+
+        UpdateOperationBanner {
+            id: updateOperationBanner
+            width: parent.width
+            onCancelRequested: root.cancelProgramUpdate()
+            onRetryRequested: root.retryProgramUpdate()
         }
 
         UpdateReadyBanner {
@@ -1102,6 +1144,8 @@ ApplicationWindow {
             { id: "shutdownReboot", action: actionAutoReboot, group: qsTr("Downloads done"), destination: qsTr("Completion action"), keywords: "reboot" },
             { id: "shutdownPowerOff", action: actionAutoShutdown, group: qsTr("Downloads done"), destination: qsTr("Completion action"), keywords: "shutdown power off" },
             { id: "plugins", action: actionManagePlugins, group: qsTr("Search"), destination: qsTr("Search plugins"), keywords: "install update engines providers" },
+            { id: "installSearchPlugin", action: actionInstallSearchPlugin, group: qsTr("Search"), destination: qsTr("Search plugins · choose a source"), keywords: "install plugin engine provider file URL" },
+            { id: "checkSearchPluginUpdates", action: actionCheckSearchPluginUpdates, group: qsTr("Search"), destination: qsTr("Search plugins · updates"), keywords: "check update plugin engine provider" },
             { id: "commandPalette", action: actionCommandPalette, group: qsTr("Help"), destination: qsTr("Command palette"), keywords: "commands settings destinations Ctrl Shift F" },
             { id: "documentation", action: actionDocumentation, group: qsTr("Help"), destination: qsTr("Documentation"), keywords: "manual help" },
             { id: "updates", action: actionCheckForUpdates, group: qsTr("Help"), destination: qsTr("Program updater"), keywords: "check download restart" },
@@ -1111,6 +1155,21 @@ ApplicationWindow {
             { id: "alternativeLimits", action: actionUseAlternativeSpeedLimits, group: qsTr("Tools"), destination: qsTr("Global speed limits"), keywords: "alternative turtle" },
             { id: "openFolder", action: actionOpenDestinationFolder, group: qsTr("Transfers"), destination: qsTr("Selected transfer"), keywords: "open destination folder" }
         ]
+        if (ProgramUpdater.readyToRestart) {
+            actionEntries.push({ id: "restartToInstallUpdate", action: actionRestartToInstallUpdate,
+                group: qsTr("Help"), destination: qsTr("Program updater"),
+                keywords: "update staged restart install version" })
+        }
+        if (ProgramUpdater.cancellable) {
+            actionEntries.push({ id: "cancelUpdate", action: actionCancelUpdate,
+                group: qsTr("Help"), destination: qsTr("Program updater"),
+                keywords: "update download check cancel stop" })
+        }
+        if (ProgramUpdater.retryAvailable) {
+            actionEntries.push({ id: "retryUpdate", action: actionRetryUpdate,
+                group: qsTr("Help"), destination: qsTr("Program updater"),
+                keywords: "update failed recovery retry" })
+        }
         for (var i = 0; i < actionEntries.length; ++i) {
             var item = actionEntries[i]
             commands.push({
@@ -1183,8 +1242,8 @@ ApplicationWindow {
         onCommandInvoked: (commandId) => root.invokePaletteCommand(commandId)
         onPluginEnabledChanged: (pluginId, enabled) =>
             SearchController.enablePlugin(pluginId, enabled)
-        onPluginRetryRequested: (pluginId) => {
-            Log.info("search", "Retry plugin setup from palette: " + pluginId)
+        onCatalogRetryRequested: () => {
+            Log.info("search", "Retry shared unofficial search-plugin catalog setup from palette")
             SearchController.retryUnofficialPluginSync()
         }
         onPluginTrustRequested: (pluginId) => {
@@ -1334,6 +1393,25 @@ ApplicationWindow {
         target: ProgramUpdater
         function onNotificationRequested(body, severity, title) {
             NotificationCenter.notify(body, severity, title)
+        }
+    }
+
+    Connections {
+        target: SearchController
+        function onUnofficialPluginTrusted(pluginId) {
+            commandPalette.finishPluginTrust(pluginId)
+            var label = SearchController.pluginFullName(pluginId) || pluginId
+            NotificationCenter.notify(
+                qsTr("%1 is trusted and available to the search runtime.").arg(label),
+                "success", qsTr("Search plugin trusted"))
+        }
+        function onUnofficialPluginTrustFailed(pluginId, reason) {
+            commandPalette.finishPluginTrust(pluginId)
+            var label = SearchController.pluginFullName(pluginId) || pluginId
+            NotificationCenter.notify(
+                qsTr("%1 could not be trusted: %2").arg(label)
+                    .arg(reason || qsTr("Plugin validation failed.")),
+                "error", qsTr("Search plugin trust failed"))
         }
     }
 
@@ -1601,12 +1679,41 @@ ApplicationWindow {
         Log.info("ui", "Action: Check for updates")
         AppController.checkForUpdates()
     }
+    function cancelProgramUpdate() {
+        if (!ProgramUpdater.cancellable)
+            return
+
+        Log.info("ui", "Action: Cancel update")
+        NotificationCenter.notify(
+            qsTr("Cancellation requested. The current update check or download will stop; no update will be installed."),
+            "progress", qsTr("Cancelling update"))
+        ProgramUpdater.cancel()
+    }
+    function retryProgramUpdate() {
+        if (!ProgramUpdater.retryAvailable)
+            return
+
+        Log.info("ui", "Action: Retry update")
+        NotificationCenter.notify(
+            qsTr("Retrying the signed update check. Any downloaded package will be verified before it can be staged."),
+            "progress", qsTr("Retrying update"))
+        ProgramUpdater.retry()
+    }
     function managePlugins() {
         Log.info("ui", "Action: Manage plugins")
         // Search owns the plugin manager dialog. Route the legacy menu action
         // through the same destination path as the visible Search plugins
         // button so it cannot silently become a dead end.
         centralTabs.openSearchPlugins()
+    }
+    function installSearchPlugin() {
+        Log.info("search", "Open search-plugin source chooser from command palette")
+        centralTabs.openSearchPlugins("__command-palette-install-search-plugin__")
+    }
+    function checkForSearchPluginUpdates() {
+        Log.info("search", "Check for search-plugin updates from command palette")
+        centralTabs.openSearchPlugins()
+        SearchController.checkForPluginUpdates()
     }
 
     function lockUI() {

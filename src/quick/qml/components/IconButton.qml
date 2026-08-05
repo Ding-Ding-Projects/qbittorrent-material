@@ -47,6 +47,11 @@ ToolButton {
     implicitWidth: Math.max(size + Spacing.sm * 2, Spacing.controlHeight)
     implicitHeight: Math.max(size + Spacing.sm * 2, Spacing.controlHeight)
 
+    // Tooltips are already the visible label for icon-only controls; expose the
+    // same label to assistive technology unless a caller supplies a richer one.
+    // A glyph is not a meaningful fallback for a screen reader.
+    Accessible.name: root.tooltip.length > 0 ? root.tooltip : qsTr("Icon action")
+
     background: Rectangle {
         radius: height / 2
         color: root.checked

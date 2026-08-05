@@ -193,14 +193,13 @@ Dialog {
             text: qsTr("Cancel")
             flat: true
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
-            onClicked: root.reject()
         }
 
         Button {
             text: qsTr("Download")
             highlighted: true
             enabled: urlsArea.text.trim().length > 0
-            DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+            DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
             onClicked: root.submit()
         }
     }

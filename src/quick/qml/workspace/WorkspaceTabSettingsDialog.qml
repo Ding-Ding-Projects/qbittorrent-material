@@ -47,6 +47,21 @@ Popup {
     property bool pendingClip: false
     property color pendingClippedColor: "transparent"
     property var recentColors: []
+    property bool repositionScheduled: false
+
+    // Do not impose an arbitrary minimum size on an anchored editor. The
+    // overlay may be smaller than the editor's preferred design size on a
+    // narrow window or a high display scale, so the editor must yield to the
+    // actual viewport and let its internal ScrollView handle the content.
+    readonly property int viewportMargin: Spacing.md
+    readonly property int horizontalViewportMargin: parent && parent.width >= viewportMargin * 2
+        ? viewportMargin : 0
+    readonly property int verticalViewportMargin: parent && parent.height >= viewportMargin * 2
+        ? viewportMargin : 0
+    readonly property int preferredWidth: 1040
+    readonly property int preferredHeight: 820
+    readonly property string strictNumberPattern:
+        "[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?"
 
     readonly property var appearancePropertyModel: [
         { key: "fontFamily", label: qsTr("Font family") },
@@ -120,21 +135,34 @@ Popup {
     closePolicy: Popup.CloseOnEscape
     padding: 0
     parent: Overlay.overlay
-    width: Math.min(1040, Math.max(620, (parent ? parent.width : 1040) - Spacing.xl * 2))
-    height: Math.min(820, Math.max(520, (parent ? parent.height : 820) - Spacing.xl * 2))
+    width: parent
+        ? Math.min(preferredWidth, Math.max(0, parent.width - horizontalViewportMargin * 2))
+        : preferredWidth
+    height: parent
+        ? Math.min(preferredHeight, Math.max(0, parent.height - verticalViewportMargin * 2))
+        : preferredHeight
     Material.elevation: 16
+    onOpened: schedulePosition()
     onClosed: {
         if (returnFocusItem)
             returnFocusItem.forceActiveFocus()
     }
-    onWidthChanged: Qt.callLater(positionBesideAnchor)
-    onHeightChanged: Qt.callLater(positionBesideAnchor)
+    onWidthChanged: schedulePosition()
+    onHeightChanged: schedulePosition()
 
-    Timer {
-        interval: 80
-        running: root.visible && root.anchorItem !== null
-        repeat: true
-        onTriggered: root.positionBesideAnchor()
+    Connections {
+        target: root.parent
+        function onWidthChanged() { root.schedulePosition() }
+        function onHeightChanged() { root.schedulePosition() }
+    }
+
+    Connections {
+        target: root.anchorItem
+        function onXChanged() { root.schedulePosition() }
+        function onYChanged() { root.schedulePosition() }
+        function onWidthChanged() { root.schedulePosition() }
+        function onHeightChanged() { root.schedulePosition() }
+        function onVisibleChanged() { root.schedulePosition() }
     }
 
     component SettingsCard: Rectangle {
@@ -214,7 +242,9 @@ Popup {
     background: Rectangle {
         radius: root.numberValue(root.effectiveValue("radius"), Spacing.radiusDialog)
         color: Theme.color("surface")
-        border.width: Math.max(1, root.numberValue(root.effectiveValue("borderWidth"), 1))
+        // A zero-width border is an explicit appearance choice and must render
+        // as zero rather than being promoted back to a one-pixel outline.
+        border.width: Math.max(0, root.numberValue(root.effectiveValue("borderWidth"), 1))
         border.color: root.colorValue(root.effectiveValue("borderColor"),
             Theme.color("outlineVariant"))
     }
@@ -484,20 +514,45 @@ Popup {
         Qt.callLater(positionBesideAnchor)
     }
 
+    function schedulePosition() {
+        if (!visible || repositionScheduled)
+            return
+        repositionScheduled = true
+        Qt.callLater(function() {
+            root.repositionScheduled = false
+            root.positionBesideAnchor()
+        })
+    }
+
+    function moveWithinViewport(candidateX, candidateY) {
+        if (!parent)
+            return
+        var maximumX = Math.max(horizontalViewportMargin,
+            parent.width - width - horizontalViewportMargin)
+        var maximumY = Math.max(verticalViewportMargin,
+            parent.height - height - verticalViewportMargin)
+        x = clamp(candidateX, horizontalViewportMargin, maximumX)
+        y = clamp(candidateY, verticalViewportMargin, maximumY)
+    }
+
     function positionBesideAnchor() {
         if (!parent || !visible)
             return
-        var margin = Spacing.md
-        if (!anchorItem || !anchorItem.visible || !anchorItem.Window.window) {
-            x = Math.max(margin, (parent.width - width) / 2)
-            y = Math.max(margin, (parent.height - height) / 2)
+        if (!anchorItem || !anchorItem.visible || !anchorItem.mapToItem) {
+            moveWithinViewport((parent.width - width) / 2, (parent.height - height) / 2)
             return
         }
-        var right = anchorItem.mapToItem(parent, anchorItem.width + Spacing.sm, 0)
-        var left = anchorItem.mapToItem(parent, -width - Spacing.sm, 0)
-        var candidateX = right.x + width <= parent.width - margin ? right.x : left.x
-        x = Math.max(margin, Math.min(parent.width - width - margin, candidateX))
-        y = Math.max(margin, Math.min(parent.height - height - margin, right.y))
+        var topLeft = anchorItem.mapToItem(parent, 0, 0)
+        var right = topLeft.x + anchorItem.width + Spacing.sm
+        var left = topLeft.x - width - Spacing.sm
+        var fitsRight = right + width <= parent.width - horizontalViewportMargin
+        var fitsLeft = left >= horizontalViewportMargin
+        var candidateX = fitsRight ? right : (fitsLeft ? left : topLeft.x)
+        var below = topLeft.y + anchorItem.height + Spacing.sm
+        var above = topLeft.y - height - Spacing.sm
+        var candidateY = below + height <= parent.height - verticalViewportMargin
+            ? below : above
+        moveWithinViewport(candidateX, candidateY)
     }
 
     function persistAppearance() {
@@ -734,12 +789,53 @@ Popup {
         }
     }
 
-    function makeRgb(red, green, blue, alpha) {
-        if (red < 0 || red > 1 || green < 0 || green > 1 || blue < 0 || blue > 1
-                || alpha < 0 || alpha > 1)
+    function boundedRange(value, minimum, maximum) {
+        if (!Number.isFinite(value)) {
             parsingClipped = true
-        return Qt.rgba(clamp(red, 0, 1), clamp(green, 0, 1), clamp(blue, 0, 1),
-            clamp(alpha, 0, 1))
+            return value > 0 ? maximum : minimum
+        }
+        if (value < minimum || value > maximum)
+            parsingClipped = true
+        return clamp(value, minimum, maximum)
+    }
+
+    function boundedUnit(value) {
+        return boundedRange(value, 0, 1)
+    }
+
+    function boundedGamutUnit(value) {
+        // Perceptual conversions may leave a few floating-point ulps outside
+        // sRGB. Preserve those harmless rounding errors, but require a review
+        // before clipping genuinely out-of-gamut channels.
+        var epsilon = 0.000001
+        if (!Number.isFinite(value)) {
+            parsingClipped = true
+            return value > 0 ? 1 : 0
+        }
+        if (value < -epsilon || value > 1 + epsilon)
+            parsingClipped = true
+        return clamp(value, 0, 1)
+    }
+
+    function makeRgb(red, green, blue, alpha) {
+        if (!Number.isFinite(red)) {
+            parsingClipped = true
+            red = red > 0 ? 1 : 0
+        }
+        if (!Number.isFinite(green)) {
+            parsingClipped = true
+            green = green > 0 ? 1 : 0
+        }
+        if (!Number.isFinite(blue)) {
+            parsingClipped = true
+            blue = blue > 0 ? 1 : 0
+        }
+        if (!Number.isFinite(alpha)) {
+            parsingClipped = true
+            alpha = alpha > 0 ? 1 : 0
+        }
+        return Qt.rgba(boundedGamutUnit(red), boundedGamutUnit(green),
+            boundedGamutUnit(blue), boundedUnit(alpha))
     }
 
     function labToRgb(lightness, greenRed, blueYellow, alpha) {
@@ -772,13 +868,23 @@ Popup {
         return makeRgb(r, g, b, alpha)
     }
 
-    function numbersIn(value) {
-        var matches = String(value).match(/[-+]?(?:\d*\.?\d+)(?:[eE][-+]?\d+)?/g)
-        if (!matches)
-            return []
+    function strictNumbers(value, expression, count) {
+        // Use a full grammar for each representation. Extracting arbitrary
+        // numbers accepts visually plausible junk and can apply a color other
+        // than the one the user actually entered.
+        if (expression.charAt(0) !== "^"
+                || expression.charAt(expression.length - 1) !== "$")
+            return null
+        var match = new RegExp(expression, "i").exec(String(value).trim())
+        if (match === null || match.length !== count + 1)
+            return null
         var result = []
-        for (var i = 0; i < matches.length; ++i)
-            result.push(Number(matches[i]))
+        for (var i = 1; i <= count; ++i) {
+            var number = Number(match[i])
+            if (!Number.isFinite(number))
+                return null
+            result.push(number)
+        }
         return result
     }
 
@@ -850,60 +956,152 @@ Popup {
                 + fixed(color.a, 3) + ")"
         }
         var name = nameForColor(color)
-        return name.length ? name : qsTr("custom (%1)").arg(colorHex(color))
+        // Named colors only cover a finite opaque palette. The exact ARGB
+        // fallback is itself accepted by the Named color parser, unlike a
+        // human-only "custom (...)" label.
+        return name.length ? name : colorHex(color)
     }
 
     function parsedFormattedColor(index, value) {
         parsingClipped = false
-        var values = numbersIn(value)
+        var n = strictNumberPattern
+        var values = null
         if (index === 0)
             return parseHex(value)
         if (index === 10) {
-            var name = String(value).trim().toLocaleLowerCase()
+            var namedValue = String(value).trim()
+            var fallbackHex = parseHex(namedValue)
+            if (fallbackHex !== null)
+                return fallbackHex
             var names = namedColors()
-            return names[name] ? parseHex(names[name]) : null
+            var named = names[namedValue.toLocaleLowerCase()]
+            return named ? parseHex(named) : null
         }
-        if (index === 1 && values.length >= 3)
+        if (index === 1) {
+            values = strictNumbers(value,
+                "^rgb\\(\\s*(" + n + ")\\s*,\\s*(" + n + ")\\s*,\\s*(" + n + ")\\s*\\)$", 3)
+            if (values === null)
+                values = strictNumbers(value,
+                    "^rgba\\(\\s*(" + n + ")\\s*,\\s*(" + n + ")\\s*,\\s*(" + n + ")\\s*,\\s*(" + n + ")\\s*\\)$", 4)
+            if (values === null)
+                return null
             return makeRgb(values[0] / 255, values[1] / 255, values[2] / 255,
-                values.length >= 4 ? values[3] : 1)
-        if (index === 2 && values.length >= 3)
-            return Qt.hsla(((values[0] % 360) + 360) % 360 / 360,
-                clamp(values[1] / 100, 0, 1), clamp(values[2] / 100, 0, 1),
-                clamp(values.length >= 4 ? values[3] : 1, 0, 1))
-        if (index === 3 && values.length >= 3)
-            return Qt.hsva(((values[0] % 360) + 360) % 360 / 360,
-                clamp(values[1] / 100, 0, 1), clamp(values[2] / 100, 0, 1),
-                clamp(values.length >= 4 ? values[3] : 1, 0, 1))
-        if (index === 4 && values.length >= 3) {
-            var hue = ((values[0] % 360) + 360) % 360 / 360
-            var white = Math.max(0, values[1] / 100)
-            var black = Math.max(0, values[2] / 100)
+                values.length === 4 ? values[3] : 1)
+        }
+        if (index === 2) {
+            values = strictNumbers(value,
+                "^hsl\\(\\s*(" + n + ")\\s*,\\s*(" + n + ")%\\s*,\\s*(" + n + ")%\\s*\\)$", 3)
+            if (values === null)
+                values = strictNumbers(value,
+                    "^hsla\\(\\s*(" + n + ")\\s*,\\s*(" + n + ")%\\s*,\\s*(" + n + ")%\\s*,\\s*(" + n + ")\\s*\\)$", 4)
+            if (values === null)
+                return null
+            var hslHue = boundedRange(values[0], 0, 360)
+            return Qt.hsla((hslHue % 360) / 360, boundedUnit(values[1] / 100),
+                boundedUnit(values[2] / 100), boundedUnit(values.length === 4 ? values[3] : 1))
+        }
+        if (index === 3) {
+            values = strictNumbers(value,
+                "^(?:hsv|hsb)\\(\\s*(" + n + ")\\s*,\\s*(" + n + ")%\\s*,\\s*(" + n + ")%\\s*\\)$", 3)
+            if (values === null)
+                values = strictNumbers(value,
+                    "^(?:hsva|hsba)\\(\\s*(" + n + ")\\s*,\\s*(" + n + ")%\\s*,\\s*(" + n + ")%\\s*,\\s*(" + n + ")\\s*\\)$", 4)
+            if (values === null)
+                return null
+            var hsvHue = boundedRange(values[0], 0, 360)
+            return Qt.hsva((hsvHue % 360) / 360, boundedUnit(values[1] / 100),
+                boundedUnit(values[2] / 100), boundedUnit(values.length === 4 ? values[3] : 1))
+        }
+        if (index === 4) {
+            values = strictNumbers(value,
+                "^hwb\\(\\s*(" + n + ")\\s+(" + n + ")%\\s+(" + n + ")%\\s*\\)$", 3)
+            if (values === null)
+                values = strictNumbers(value,
+                    "^hwb\\(\\s*(" + n + ")\\s+(" + n + ")%\\s+(" + n + ")%\\s*\\/\\s*(" + n + ")\\s*\\)$", 4)
+            if (values === null)
+                return null
+            var hue = (boundedRange(values[0], 0, 360) % 360) / 360
+            var white = boundedUnit(values[1] / 100)
+            var black = boundedUnit(values[2] / 100)
             var sum = white + black
             if (sum > 1) { white /= sum; black /= sum; parsingClipped = true }
             var pure = Qt.hsva(hue, 1, 1, 1)
             var factor = 1 - white - black
             return makeRgb(pure.r * factor + white, pure.g * factor + white,
-                pure.b * factor + white, values.length >= 4 ? values[3] : 1)
+                pure.b * factor + white, boundedUnit(values.length === 4 ? values[3] : 1))
         }
-        if (index === 5 && values.length >= 3)
-            return labToRgb(values[0], values[1], values[2], values.length >= 4 ? values[3] : 1)
-        if (index === 6 && values.length >= 3) {
-            var radians = values[2] * Math.PI / 180
-            return labToRgb(values[0], values[1] * Math.cos(radians),
-                values[1] * Math.sin(radians), values.length >= 4 ? values[3] : 1)
+        if (index === 5) {
+            values = strictNumbers(value,
+                "^lab\\(\\s*(" + n + ")\\s+(" + n + ")\\s+(" + n + ")\\s*\\)$", 3)
+            if (values === null)
+                values = strictNumbers(value,
+                    "^lab\\(\\s*(" + n + ")\\s+(" + n + ")\\s+(" + n + ")\\s*\\/\\s*(" + n + ")\\s*\\)$", 4)
+            if (values === null)
+                return null
+            return labToRgb(boundedRange(values[0], 0, 100), values[1], values[2],
+                boundedUnit(values.length === 4 ? values[3] : 1))
         }
-        if (index === 7 && values.length >= 3)
-            return oklabToRgb(values[0], values[1], values[2], values.length >= 4 ? values[3] : 1)
-        if (index === 8 && values.length >= 3) {
-            radians = values[2] * Math.PI / 180
-            return oklabToRgb(values[0], values[1] * Math.cos(radians),
-                values[1] * Math.sin(radians), values.length >= 4 ? values[3] : 1)
+        if (index === 6) {
+            values = strictNumbers(value,
+                "^lch\\(\\s*(" + n + ")\\s+(" + n + ")\\s+(" + n + ")\\s*\\)$", 3)
+            if (values === null)
+                values = strictNumbers(value,
+                    "^lch\\(\\s*(" + n + ")\\s+(" + n + ")\\s+(" + n + ")\\s*\\/\\s*(" + n + ")\\s*\\)$", 4)
+            if (values === null)
+                return null
+            var lchChroma = values[1]
+            if (lchChroma < 0) {
+                parsingClipped = true
+                lchChroma = 0
+            }
+            var radians = boundedRange(values[2], 0, 360) * Math.PI / 180
+            return labToRgb(boundedRange(values[0], 0, 100),
+                lchChroma * Math.cos(radians), lchChroma * Math.sin(radians),
+                boundedUnit(values.length === 4 ? values[3] : 1))
         }
-        if (index === 9 && values.length >= 4) {
-            var c = values[0] / 100, m = values[1] / 100
-            var y = values[2] / 100, k = values[3] / 100
+        if (index === 7) {
+            values = strictNumbers(value,
+                "^oklab\\(\\s*(" + n + ")\\s+(" + n + ")\\s+(" + n + ")\\s*\\)$", 3)
+            if (values === null)
+                values = strictNumbers(value,
+                    "^oklab\\(\\s*(" + n + ")\\s+(" + n + ")\\s+(" + n + ")\\s*\\/\\s*(" + n + ")\\s*\\)$", 4)
+            if (values === null)
+                return null
+            return oklabToRgb(boundedUnit(values[0]), values[1], values[2],
+                boundedUnit(values.length === 4 ? values[3] : 1))
+        }
+        if (index === 8) {
+            values = strictNumbers(value,
+                "^oklch\\(\\s*(" + n + ")\\s+(" + n + ")\\s+(" + n + ")\\s*\\)$", 3)
+            if (values === null)
+                values = strictNumbers(value,
+                    "^oklch\\(\\s*(" + n + ")\\s+(" + n + ")\\s+(" + n + ")\\s*\\/\\s*(" + n + ")\\s*\\)$", 4)
+            if (values === null)
+                return null
+            var oklchChroma = values[1]
+            if (oklchChroma < 0) {
+                parsingClipped = true
+                oklchChroma = 0
+            }
+            radians = boundedRange(values[2], 0, 360) * Math.PI / 180
+            return oklabToRgb(boundedUnit(values[0]),
+                oklchChroma * Math.cos(radians), oklchChroma * Math.sin(radians),
+                boundedUnit(values.length === 4 ? values[3] : 1))
+        }
+        if (index === 9) {
+            values = strictNumbers(value,
+                "^cmyk\\(\\s*(" + n + ")%\\s*,\\s*(" + n + ")%\\s*,\\s*(" + n + ")%\\s*,\\s*(" + n + ")%\\s*\\)$", 4)
+            if (values === null)
+                values = strictNumbers(value,
+                    "^cmyka\\(\\s*(" + n + ")%\\s*,\\s*(" + n + ")%\\s*,\\s*(" + n + ")%\\s*,\\s*(" + n + ")%\\s*,\\s*(" + n + ")\\s*\\)$", 5)
+            if (values === null)
+                return null
+            var c = boundedUnit(values[0] / 100)
+            var m = boundedUnit(values[1] / 100)
+            var y = boundedUnit(values[2] / 100)
+            var k = boundedUnit(values[3] / 100)
             return makeRgb((1 - c) * (1 - k), (1 - m) * (1 - k),
-                (1 - y) * (1 - k), values.length >= 5 ? values[4] : 1)
+                (1 - y) * (1 - k), boundedUnit(values.length === 5 ? values[4] : 1))
         }
         return null
     }

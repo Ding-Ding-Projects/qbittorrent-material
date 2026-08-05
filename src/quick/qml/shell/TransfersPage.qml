@@ -1361,7 +1361,6 @@ Item {
                 text: qsTr("Close")
                 flat: true
                 DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
-                onClicked: contentDialog.close()
             }
         }
     }

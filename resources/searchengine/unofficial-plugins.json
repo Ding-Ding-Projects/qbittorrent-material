@@ -206,7 +206,8 @@
       "id": "kinozal",
       "url": "https://raw.githubusercontent.com/imDMG/qBt_SE/master/engines/kinozal.py",
       "sha256": "00a7e6d13b1e381d3453e7d434da4a205ac144ec19ea5de9252333f26da4a828",
-      "available": true
+      "available": false,
+      "unavailableReason": "This source does not meet the bundled Nova module/class contract."
     },
     {
       "id": "latteam",
@@ -296,7 +297,8 @@
       "id": "nnmclub",
       "url": "https://raw.githubusercontent.com/imDMG/qBt_SE/master/engines/nnmclub.py",
       "sha256": "921745b01a3497f385d0730fdf6722fe5bac4b77d2519f28035d8245784a4812",
-      "available": true
+      "available": false,
+      "unavailableReason": "This source does not meet the bundled Nova module/class contract."
     },
     {
       "id": "nyaa",
@@ -384,13 +386,15 @@
       "id": "rutor",
       "url": "https://raw.githubusercontent.com/imDMG/qBt_SE/master/engines/rutor.py",
       "sha256": "1cf9c5c302ad8defbe6ddb90bcbdf56cc905b49517b9233618b0f5a252845913",
-      "available": true
+      "available": false,
+      "unavailableReason": "This source does not meet the bundled Nova module/class contract."
     },
     {
       "id": "rutracker",
       "url": "https://raw.githubusercontent.com/imDMG/qBt_SE/master/engines/rutracker.py",
       "sha256": "8b99542099ad1bd927a31d97b3f7a6b959695636f4713678da8a4f5343dc313b",
-      "available": true
+      "available": false,
+      "unavailableReason": "This source does not meet the bundled Nova module/class contract."
     },
     {
       "id": "rutracker_2",
@@ -452,7 +456,8 @@
       "id": "tapochek",
       "url": "https://raw.githubusercontent.com/MjKey/qBT-SE/refs/heads/master/enigines/tapochek.py",
       "sha256": "c213ffa435fcdd862a5d309b29b87c80c3f0d2389652fb2f371b0da3e03638c1",
-      "available": true
+      "available": false,
+      "unavailableReason": "This source does not meet the bundled Nova module/class contract."
     },
     {
       "id": "thepiratebay",

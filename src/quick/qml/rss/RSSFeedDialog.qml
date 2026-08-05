@@ -124,7 +124,6 @@ Dialog {
             text: qsTr("Cancel")
             flat: true
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
-            onClicked: root.reject()
         }
 
         Button {
@@ -132,13 +131,12 @@ Dialog {
             highlighted: true
             enabled: urlField.text.trim().length > 0
             DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
-            onClicked: {
-                Log.info("rss", "RSSFeedDialog accepted (url='" + urlField.text + "', interval=" + intervalSpin.value + ")")
-                root.submitted(urlField.text.trim(), intervalSpin.value, root.editMode, root.path)
-                root.close()
-            }
         }
     }
 
+    onAccepted: {
+        Log.info("rss", "RSSFeedDialog accepted (url='" + urlField.text + "', interval=" + intervalSpin.value + ")")
+        root.submitted(urlField.text.trim(), intervalSpin.value, root.editMode, root.path)
+    }
     onRejected: Log.debug("rss", "RSSFeedDialog cancelled")
 }

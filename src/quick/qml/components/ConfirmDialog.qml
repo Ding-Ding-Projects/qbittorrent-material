@@ -66,6 +66,10 @@ Dialog {
 
     // Short-circuit when the user previously chose "Don't ask again".
     function open() {
+        // This is an opt-in for this invocation only. Retaining a checked state
+        // after Cancel would make a later Accept suppress a confirmation the
+        // user never chose to suppress on that later attempt.
+        rememberCheck.checked = false
         if (rememberKey.length
                 && Preferences.value(rememberKey, !rememberValue) === rememberValue) {
             Log.debug("ui", "ConfirmDialog '" + title + "' auto-accepted (remembered)")
@@ -126,7 +130,6 @@ Dialog {
             text: root.rejectText
             flat: true
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
-            onClicked: root.reject()
         }
 
         Button {
@@ -134,7 +137,6 @@ Dialog {
             highlighted: true
             Material.accent: root.destructive ? Theme.color("error") : Theme.color("primary")
             DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
-            onClicked: root.accept()
         }
     }
 
@@ -145,5 +147,8 @@ Dialog {
             Log.debug("ui", "ConfirmDialog remembered choice under key " + rememberKey)
         }
     }
-    onRejected: Log.debug("ui", "ConfirmDialog '" + title + "' rejected")
+    onRejected: {
+        rememberCheck.checked = false
+        Log.debug("ui", "ConfirmDialog '" + title + "' rejected")
+    }
 }

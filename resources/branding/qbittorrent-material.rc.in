@@ -1,10 +1,10 @@
 #include <windows.h>
 
-IDI_QBITTORRENT_MATERIAL ICON "qbittorrent-material.ico"
+IDI_QBITTORRENT_MATERIAL ICON "@QBT_BRANDING_ICON_RC_PATH@"
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 5,3,0,0
- PRODUCTVERSION 5,3,0,0
+ FILEVERSION @QBT_PACKAGE_VERSION_RC_NUMERIC@
+ PRODUCTVERSION @QBT_PACKAGE_VERSION_RC_NUMERIC@
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
  FILEOS VOS_NT_WINDOWS32
@@ -17,11 +17,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "qBittorrent Material contributors\0"
             VALUE "FileDescription", "qBittorrent Material\0"
-            VALUE "FileVersion", "5.3.0.0\0"
+            VALUE "FileVersion", "@QBT_PACKAGE_VERSION_RC_STRING@\0"
             VALUE "InternalName", "qbittorrent.exe\0"
             VALUE "OriginalFilename", "qbittorrent.exe\0"
             VALUE "ProductName", "qBittorrent Material\0"
-            VALUE "ProductVersion", "5.3.0.0\0"
+            VALUE "ProductVersion", "@QBT_PACKAGE_VERSION_RC_STRING@\0"
             VALUE "SquirrelAwareVersion", "1\0"
         END
     END

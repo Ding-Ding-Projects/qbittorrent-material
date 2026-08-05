@@ -31,6 +31,23 @@ if (NOT QBT_PACKAGE_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
         "QBT_PACKAGE_VERSION must contain exactly three numeric components (received '${QBT_PACKAGE_VERSION}').")
 endif()
 
+# Windows VERSIONINFO requires a four-part numeric tuple while Squirrel uses a
+# three-part package identity. Generate the resource from the same source of
+# truth so Explorer metadata, Qt.application.version, and the update feed never
+# disagree about a shipped build.
+string(REPLACE "." "," QBT_PACKAGE_VERSION_RC_COMPONENTS "${QBT_PACKAGE_VERSION}")
+set(QBT_PACKAGE_VERSION_RC_NUMERIC "${QBT_PACKAGE_VERSION_RC_COMPONENTS},0")
+set(QBT_PACKAGE_VERSION_RC_STRING "${QBT_PACKAGE_VERSION}.0")
+set(QBT_BRANDING_ICON_RC_PATH "${CMAKE_SOURCE_DIR}/resources/branding/qbittorrent-material.ico")
+file(TO_CMAKE_PATH "${QBT_BRANDING_ICON_RC_PATH}" QBT_BRANDING_ICON_RC_PATH)
+set(QBT_WINDOWS_VERSION_RESOURCE "${CMAKE_BINARY_DIR}/generated/qbittorrent-material.rc")
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
+configure_file(
+    "${CMAKE_SOURCE_DIR}/resources/branding/qbittorrent-material.rc.in"
+    "${QBT_WINDOWS_VERSION_RESOURCE}"
+    @ONLY
+)
+
 # --- Global language settings -------------------------------------------------
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

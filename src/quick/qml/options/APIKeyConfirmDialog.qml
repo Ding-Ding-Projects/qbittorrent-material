@@ -96,14 +96,12 @@ Dialog {
             text: qsTr("Cancel")
             flat: true
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
-            onClicked: root.reject()
         }
         Button {
             text: qsTr("OK")
             highlighted: true
             Material.accent: root.destructive ? Theme.color("error") : Theme.color("primary")
             DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
-            onClicked: root.accept()
         }
     }
 

@@ -32,6 +32,9 @@
 #include <QTime>
 #include <QUrl>
 
+#include <libtorrent/address.hpp>
+#include <libtorrent/error_code.hpp>
+
 #include "base/bittorrent/session.h"
 #include "base/bittorrent/sharelimits.h"
 #include "base/bittorrent/torrent.h"
@@ -816,6 +819,22 @@ bool OptionsController::copyApiKeyToClipboard() const
         return false;
     QGuiApplication::clipboard()->setText(apiKey);
     return true;
+}
+
+bool OptionsController::isValidBannedIPAddress(const QString &address) const
+{
+    // Keep this deliberately identical to SessionImpl::setBannedIPs(): a
+    // value accepted in the editor must survive the engine's final filter.
+    lt::error_code error;
+    [[maybe_unused]] const lt::address parsed = lt::make_address(address.toStdString(), error);
+    return !error;
+}
+
+bool OptionsController::isValidWebUISubnet(const QString &subnet) const
+{
+    // Preferences::setWebUIAuthSubnetWhitelist() applies this same filter as
+    // defense in depth when the staged values are committed.
+    return Utils::Net::parseSubnet(subnet.trimmed()).has_value();
 }
 
 void OptionsController::reloadIPFilter()

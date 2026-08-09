@@ -664,6 +664,25 @@ ApplicationWindow {
         onTriggered: root.checkForSearchPluginUpdates()
     }
 
+    // --- Notifications ---
+    // These are real controller actions, shared by command-palette entries so
+    // their enabled state and history-preserving behaviour cannot drift from
+    // the notification surface.
+    property alias actionMarkAllNotificationsRead: actionMarkAllNotificationsRead
+    Action {
+        id: actionMarkAllNotificationsRead
+        text: qsTr("Mark all read")
+        enabled: NotificationCenter.unreadCount > 0
+        onTriggered: NotificationCenter.markAllRead()
+    }
+    property alias actionDismissAllNotifications: actionDismissAllNotifications
+    Action {
+        id: actionDismissAllNotifications
+        text: qsTr("Dismiss all (%1)").arg(NotificationCenter.activeCount)
+        enabled: NotificationCenter.activeCount > 0
+        onTriggered: NotificationCenter.dismissAll()
+    }
+
     // --- Help ---
     property alias actionDocumentation: actionDocumentation
     Action {
@@ -919,7 +938,7 @@ ApplicationWindow {
         acceptText: qsTr("Restart to install update")
         rejectText: qsTr("Later")
         onAccepted: root.restartToInstallUpdate()
-        onRejected: updateReadyBanner.postpone()
+        onRejected: updateReadyBanner.postpone(root.updateRestartReturnFocusItem)
     }
 
     // =========================================================================
@@ -928,9 +947,10 @@ ApplicationWindow {
 
     Snackbar {
         id: snackbar
-        // Keep the notification host in the same overlay stack as dialogs so
-        // its high local z value cannot paint across a dialog's surface.
-        parent: Overlay.overlay
+        // Non-modal sheets and the corner host must share a stacking context:
+        // page content < Snackbar < Sheet. Modal dialogs remain in
+        // Overlay.overlay, which keeps every required decision above both.
+        parent: centralTabs
         primaryHost: true
     }
 
@@ -1100,6 +1120,18 @@ ApplicationWindow {
             { id: "exit", action: actionExit, group: qsTr("File"), destination: qsTr("Application"), keywords: "quit close" },
             { id: "undo", action: actionUndo, group: qsTr("Edit"), destination: qsTr("Local history"), keywords: "undo journal restore" },
             { id: "history", action: actionShowHistory, group: qsTr("Edit"), destination: qsTr("History panel"), keywords: "versions journal" },
+            { id: "markAllNotificationsRead", action: actionMarkAllNotificationsRead,
+                group: qsTr("Notifications"), destination: qsTr("Notifications panel"),
+                context: qsTr("%1 unread notifications").arg(NotificationCenter.unreadCount),
+                accessibleDescription: qsTr("Marks %1 unread notifications as read.")
+                    .arg(NotificationCenter.unreadCount),
+                keywords: "notifications alerts mark all read unread" },
+            { id: "dismissAllNotifications", action: actionDismissAllNotifications,
+                group: qsTr("Notifications"), destination: qsTr("Notifications panel"),
+                context: qsTr("%1 active notifications").arg(NotificationCenter.activeCount),
+                accessibleDescription: qsTr("Dismisses %1 active notifications and keeps them in notification history.")
+                    .arg(NotificationCenter.activeCount),
+                keywords: "notifications alerts dismiss all active history" },
             { id: "start", action: actionStart, group: qsTr("Transfers"), destination: qsTr("Selected transfers"), keywords: "resume selected torrents" },
             { id: "stop", action: actionStop, group: qsTr("Transfers"), destination: qsTr("Selected transfers"), keywords: "pause selected torrents" },
             { id: "remove", action: actionDelete, group: qsTr("Transfers"), destination: qsTr("Selected transfers"), keywords: "delete remove selected torrents" },
@@ -1182,6 +1214,8 @@ ApplicationWindow {
                 checkable: item.action.checkable,
                 checked: item.action.checked,
                 shortcut: item.action.shortcut ? item.action.shortcut.toString() : "",
+                context: item.context || "",
+                accessibleDescription: item.accessibleDescription || "",
                 kind: "action",
                 action: item.action
             })

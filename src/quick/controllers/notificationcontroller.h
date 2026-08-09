@@ -67,8 +67,9 @@ public:
     Q_INVOKABLE void dismiss(const QString &id);
     Q_INVOKABLE void dismissAll();
     Q_INVOKABLE void clearAll();
-    /// Snapshot undismissed entries in visual order (oldest first) so the
-    /// primary corner host can restore persisted cards when QML is created.
+    /// Snapshot restorable persistent entries in visual order (oldest first).
+    /// Process-transient cards are delivered live only and are not revived by
+    /// reconstructing the primary corner host.
     Q_INVOKABLE QVariantList activeEntries() const;
     Q_INVOKABLE void activateAction(const QString &id);
     Q_INVOKABLE int matchingCount(const QString &query, bool regex,

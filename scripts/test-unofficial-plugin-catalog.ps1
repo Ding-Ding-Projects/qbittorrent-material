@@ -156,6 +156,58 @@ if ($foreignAppsHeader -notmatch 'void resetAutomaticPythonDetection\(\)' `
         -or [regex]::Matches($manager, 'Utils::ForeignApps::resetAutomaticPythonDetection\(\)').Count -ne 1) {
     throw 'A user-requested catalog retry must invalidate only cached automatic Python discovery before probing again.'
 }
+$syncMethodStart = $manager.IndexOf('void SearchPluginManager::startUnofficialCatalogSync()', [StringComparison]::Ordinal)
+$syncMethodEnd = if ($syncMethodStart -ge 0) {
+    $manager.IndexOf('void SearchPluginManager::downloadNextUnofficialPlugin()', $syncMethodStart, [StringComparison]::Ordinal)
+} else {
+    -1
+}
+if ($syncMethodStart -lt 0 -or $syncMethodEnd -le $syncMethodStart) {
+    throw 'The catalog synchronization implementation is missing or malformed.'
+}
+$syncMethod = $manager.Substring($syncMethodStart, $syncMethodEnd - $syncMethodStart)
+$runtimeIncompatiblePreserveIndex = $syncMethod.IndexOf('if (preserveRuntimeIncompatibleCandidate)', [StringComparison]::Ordinal)
+$activeExistsIndex = $syncMethod.IndexOf('if (activeExists)', [StringComparison]::Ordinal)
+$activeSourceIndex = $syncMethod.IndexOf('if (activeSource && !refreshRuntimeIncompatibleCandidate)', [StringComparison]::Ordinal)
+if ($managerHeader -notmatch 'm_catalogRuntimeIncompatibleRetryRequested' `
+        -or $retryMethod -notmatch 'm_catalogRuntimeIncompatibleRetryRequested = true' `
+        -or $syncMethod -notmatch 'std::exchange\(m_catalogRuntimeIncompatibleRetryRequested, false\)' `
+        -or $syncMethod -notmatch 'const bool runtimeIncompatibleForCurrentSource = runtimeIncompatibleCandidate[\s\S]{0,260}source\.url == ledger\.sourceUrl[\s\S]{0,120}source\.sha256 == ledger\.expectedHash' `
+        -or $syncMethod -notmatch 'const bool preserveRuntimeIncompatibleCandidate = runtimeIncompatibleForCurrentSource[\s\S]{0,100}!retryRuntimeIncompatible' `
+        -or $syncMethod -notmatch 'const bool refreshRuntimeIncompatibleCandidate = runtimeIncompatibleCandidate[\s\S]{0,140}!runtimeIncompatibleForCurrentSource \|\| retryRuntimeIncompatible' `
+        -or $runtimeIncompatiblePreserveIndex -lt 0 `
+        -or $activeExistsIndex -lt 0 `
+        -or $activeSourceIndex -lt 0 `
+        -or $runtimeIncompatiblePreserveIndex -gt $activeExistsIndex `
+        -or $activeSourceIndex -gt $syncMethod.IndexOf('m_catalogQueue.enqueue(entry)', [StringComparison]::Ordinal)) {
+    throw 'A current runtime-incompatible candidate must persist across automatic syncs, while an explicit retry or changed pin can reach a fresh candidate download.'
+}
+$runtimeIncompatiblePreserveBlock = $syncMethod.Substring($runtimeIncompatiblePreserveIndex, $activeExistsIndex - $runtimeIncompatiblePreserveIndex)
+if ($runtimeIncompatiblePreserveBlock -match 'integrityState\s*=' `
+        -or $runtimeIncompatiblePreserveBlock -match 'runtimeState\s*=' `
+        -or $runtimeIncompatiblePreserveBlock -notmatch 'continue;') {
+    throw 'Preserving a current runtime-incompatible candidate must not rewrite its durable diagnosis or auto-promote it.'
+}
+$trustMethodStart = $manager.IndexOf('void SearchPluginManager::trustUnofficialPlugin', [StringComparison]::Ordinal)
+$trustMethodEnd = if ($trustMethodStart -ge 0) {
+    $manager.IndexOf('void SearchPluginManager::reload()', $trustMethodStart, [StringComparison]::Ordinal)
+} else {
+    -1
+}
+if ($trustMethodStart -lt 0 -or $trustMethodEnd -le $trustMethodStart `
+        -or $manager.Substring($trustMethodStart, $trustMethodEnd - $trustMethodStart) -match 'runtime-incompatible') {
+    throw 'A persisted runtime-incompatible candidate must remain explicitly trustable for user-directed recovery.'
+}
+$finishSyncStart = $manager.IndexOf('void SearchPluginManager::finishUnofficialCatalogSync()', [StringComparison]::Ordinal)
+$finishSyncEnd = if ($finishSyncStart -ge 0) {
+    $manager.IndexOf('void SearchPluginManager::failUnofficialCatalogSync', $finishSyncStart, [StringComparison]::Ordinal)
+} else {
+    -1
+}
+if ($finishSyncStart -lt 0 -or $finishSyncEnd -le $finishSyncStart `
+        -or $manager.Substring($finishSyncStart, $finishSyncEnd - $finishSyncStart) -notmatch 'state\.integrityState != u"runtime-incompatible"_s') {
+    throw 'A preserved runtime-incompatible candidate must not be reported as automatically awaiting trust.'
+}
 if ($manager -notmatch 'catalogQuarantinePath\(m_currentCatalogEntry\.id, source\.sha256\)' `
         -or $manager -notmatch 'state\.integrityState = preserveOwnedActive \? u"pending-update-trust"_s : u"pending-trust"_s' `
         -or $manager -notmatch 'Automatically validating this SHA-256-verified catalog plugin' `

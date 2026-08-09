@@ -416,6 +416,17 @@ Sheet {
         function onThemeChanged() { root.syncSeedColorField() }
     }
 
+    onOpenChanged: {
+        // AdvancedColorPicker is deliberately parented to Overlay.overlay so
+        // it can stay within the viewport. Close it explicitly when its
+        // source sheet closes, otherwise it can outlive the hidden sheet.
+        if (!open && seedColorPicker.opened) {
+            seedColorPreviewDebounce.stop()
+            pendingSeedColor = ThemeManager.seedColor
+            seedColorPicker.cancelPicker()
+        }
+    }
+
     Timer {
         id: seedColorPreviewDebounce
         interval: 160
@@ -901,7 +912,9 @@ Sheet {
                         text: qsTr("Reset global appearance")
                         flat: true
                         onClicked: {
+                            seedColorPreviewDebounce.stop()
                             ThemeManager.resetAppearance()
+                            pendingSeedColor = ThemeManager.seedColor
                             seedColorField.text = String(ThemeManager.seedColor)
                             seedColorField.userEdited = false
                         }

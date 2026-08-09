@@ -29,16 +29,16 @@ struct Baseline
 /** Cache the exact previous full package before Squirrel replaces local RELEASES. */
 [[nodiscard]] bool prepareBaseline(const Baseline &baseline, QString *error);
 
-/** Persist a launch-health transaction and return its unguessable attempt token. */
+/** Persist a launch-health transaction and its already-filtered restart arguments. */
 [[nodiscard]] bool createRestartTransaction(const QString &squirrelRoot,
         const QString &fromVersion, const QString &targetVersion,
-        const QString &relativeExecutable, const QStringList &originalArguments,
+        const QString &relativeExecutable, const QStringList &restartArguments,
         QString *token, QString *error);
 
 /** Tell a detached watchdog to stop when Update.exe itself could not be launched. */
 void cancelRestartTransaction(const QString &squirrelRoot, const QString &token);
 
-/** Preserve only profile-selection arguments across an updater restart. */
+/** Preserve profile-selection arguments across a restart, making profile roots absolute. */
 [[nodiscard]] QStringList preservedLaunchArguments(const QStringList &arguments);
 
 /** Run the old-binary watchdog before QApplication is constructed. */

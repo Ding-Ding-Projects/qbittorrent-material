@@ -1481,10 +1481,17 @@ void ProgramUpdater::restartToUpdate()
     if (!nativeRestartPreflight())
         return;
 
+    // Resolve relative profile roots once while this instance still has the
+    // caller's working directory. Reuse these exact arguments for the target
+    // and the persisted rollback transaction; Squirrel launches either binary
+    // from an app-<version> directory instead.
+    const QStringList restartArguments =
+            UpdateRecovery::preservedLaunchArguments(QCoreApplication::arguments());
+
     QString healthToken;
     if (!UpdateRecovery::createRestartTransaction(m_squirrelRoot, m_currentVersion,
                 m_availableVersion, m_executableRelativePath,
-                QCoreApplication::arguments(), &healthToken, &diagnostic))
+                restartArguments, &healthToken, &diagnostic))
     {
         fail(tr("The update is ready, but restart recovery could not be prepared. Your current "
                 "session is still running."), diagnostic);
@@ -1509,8 +1516,7 @@ void ProgramUpdater::restartToUpdate()
     // rollback, so a custom-profile instance never restarts into the default
     // profile and arbitrary launch arguments cannot cross the updater boundary.
     QStringList targetArguments{u"--update-health-token="_s + healthToken};
-    targetArguments << UpdateRecovery::preservedLaunchArguments(
-            QCoreApplication::arguments());
+    targetArguments << restartArguments;
 
     qint64 updaterPid = 0;
     const QStringList arguments{

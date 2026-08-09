@@ -341,7 +341,10 @@ void SearchHandler::readSearchOutput(const bool drainAll)
         QList<QByteArrayView> lines = Utils::ByteArray::splitToViews(output, "\n", Qt::KeepEmptyParts);
 
         // The last item is either empty or an incomplete line for the next
-        // chunk. Check its untrimmed length before storing it.
+        // chunk. Keep its bytes exactly as received: trimming here corrupts a
+        // field when a meaningful interior space falls on the chunk boundary.
+        // Individual protocol fields are trimmed only after the full line is
+        // reassembled in parseSearchResult().
         const QByteArrayView trailingLine = lines.takeLast();
         if (trailingLine.size() > MAX_SEARCH_RESULT_LINE_BYTES)
         {
@@ -350,7 +353,7 @@ void SearchHandler::readSearchOutput(const bool drainAll)
                 .arg(MAX_SEARCH_RESULT_LINE_BYTES / 1024));
             return;
         }
-        m_searchResultLineTruncated = trailingLine.trimmed().toByteArray();
+        m_searchResultLineTruncated = trailingLine.toByteArray();
 
         QList<SearchResult> searchResultList;
         searchResultList.reserve(lines.size());

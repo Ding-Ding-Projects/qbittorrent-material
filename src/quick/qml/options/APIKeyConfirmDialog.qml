@@ -17,27 +17,24 @@ import qBittorrent
 
 /*!
     \qmltype APIKeyConfirmDialog
-    \brief Confirmation for the WebUI API-key generate / rotate / delete actions.
+    \brief Confirmation for the staged WebUI API-key generate / rotate actions.
 
-    These actions apply immediately (bypassing the dialog-wide Apply), so they
-    are gated behind an explicit confirmation. Set \l mode to
-    \c "generate" / \c "rotate" / \c "delete", call \c open(); on confirmation it
-    emits \c confirmed(mode). \c delete is treated as destructive.
+    API-key edits remain staged in OptionsController and persist only through
+    the outer Options dialog's Apply or OK action. Set \l mode to \c "generate"
+    or \c "rotate", call \c open(); on confirmation it emits \c confirmed(mode).
+    Deletion deliberately bypasses this ordinary confirmation and is routed by
+    WebUIPage through SuperConfirmDialog instead.
 */
 Dialog {
     id: root
 
-    /*! One of "generate", "rotate", "delete". */
+    /*! One of "generate" or "rotate". */
     property string mode: "generate"
 
     /*! Emitted when the user confirms the action; carries \l mode. */
     signal confirmed(string mode)
 
-    readonly property bool destructive: mode === "delete"
-
-    title: mode === "delete" ? qsTr("Delete API key")
-                             : (mode === "rotate" ? qsTr("Rotate API key")
-                                                  : qsTr("Generate API key"))
+    title: mode === "rotate" ? qsTr("Rotate API key") : qsTr("Generate API key")
 
     modal: true
     parent: Overlay.overlay
@@ -68,19 +65,10 @@ Dialog {
 
     contentItem: RowLayout {
         spacing: Spacing.md
-        MDIcon {
-            visible: root.destructive
-            icon: Icons.warning
-            size: 28
-            color: Theme.color("error")
-            Layout.alignment: Qt.AlignTop
-        }
         Label {
-            text: root.mode === "delete"
-                  ? qsTr("Are you sure you want to delete the current API key? Any client using it will lose access.")
-                  : (root.mode === "rotate"
-                     ? qsTr("Rotating the API key invalidates the current key immediately. Continue?")
-                     : qsTr("Generate a new API key for programmatic access?"))
+            text: root.mode === "rotate"
+                  ? qsTr("Rotating the API key stages a replacement. The saved key remains active until you choose Apply or OK; then clients using it lose Web UI access.")
+                  : qsTr("Generate a new API key for programmatic access. It is saved only after you choose Apply or OK.")
             font: Typography.bodyMedium
             color: Theme.color("onSurfaceVariant")
             wrapMode: Text.WordWrap
@@ -98,14 +86,20 @@ Dialog {
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
         }
         Button {
-            text: qsTr("OK")
+            text: root.mode === "rotate" ? qsTr("Stage rotation") : qsTr("Stage generation")
             highlighted: true
-            Material.accent: root.destructive ? Theme.color("error") : Theme.color("primary")
+            Material.accent: Theme.color("primary")
             DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
         }
     }
 
     onAccepted: {
+        // Deletion must never regress to this ordinary confirmation path. The
+        // Web UI page owns the two-key/full-slider SuperConfirmDialog route.
+        if (mode === "delete") {
+            Log.warning("ui", "APIKeyConfirmDialog rejected unsafe delete confirmation route")
+            return
+        }
         Log.info("ui", "APIKeyConfirmDialog confirmed (mode=" + mode + ")")
         root.confirmed(mode)
     }

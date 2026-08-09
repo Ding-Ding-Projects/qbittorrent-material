@@ -234,9 +234,17 @@ void SearchDownloadHandler::downloadProcessFinished(const int exitcode)
     if ((exitcode == 0) && (m_downloadProcess->exitStatus() == QProcess::NormalExit))
     {
         const QString line = QString::fromUtf8(m_downloadStdOut).trimmed();
-        const QList<QStringView> parts = QStringView(line).split(u' ');
-        if (parts.size() == 2)
-            path = parts[0].toString();
+        // Legacy nova2dl.py writes "<temporary path> <source URL>". The path
+        // is allowed to contain spaces, so the final delimiter is the only
+        // protocol separator we can safely use.
+        const qsizetype delimiter = line.lastIndexOf(u' ');
+        if ((delimiter > 0) && (delimiter < (line.size() - 1)))
+        {
+            const QStringView pathPart = QStringView(line).left(delimiter);
+            const QStringView metadataPart = QStringView(line).mid(delimiter + 1);
+            if (!pathPart.trimmed().isEmpty() && !metadataPart.trimmed().isEmpty())
+                path = pathPart.trimmed().toString();
+        }
     }
 
     m_downloadStdOut.clear();

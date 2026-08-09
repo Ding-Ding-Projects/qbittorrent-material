@@ -36,9 +36,9 @@ Pane {
             root.returnFocusItem = owningWindow.activeFocusItem
     }
 
-    function postpone() {
+    function postpone(origin) {
         root.postponedVersion = root.versionText
-        root.laterRequested(root.returnFocusItem)
+        root.laterRequested(origin ? origin : root.returnFocusItem)
     }
 
     onExpandedChanged: {

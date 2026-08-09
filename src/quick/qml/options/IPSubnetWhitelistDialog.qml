@@ -45,8 +45,11 @@ Dialog {
 
     ListModel { id: entries }
 
+    property string validationMessage: ""
+
     function open() {
         entries.clear()
+        validationMessage = ""
         var list = OptionsController.value(settingKey, [])
         for (var i = 0; i < list.length; ++i)
             entries.append({ value: list[i] })
@@ -57,13 +60,41 @@ Dialog {
     function addEntry(text) {
         var v = ("" + text).trim()
         if (v.length === 0)
-            return
+            return false
+        if (!OptionsController.isValidWebUISubnet(v)) {
+            validationMessage = qsTr("Enter a valid IPv4 or IPv6 address or CIDR subnet.")
+            addField.forceActiveFocus()
+            return false
+        }
         for (var i = 0; i < entries.count; ++i) {
-            if (entries.get(i).value === v)
-                return
+            if (entries.get(i).value === v) {
+                validationMessage = qsTr("This IP subnet is already listed.")
+                addField.forceActiveFocus()
+                return false
+            }
         }
         entries.append({ value: v })
+        validationMessage = ""
         Log.debug("ui", "Subnet whitelist add: " + v)
+        return true
+    }
+
+    function stageEntries() {
+        var list = []
+        for (var i = 0; i < entries.count; ++i) {
+            var value = entries.get(i).value
+            if (!OptionsController.isValidWebUISubnet(value)) {
+                validationMessage = qsTr("Remove the invalid IP subnet before saving.")
+                listView.currentIndex = i
+                listView.positionViewAtIndex(i, ListView.Contain)
+                listView.forceActiveFocus()
+                return false
+            }
+            list.push(value)
+        }
+        OptionsController.setValue(settingKey, list)
+        Log.info("ui", "IPSubnetWhitelistDialog saved " + list.length + " subnets")
+        return true
     }
 
     header: Label {
@@ -84,19 +115,34 @@ Dialog {
             TextField {
                 id: addField
                 Layout.fillWidth: true
-                placeholderText: qsTr("Subnet (e.g. 192.168.1.0/24)")
+                placeholderText: qsTr("IP address or CIDR subnet")
+                Accessible.name: qsTr("IP subnet whitelist entry")
+                Accessible.description: root.validationMessage.length > 0
+                    ? root.validationMessage
+                    : qsTr("Enter an IPv4 or IPv6 address or CIDR subnet, for example 192.168.1.0/24.")
+                onTextChanged: root.validationMessage = ""
                 onAccepted: {
-                    root.addEntry(text)
-                    text = ""
+                    if (root.addEntry(text))
+                        text = ""
                 }
             }
             Button {
                 text: qsTr("Add")
                 onClicked: {
-                    root.addEntry(addField.text)
-                    addField.text = ""
+                    if (root.addEntry(addField.text))
+                        addField.text = ""
                 }
             }
+        }
+
+        Label {
+            objectName: "ipSubnetWhitelistValidationMessage"
+            Layout.fillWidth: true
+            visible: root.validationMessage.length > 0
+            text: root.validationMessage
+            color: Theme.color("error")
+            wrapMode: Text.Wrap
+            Accessible.name: root.validationMessage
         }
 
         Frame {
@@ -116,6 +162,10 @@ Dialog {
                 clip: true
                 model: entries
                 currentIndex: -1
+                Accessible.name: qsTr("IP subnet whitelist")
+                Accessible.description: root.validationMessage.length > 0
+                    ? root.validationMessage
+                    : qsTr("Select an IP address or subnet to remove it from the list.")
                 delegate: ItemDelegate {
                     required property int index
                     required property string value
@@ -155,16 +205,14 @@ Dialog {
         Button {
             text: qsTr("OK")
             highlighted: true
-            DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+            DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
+            onClicked: {
+                if (root.stageEntries())
+                    root.accept()
+            }
         }
     }
 
-    onAccepted: {
-        var list = []
-        for (var i = 0; i < entries.count; ++i)
-            list.push(entries.get(i).value)
-        Log.info("ui", "IPSubnetWhitelistDialog saved " + list.length + " subnets")
-        OptionsController.setValue(settingKey, list)
-    }
+    onOpened: addField.forceActiveFocus()
     onRejected: Log.debug("ui", "IPSubnetWhitelistDialog cancelled")
 }

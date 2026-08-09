@@ -19,6 +19,11 @@ import qBittorrent
 Item {
     id: root
 
+    // Keep every non-modal sheet in one central-tabs layer above the corner
+    // notification host (z: 100). A shared tier prevents a Snackbar card from
+    // covering or intercepting a sheet control when their bounds overlap.
+    z: 200
+
     /*! Sheet content width (each design sheet specifies its own). */
     property int sheetWidth: 420
 

@@ -14,7 +14,6 @@ Sheet {
     id: root
     sheetWidth: 440
     accessibleName: qsTr("Notifications")
-    z: 160
 
     signal closeRequested()
     signal openHistoryRequested()

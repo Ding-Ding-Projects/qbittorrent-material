@@ -441,6 +441,33 @@ Test-Policy ($advancedColorPickerQml.Contains('function formattedColor(index, co
         -and $advancedColorPickerQml.Contains('pendingClip = true') `
         -and $advancedColorPickerQml.Contains('function contrastRatio()')) `
     "color translation is bidirectional and reports gamut clipping and applied contrast"
+$pickerFooterApplyIndex = $advancedColorPickerQml.IndexOf('function acceptPicker() {')
+$pickerFooterValidationIndex = $advancedColorPickerQml.IndexOf('if (!acceptFormattedColor())')
+$pickerFooterAcceptIndex = $advancedColorPickerQml.IndexOf('acceptedThisOpen = true')
+Test-Policy ($pickerFooterApplyIndex -ge 0 `
+        -and $pickerFooterValidationIndex -gt $pickerFooterApplyIndex `
+        -and $pickerFooterAcceptIndex -gt $pickerFooterValidationIndex `
+        -and $advancedColorPickerQml.Contains('return false') `
+        -and $advancedColorPickerQml.Contains('return true')) `
+    "the picker footer transactionally validates typed color text before accepting it"
+$settingsCloseHookIndex = $quickSettingsQml.IndexOf('onOpenChanged: {')
+$settingsPickerCancelIndex = $quickSettingsQml.IndexOf('seedColorPicker.cancelPicker()')
+$settingsResetIndex = $quickSettingsQml.IndexOf('ThemeManager.resetAppearance()')
+$settingsResetStopIndex = if ($settingsResetIndex -ge 0) {
+    $quickSettingsQml.LastIndexOf('seedColorPreviewDebounce.stop()', $settingsResetIndex)
+} else { -1 }
+$settingsResetPendingIndex = if ($settingsResetIndex -ge 0) {
+    $quickSettingsQml.IndexOf('pendingSeedColor = ThemeManager.seedColor', $settingsResetIndex)
+} else { -1 }
+Test-Policy ($settingsCloseHookIndex -ge 0 `
+        -and $settingsPickerCancelIndex -gt $settingsCloseHookIndex `
+        -and $settingsPickerCancelIndex -lt ($settingsCloseHookIndex + 500) `
+        -and $settingsResetStopIndex -ge 0 `
+        -and $settingsResetStopIndex -lt $settingsResetIndex `
+        -and ($settingsResetIndex - $settingsResetStopIndex) -lt 200 `
+        -and $settingsResetPendingIndex -gt $settingsResetIndex `
+        -and ($settingsResetPendingIndex - $settingsResetIndex) -lt 200) `
+    "closing Settings cancels its overlay picker and reset clears stale seed previews"
 Test-Policy ($advancedColorPickerQml.Contains('readonly property string strictNumberPattern:') `
         -and $advancedColorPickerQml.Contains('function strictNumbers(value, expression, count)') `
         -and $advancedColorPickerQml.Contains('new RegExp(expression, "i")') `
@@ -647,6 +674,26 @@ Test-Policy (($unboundSearchSettings.Count -eq 0) `
 Test-Policy ($searchOptionsPage.Contains('SearchController.unavailableReason') `
         -and $searchOptionsPage.Contains('SearchController.refreshPythonDetection()')) `
     "the Search options page reports whether the chosen interpreter actually works"
+
+# Options owns a transaction of staged settings. Qt Popup's default Escape and
+# outside-press policy uses close() directly, bypassing Dialog.onRejected(), so
+# both dismissal affordances must pass through one explicit decision before the
+# existing rejection handler performs the one reset.
+$optionsDialogResetCalls = ([regex]::Matches($optionsDialogSource, 'OptionsController\.reset\(\)')).Count
+Test-Policy ($optionsDialogSource -match 'title:\s*qsTr\("Options"\)[\s\S]{0,600}?closePolicy:\s*Popup\.NoAutoClose' `
+        -and $optionsDialogSource -match 'function\s+requestDismiss\(\)[\s\S]*?OptionsController\.modified[\s\S]*?discardPendingChanges\.open\(\)' `
+        -and $optionsDialogSource -match 'sequence:\s*"Escape"[\s\S]{0,240}?enabled:\s*root\.visible\s*&&\s*root\.activeFocus[\s\S]{0,240}?onActivated:\s*root\.requestDismiss\(\)' `
+        -and $optionsDialogSource -match 'onActivatedAmbiguously:\s*root\.requestDismiss\(\)' `
+        -and $optionsDialogSource -match 'id:\s*cancelButton[\s\S]{0,360}?DialogButtonBox\.buttonRole:\s*DialogButtonBox\.ActionRole[\s\S]{0,160}?onClicked:\s*root\.requestDismiss\(\)' `
+        -and $optionsDialogSource -match 'id:\s*discardPendingChanges[\s\S]{0,280}?closePolicy:\s*Popup\.NoAutoClose[\s\S]{0,700}?onAccepted:\s*root\.completeDismissal\(\)' `
+        -and $optionsDialogSource -match 'onRejected:\s*\{[\s\S]*?OptionsController\.reset\(\)' `
+        -and ($optionsDialogResetCalls -eq 1) `
+        -and $optionsDialogSource -notmatch 'Popup\.CloseOnPressOutside') `
+    "Options blocks automatic outside dismissal and sends Cancel/Escape through one explicit staged-change decision"
+Test-Policy ($optionsDialogSource -match 'onAccepted:\s*\{[\s\S]*?OptionsController\.apply\(\)' `
+        -and $optionsDialogSource -match 'text:\s*qsTr\("OK"\)[\s\S]{0,220}?DialogButtonBox\.buttonRole:\s*DialogButtonBox\.AcceptRole' `
+        -and $optionsDialogSource -match 'text:\s*qsTr\("Apply"\)[\s\S]{0,220}?DialogButtonBox\.buttonRole:\s*DialogButtonBox\.ApplyRole') `
+    "Options retains its existing Accept/Apply semantics while dismissal is guarded"
 
 # Selecting one row and repeating an action forty times is the app failing to do
 # its job. "Select all" must also state its scope: with a filter narrowing the
@@ -891,6 +938,33 @@ Test-Policy ($deletionDialog.Contains('SuperConfirmDialog {') `
         -and $deletionDialog.Contains('superConfirm.originatingControl = confirmButton') `
         -and $deletionDialog.Contains('onAuthorized:')) `
     "erasing downloaded files goes through the destructive gate"
+$apiKeyConfirmDialog = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/options/APIKeyConfirmDialog.qml")
+$webUiPage = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/options/WebUIPage.qml")
+Test-Policy ($superConfirm.Contains('property string finalityText: qsTr("This cannot be undone.")') `
+        -and $superConfirm.Contains('text: root.finalityText') `
+        -and $apiKeyConfirmDialog.Contains('persist only through') `
+        -and $apiKeyConfirmDialog.Contains('SuperConfirmDialog route') `
+        -and $apiKeyConfirmDialog.Contains('if (mode === "delete")')) `
+    "ordinary API-key confirmation keeps API-key persistence staged and cannot delete a credential"
+Test-Policy ($webUiPage.Contains('id: deleteApiKeyButton') `
+        -and $webUiPage.Contains('apiKeyDeleteConfirm.originatingControl = deleteApiKeyButton') `
+        -and $webUiPage.Contains('SuperConfirmDialog {') `
+        -and $webUiPage.Contains('id: apiKeyDeleteConfirm') `
+        -and $superConfirm.Contains('qsTr("Emergency exit")') `
+        -and $superConfirm.Contains('closePolicy: Popup.CloseOnEscape') `
+        -and $superConfirm.Contains('root._restoreFocus()') `
+        -and $webUiPage.Contains('Stage deletion of the Web UI API key') `
+        -and $webUiPage.Contains('The Web UI API credential and every client configured to use it') `
+        -and $webUiPage.Contains('Cancel in Options keeps the current saved credential and client access unchanged.') `
+        -and $webUiPage.Contains('After a successful Apply or OK, the previous API key cannot be restored and every client using it loses Web UI access.') `
+        -and $webUiPage.Contains('Slide to stage API-key deletion') `
+        -and $webUiPage.Contains('property bool deletionStaged: false') `
+        -and $webUiPage.Contains('apiKeyDeleteConfirm.deletionStaged = false') `
+        -and $webUiPage.Contains('if (deletionStaged || !OptionsController.apiKeyValid)') `
+        -and ([regex]::Matches($webUiPage, 'OptionsController\.deleteApiKey\(\)').Count -eq 1)) `
+    "API-key deletion uses the two-key gate, returns to its origin, states staged access loss, and reaches the staged delete exactly once"
 
 # Controls presented as usable must perform their labelled action. The Trackers
 # tab shipped five commands and a download button that routed through shims and
@@ -1099,6 +1173,8 @@ $iconButtonSource = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/components/IconButton.qml")
 $notificationRegressionSource = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "test/testnotificationcontroller.cpp")
+$notificationPersistenceRegressionSource = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "test/testnotificationpersistence.cpp")
 $rootCMakeForNotifications = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "CMakeLists.txt")
 $appCMakeForNotifications = Get-Content -Raw -LiteralPath `
@@ -1134,7 +1210,7 @@ Test-Policy ($notificationSheetSource.Contains('const modelState = [Notification
     "notification search state, cards, dismiss controls, and the header expose reactive keyboard and assistive state"
 Test-Policy ($notificationSheetSource.Contains('Clear history is unavailable until notification records can be restored from append-only local history.') `
         -and $notificationSheetSource -notmatch 'onClicked:\s*NotificationCenter\.clearAll\(\)' `
-        -and $notificationSource.Contains('entry.actionId.startsWith(u"journal-undo:"_s)') `
+        -and $notificationSource.Contains('bool isJournalUndoAction(const QString &actionId)') `
         -and $notificationSource.Contains('if (oneShot && entry.dismissed)') `
         -and $notificationSource.Contains('entry.actionId.clear();')) `
     "history clearing is disabled without append-only restoration and one-shot undo actions cannot replay"
@@ -1163,9 +1239,11 @@ Test-Policy ($snackbarSource.Contains('function onAllDismissed()') `
 
 $mainSnackbarSource = Get-Content -Raw -LiteralPath `
     (Get-RepositoryPath "src/quick/qml/Main.qml")
-Test-Policy (($mainSnackbarSource -match '(?s)Snackbar\s*\{\s*id:\s*snackbar[\s\S]{0,300}parent:\s*Overlay\.overlay') `
-        -and ($snackbarSource -match '(?m)^\s*z:\s*-1\s*$')) `
-    "the primary Snackbar shares the overlay stack but remains beneath modal dialogs"
+Test-Policy (($mainSnackbarSource -match '(?s)Snackbar\s*\{\s*id:\s*snackbar[\s\S]{0,300}parent:\s*centralTabs') `
+        -and ($snackbarSource -match '(?m)^\s*z:\s*100\s*$') `
+        -and ($notificationSheetFrame -match '(?m)^\s*z:\s*200\s*$') `
+        -and ($mainSnackbarSource -match '(?s)ConfirmDialog\s*\{[\s\S]{0,300}parent:\s*Overlay\.overlay')) `
+    "the primary Snackbar and non-modal sheets share explicit central-tabs layers while modal dialogs stay above them"
 
 $snackbarDismissAllIndex = $snackbarSource.IndexOf('id: dismissAllButton')
 $snackbarScrollIndex = $snackbarSource.IndexOf('id: notificationScroll')
@@ -1190,7 +1268,7 @@ Test-Policy (([regex]::Matches($snackbarSource, 'ScrollView\s*\{')).Count -eq 1 
 Test-Policy ($notificationHeader.Contains('Q_INVOKABLE QVariantList activeEntries() const') `
         -and $notificationSource.Contains('QVariantList NotificationController::activeEntries() const') `
         -and $notificationSource.Contains('m_entries.crbegin()') `
-        -and $notificationSource.Contains('if (entry.dismissed)') `
+        -and $notificationSource.Contains('if (entry.dismissed || !isPersistentPresentation(entry.severity))') `
         -and $snackbarSource.Contains('NotificationCenter.activeEntries()') `
         -and $snackbarSource.Contains('Component.onCompleted: hydrateActiveNotifications()') `
         -and $snackbarSource.Contains('activeModel.get(i).notificationId === id') `
@@ -1199,7 +1277,7 @@ Test-Policy ($notificationHeader.Contains('Q_INVOKABLE QVariantList activeEntrie
         -and $snackbarSource.Contains('running: !card.persistent') `
         -and $snackbarSource.Contains('&& !snackbarViewport.keyboardInteractionActive') `
         -and $snackbarSource.Contains('&& !card.keyboardInteractionActive')) `
-    "the primary Snackbar hydrates persisted cards without duplicates and pauses transient expiry while keyboard actions are focused"
+    "the primary Snackbar hydrates only restart-safe persistent cards and pauses live transient expiry while keyboard actions are focused"
 Test-Policy ($snackbarSource -match 'IconButton\s*\{' `
         -and $snackbarSource.Contains('symbol: Icons.close') `
         -and $snackbarSource -notmatch 'icon\.name:\s*"close"' `
@@ -1208,13 +1286,15 @@ Test-Policy ($snackbarSource -match 'IconButton\s*\{' `
         -and $snackbarSource.Contains('Accessible.role: Accessible.AlertMessage') `
         -and $iconButtonSource.Contains('Accessible.name: root.tooltip.length > 0 ? root.tooltip : qsTr("Icon action")')) `
     "Snackbar dismissal and action controls use bundled icons and remain keyboard and screen-reader accessible"
-Test-Policy ($notificationSource.Contains('entry.actionId.startsWith(u"journal-undo:"_s)') `
+Test-Policy ($notificationSource.Contains('bool isJournalUndoAction(const QString &actionId)') `
         -and $notificationSource.Contains('if (oneShot && entry.dismissed)') `
         -and $notificationSource.Contains('entry.actionLabel.clear()') `
         -and $notificationSource.Contains('entry.actionId.clear()') `
         -and $notificationSource.Contains('{ActionLabelRole, ActionIdRole}') `
-        -and $notificationSource.Contains('emit actionRequested(actionId, id)')) `
-    "journal undo notification actions are consumed once while file-opening actions stay repeatable"
+        -and $notificationSource.Contains('emit actionRequested(actionId, id)') `
+        -and ($notificationSource -match '(?s)void NotificationController::load\(\)[\s\S]*?!isPersistentPresentation\(entry\.severity\)[\s\S]{0,300}entry\.dismissed = true;') `
+        -and ($notificationSource -match '(?s)void NotificationController::load\(\)[\s\S]*?isJournalUndoAction\(entry\.actionId\)[\s\S]{0,300}entry\.actionLabel\.clear\(\);[\s\S]{0,300}entry\.actionId\.clear\(\);')) `
+    "journal undo actions are consumed once live and stripped with transient presentation state on restart"
 Test-Policy ($notificationSource.Contains('constexpr int kMaximumEntries = 200') `
         -and $notificationSource.Contains('QVector<QString> evictedActiveIds') `
         -and $notificationSource.Contains('for (int row = kMaximumEntries; row < m_entries.size(); ++row)') `
@@ -1229,15 +1309,33 @@ Test-Policy ($notificationRegressionSource.Contains('QCoreApplication applicatio
         -and $notificationRegressionSource.Contains('controller->activateAction(actionNotificationId)') `
         -and $notificationRegressionSource.Contains('controller->dismiss(actionNotificationId)') `
         -and $notificationRegressionSource.Contains('controller->dismissAll()') `
-        -and $notificationRegressionSource.Contains('controller->activeEntries().isEmpty()')) `
-    "the opt-in non-GUI regression covers 201 persistent entries, eviction, action consumption, individual dismissal, and dismiss-all"
+        -and $notificationRegressionSource.Contains('controller->activeEntries().isEmpty()') `
+        -and $notificationRegressionSource.Contains('transientUndoId') `
+        -and $notificationRegressionSource.Contains('persistentWarningId') `
+        -and $notificationRegressionSource.Contains('persistentErrorId') `
+        -and $notificationRegressionSource.Contains('!recoveryIds.contains(transientUndoId)')) `
+    "the opt-in non-GUI regression covers persistent eviction/dismissal plus restart-safe transient recovery filtering"
+Test-Policy ($notificationPersistenceRegressionSource.Contains('QTemporaryDir temporaryRoot') `
+        -and $notificationPersistenceRegressionSource.Contains('Profile::initInstance(profileRoot, configurationName, false)') `
+        -and $notificationPersistenceRegressionSource.Contains('SettingsStorage::initInstance()') `
+        -and $notificationPersistenceRegressionSource.Contains('Preferences::initInstance()') `
+        -and $notificationPersistenceRegressionSource.Contains('Preferences::instance()->apply()') `
+        -and $notificationPersistenceRegressionSource.Contains('freeProfile();') `
+        -and $notificationPersistenceRegressionSource.Contains('initializeProfile();') `
+        -and $notificationPersistenceRegressionSource.Contains('controller->activateAction(transientId)') `
+        -and $notificationPersistenceRegressionSource.Contains('requestedActions.isEmpty()') `
+        -and $notificationPersistenceRegressionSource.Contains('snapshotContains(recoveryEntries, warningId)')) `
+    "the persistence regression cold-loads a temporary profile and proves stale undo actions cannot revive"
 Test-Policy ($rootCMakeForNotifications.Contains('option(QBT_BUILD_NOTIFICATION_TESTS') `
         -and $rootCMakeForNotifications -match 'QBT_BUILD_NOTIFICATION_TESTS[\s\S]*?OFF\)' `
         -and $appCMakeForNotifications.Contains('testnotificationcontroller EXCLUDE_FROM_ALL') `
         -and $appCMakeForNotifications.Contains('QBT_NOTIFICATION_TEST_NO_PREFERENCES') `
         -and $appCMakeForNotifications.Contains('add_test(NAME testnotificationcontroller COMMAND testnotificationcontroller)') `
+        -and $appCMakeForNotifications.Contains('testnotificationpersistence EXCLUDE_FROM_ALL') `
+        -and $appCMakeForNotifications.Contains('qbt_base') `
+        -and $appCMakeForNotifications.Contains('add_test(NAME testnotificationpersistence COMMAND testnotificationpersistence)') `
         -and $notificationSource.Contains('#if !defined(QBT_NOTIFICATION_TEST_NO_PREFERENCES)')) `
-    "the notification regression is opt-in, excluded from release builds, registered with CTest, and cannot write user preferences"
+    "the notification regressions are opt-in, excluded from release builds, and cover pure plus temporary-profile persistence paths"
 
 $filterSidebar = Get-Content -Raw -LiteralPath (Get-RepositoryPath "src/quick/qml/transferlist/FilterSidebar.qml")
 Test-Policy ($filterSidebar -match 'width:\s*Math\.max\(0,\s*filterScroll\.availableWidth\)') `
@@ -1435,6 +1533,26 @@ Test-Policy ($commandPalette -match 'WorkspaceManager\.evaluateRegularExpression
         -and $commandPalette -match 'Keys\.onReturnPressed' `
         -and $commandPalette -match 'Accessible\.name:\s*qsTr\("Search command palette"\)') `
     "the command palette supports shared regex search, keyboard navigation, and accessible naming"
+$paletteOpenIndex = $commandPalette.IndexOf('function openPalette() {')
+$paletteVisibleGuardIndex = $commandPalette.IndexOf('if (!root.visible) {', $paletteOpenIndex)
+$paletteQueryResetIndex = $commandPalette.IndexOf('search.text = ""', $paletteOpenIndex)
+$paletteOpenCallIndex = $commandPalette.IndexOf('            open()', $paletteOpenIndex)
+$paletteFocusIndex = $commandPalette.IndexOf('search.forceActiveFocus(Qt.ShortcutFocusReason)', $paletteOpenIndex)
+Test-Policy ($paletteOpenIndex -ge 0 `
+        -and $paletteVisibleGuardIndex -gt $paletteOpenIndex `
+        -and $paletteQueryResetIndex -gt $paletteVisibleGuardIndex `
+        -and $paletteOpenCallIndex -gt $paletteQueryResetIndex `
+        -and $paletteFocusIndex -gt $paletteOpenCallIndex `
+        -and $commandPalette.Contains('property var pendingPluginTrustIds: []') `
+        -and $commandPalette.Contains('function isPluginTrustPending(pluginId)') `
+        -and $commandPalette.Contains('function requestPluginTrust(pluginId)') `
+        -and $commandPalette.Contains('pendingPluginTrustIds = pendingPluginTrustIds.concat([pluginId])') `
+        -and $commandPalette.Contains('if (pendingPluginTrustIds[i] !== pluginId)') `
+        -and $commandPalette.Contains('readonly property bool trustPending:') `
+        -and $commandPalette.Contains('modelData.canTrust === true || trustPending') `
+        -and $commandPalette.Contains('root.requestPluginTrust(modelData.pluginId)') `
+        -and $commandPalette -notmatch 'property\s+string\s+pendingPluginTrustId\b') `
+    "reopening the visible palette preserves its search and selection while trust validation remains independently pending per plugin"
 Test-Policy ($mainQmlForPalette -match 'function commandPaletteCommands\(\)' `
         -and $mainQmlForPalette -match 'var actionEntries = \[' `
         -and ([regex]::Matches($mainQmlForPalette, 'action:\s*action[A-Za-z]+')).Count -ge 50 `
@@ -1446,6 +1564,17 @@ Test-Policy ($mainQmlForPalette -match 'function commandPaletteCommands\(\)' `
         -and $commandPalette -match 'modelData\.checkable' `
         -and $commandPalette -match 'root\.commands\.length') `
     "the command palette covers the shared action catalog and live installed search plugins"
+Test-Policy ($mainQmlForPalette -match 'id:\s*actionMarkAllNotificationsRead' `
+        -and $mainQmlForPalette -match 'enabled:\s*NotificationCenter\.unreadCount\s*>\s*0' `
+        -and $mainQmlForPalette -match 'onTriggered:\s*NotificationCenter\.markAllRead\(\)' `
+        -and $mainQmlForPalette -match 'id:\s*actionDismissAllNotifications' `
+        -and $mainQmlForPalette -match 'enabled:\s*NotificationCenter\.activeCount\s*>\s*0' `
+        -and $mainQmlForPalette -match 'onTriggered:\s*NotificationCenter\.dismissAll\(\)' `
+        -and $mainQmlForPalette.Contains('id: "markAllNotificationsRead", action: actionMarkAllNotificationsRead') `
+        -and $mainQmlForPalette.Contains('id: "dismissAllNotifications", action: actionDismissAllNotifications') `
+        -and $mainQmlForPalette.Contains('accessibleDescription: item.accessibleDescription || ""') `
+        -and $commandPalette.Contains('modelData.accessibleDescription')) `
+    "the command palette exposes live, accessible mark-all-read and dismiss-all notification actions through NotificationCenter"
 Test-Policy ($commandPalette -match 'GUI/CommandPalette/FullWindow' `
         -and $commandPalette -match 'color:\s*Theme\.color\("surface"\)' `
         -and $commandPalette -match 'clip:\s*true') `
@@ -1523,12 +1652,17 @@ Test-Policy ($programUpdaterSource.Contains('stagedExecutableExists(m_availableV
         -and $updateReadyBanner -match 'qsTr\("Later"\)' `
         -and $updateReadyBanner -match 'qsTr\("Restart to install update"\)' `
         -and $updateReadyBanner -match 'restartRequested\(root\.returnFocusItem\)' `
+        -and $updateReadyBanner -match 'function postpone\(origin\)' `
+        -and $updateReadyBanner -match 'root\.postponedVersion\s*=\s*root\.versionText' `
+        -and $updateReadyBanner -match 'root\.laterRequested\(origin \? origin : root\.returnFocusItem\)' `
+        -and $updateReadyBanner -match 'onClicked:\s*root\.postpone\(\)' `
         -and $updateReadyBanner -match 'Accessible\.role:\s*Accessible\.AlertMessage' `
         -and $updateReadyBanner -match 'duration:\s*ThemeManager\.reducedMotion\s*\?\s*0\s*:\s*Spacing\.motionFast' `
         -and $mainQmlForUpdater -match 'ProgramUpdater\.restartToUpdate\(\)' `
         -and $mainQmlForUpdater -match 'id:\s*updateRestartConfirmDialog' `
         -and $mainQmlForUpdater -match 'acceptText:\s*qsTr\("Restart to install update"\)' `
         -and $mainQmlForUpdater -match 'rejectText:\s*qsTr\("Later"\)' `
+        -and $mainQmlForUpdater -match 'onRejected:\s*updateReadyBanner\.postpone\(root\.updateRestartReturnFocusItem\)' `
         -and $mainQmlForUpdater -match 'WorkspaceManager\.dirty\s*&&\s*!WorkspaceManager\.syncNow\(\)' `
         -and $mainQmlForUpdater -match 'OptionsController\.modified' `
         -and $mainQmlForUpdater -match 'optionsDialog\.visible\s*=\s*true' `
@@ -2085,6 +2219,60 @@ if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {
     $publishedAssetValidationOffset = $workflow.IndexOf(
         'Assert-ReleaseAssetsAndSignedFeed "published immutable release" $publishedRelease',
         [Math]::Max(0, $publishedMetadataOffset))
+    $draftProbeOffset = $workflow.IndexOf(
+        '$stagedRelease = Get-DraftReleaseByTag -AllowAbsent')
+    $draftPollAfterCreateOffset = $workflow.IndexOf(
+        '$stagedRelease = Get-DraftReleaseByTag',
+        [Math]::Max(0, $releaseCreateOffset))
+    $draftReuseNoticeOffset = $workflow.IndexOf(
+        'Reusing exact mutable draft $env:RELEASE_TAG after a same-run retry')
+    $draftPropagationFixtures = @(
+        @(),
+        @(),
+        @(
+            [pscustomobject]@{
+                tag_name = 'v5.3.99'
+                draft = $true
+                immutable = $false
+                prerelease = $false
+                target_commitish = '4444444444444444444444444444444444444444'
+            }
+        )
+    )
+    $fixturePollCount = 0
+    $fixtureDraft = $null
+    foreach ($fixtureInventory in $draftPropagationFixtures) {
+        $fixturePollCount += 1
+        $fixtureTagMatches = @($fixtureInventory | Where-Object {
+            [string]$_.tag_name -eq 'v5.3.99'
+        })
+        $fixtureExactDraftMatches = @($fixtureTagMatches | Where-Object {
+            $_.draft -and -not $_.immutable -and -not $_.prerelease `
+                -and [string]$_.target_commitish -eq '4444444444444444444444444444444444444444'
+        })
+        if ($fixtureTagMatches.Count -eq 1 -and $fixtureExactDraftMatches.Count -eq 1) {
+            $fixtureDraft = $fixtureExactDraftMatches[0]
+            break
+        }
+    }
+    Test-Policy ($fixturePollCount -eq 3 `
+            -and $null -ne $fixtureDraft `
+            -and [string]$fixtureDraft.tag_name -eq 'v5.3.99' `
+            -and $fixtureDraft.draft `
+            -and -not $fixtureDraft.immutable `
+            -and [string]$fixtureDraft.target_commitish -eq '4444444444444444444444444444444444444444' `
+            -and $workflow -match 'function Get-DraftReleaseByTag\(\[switch\]\$AllowAbsent\)' `
+            -and $workflow -match '\$deadline = \[DateTimeOffset\]::UtcNow\.AddSeconds\(90\)' `
+            -and $workflow -match 'Start-Sleep -Seconds \(\[Math\]::Min\(8, \$attempt \* 2\)\)' `
+            -and $workflow -match '\$tagMatches\.Count -eq 1 -and \$matches\.Count -eq 1' `
+            -and $workflow -match '\$_.draft -and -not \$_.immutable -and -not \$_.prerelease' `
+            -and $workflow -match '\[string\]\$_\.target_commitish -eq \$env:GITHUB_SHA' `
+            -and $draftProbeOffset -ge 0 `
+            -and $releaseCreateOffset -gt $draftProbeOffset `
+            -and $draftPollAfterCreateOffset -gt $releaseCreateOffset `
+            -and $draftReuseNoticeOffset -gt $draftPollAfterCreateOffset `
+            -and $stagedAssetValidationOffset -gt $draftReuseNoticeOffset) `
+        "draft publication polls a bounded exact record after propagation and reuses/revalidates the same-run mutable draft on retry"
     Test-Policy ($workflow -match 'function Get-DraftReleaseByTag' `
             -and $workflow -match 'authenticated release inventory' `
             -and $workflow -match 'releases\?per_page=100' `

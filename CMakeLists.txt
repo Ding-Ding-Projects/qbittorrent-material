@@ -78,8 +78,10 @@ option(QBT_BUNDLE_QRC
 tolerant globbed asset set (only enable once every listed asset exists)" OFF)
 option(QBT_BUILD_NOTIFICATION_TESTS
     "Build the opt-in non-GUI notification controller regression" OFF)
+option(QBT_BUILD_UPDATE_RECOVERY_TESTS
+    "Build the opt-in non-GUI update recovery argument regression" OFF)
 
-if (QBT_BUILD_NOTIFICATION_TESTS)
+if (QBT_BUILD_NOTIFICATION_TESTS OR QBT_BUILD_UPDATE_RECOVERY_TESTS)
     enable_testing()
 endif()
 

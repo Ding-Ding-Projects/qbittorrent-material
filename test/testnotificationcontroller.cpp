@@ -147,6 +147,39 @@ int main(int argc, char **argv)
             QStringLiteral("retained row %1 must be dismissed").arg(row));
     }
 
+    // The corner host receives fresh transient notifications from its signal,
+    // not from the persisted recovery snapshot. That keeps an Undo action from
+    // gaining a new full timeout if the application is restarted.
+    controller->clearAll();
+    requestedActions.clear();
+    const QString transientUndoId = controller->notify(
+        QStringLiteral("Transient undo"), QStringLiteral("info"),
+        QStringLiteral("Restart regression"), QStringLiteral("Undo"),
+        QStringLiteral("journal-undo:transient"));
+    const QString persistentWarningId = controller->notify(
+        QStringLiteral("Persistent warning"), QStringLiteral("warning"),
+        QStringLiteral("Restart regression"));
+    const QString persistentErrorId = controller->notify(
+        QStringLiteral("Persistent error"), QStringLiteral("error"),
+        QStringLiteral("Restart regression"));
+
+    const QVariantList recoveryEntries = controller->activeEntries();
+    QVector<QString> recoveryIds;
+    recoveryIds.reserve(recoveryEntries.size());
+    for (const QVariant &entry : recoveryEntries)
+        recoveryIds.append(entry.toMap().value(QStringLiteral("notificationId")).toString());
+    expect(!recoveryIds.contains(transientUndoId),
+        QStringLiteral("transient undo must not enter the persisted recovery snapshot"));
+    expect(recoveryIds.contains(persistentWarningId) && recoveryIds.contains(persistentErrorId),
+        QStringLiteral("persistent warning and error cards must remain restorable"));
+    expect(controller->count() == 3 && controller->activeCount() == 3,
+        QStringLiteral("excluding a transient recovery card must retain its live history row"));
+
+    controller->activateAction(transientUndoId);
+    expect(requestedActions.size() == 1
+            && requestedActions.constFirst().first == QStringLiteral("journal-undo:transient"),
+        QStringLiteral("a fresh transient undo remains actionable before restart sanitization"));
+
     if (failures == 0)
         qInfo() << "Notification controller 201-entry regression passed";
     return (failures == 0) ? 0 : 1;

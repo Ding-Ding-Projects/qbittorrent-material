@@ -149,6 +149,17 @@ QString argumentValue(const QStringList &arguments, const QString &name)
     return {};
 }
 
+QString absoluteProfileRoot(const QString &profileRoot)
+{
+    // The installed Squirrel target (and the rollback executable) starts in an
+    // app-<version> directory. Resolve a relative custom profile while the
+    // original process still owns its launch working directory, then carry the
+    // stable absolute value through both restart paths.
+    if (profileRoot.isEmpty())
+        return {};
+    return QDir::cleanPath(QFileInfo(profileRoot).absoluteFilePath());
+}
+
 QStringList preservedArguments(const QStringList &arguments)
 {
     QStringList result;
@@ -159,11 +170,17 @@ QStringList preservedArguments(const QStringList &arguments)
                 || (argument == u"--configuration"_s);
         if (separated && (index + 1 < arguments.size()))
         {
-            result << argument << arguments.at(++index);
+            const QString value = arguments.at(++index);
+            result << argument
+                   << ((argument == u"--profile-root"_s) ? absoluteProfileRoot(value) : value);
             continue;
         }
-        if (argument.startsWith(u"--profile-root="_s)
-                || argument.startsWith(u"--configuration="_s))
+        if (argument.startsWith(u"--profile-root="_s))
+        {
+            result << (u"--profile-root="_s
+                    + absoluteProfileRoot(argument.sliced(u"--profile-root="_s.size())));
+        }
+        else if (argument.startsWith(u"--configuration="_s))
         {
             result << argument;
         }
@@ -409,7 +426,7 @@ bool prepareBaseline(const Baseline &baseline, QString *error)
 
 bool createRestartTransaction(const QString &squirrelRoot, const QString &fromVersion,
         const QString &targetVersion, const QString &relativeExecutable,
-        const QStringList &originalArguments, QString *token, QString *error)
+        const QStringList &restartArguments, QString *token, QString *error)
 {
     QJsonObject baseline;
     const QString directory = recoveryDirectory(squirrelRoot);
@@ -435,7 +452,10 @@ bool createRestartTransaction(const QString &squirrelRoot, const QString &fromVe
     }
 
     QJsonArray arguments;
-    for (const QString &argument : preservedLaunchArguments(originalArguments))
+    // ProgramUpdater supplies the same already-filtered, canonical argument
+    // list to Update.exe. Persist it verbatim so a rollback starts the exact
+    // same custom profile rather than re-resolving against an app directory.
+    for (const QString &argument : restartArguments)
         arguments.append(argument);
 
     QJsonObject object;

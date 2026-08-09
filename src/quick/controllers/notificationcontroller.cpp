@@ -32,6 +32,16 @@ namespace
     constexpr int kMaximumActionIdLength = 4096;
     const QString kHistoryKey = u"GUI/Notifications/HistoryV1"_s;
     const QString kRegexSafetyPrefix = u"(*LIMIT_MATCH=100000)(*LIMIT_DEPTH=1000)(?:"_s;
+
+    [[nodiscard]] bool isPersistentPresentation(const QString &severity)
+    {
+        return (severity == u"warning"_s) || (severity == u"error"_s);
+    }
+
+    [[nodiscard]] bool isJournalUndoAction(const QString &actionId)
+    {
+        return actionId.startsWith(u"journal-undo:"_s);
+    }
 }
 
 NotificationController *NotificationController::s_instance = nullptr;
@@ -263,12 +273,16 @@ QVariantList NotificationController::activeEntries() const
     QVariantList result;
     result.reserve(activeCount());
 
-    // History is stored newest-first. The corner stack reads oldest-to-newest
+    // The corner stack only restores persistent warning/error cards. Fresh
+    // info, success and progress notifications arrive through
+    // notificationRaised(), but their timer is process-scoped and must never
+    // gain a new action window merely because QML is reconstructed.
+    // History is stored newest-first; the corner stack reads oldest-to-newest
     // so its newest card stays at the bottom, matching live notification order.
     for (auto iterator = m_entries.crbegin(); iterator != m_entries.crend(); ++iterator)
     {
         const Entry &entry = *iterator;
-        if (entry.dismissed)
+        if (entry.dismissed || !isPersistentPresentation(entry.severity))
             continue;
 
         result.append(QVariantMap {
@@ -293,7 +307,7 @@ void NotificationController::activateAction(const QString &id)
     if (entry.actionId.isEmpty())
         return;
 
-    const bool oneShot = entry.actionId.startsWith(u"journal-undo:"_s);
+    const bool oneShot = isJournalUndoAction(entry.actionId);
     if (oneShot && entry.dismissed)
         return;
 
@@ -393,6 +407,7 @@ void NotificationController::load()
         return;
     const QJsonArray array = document.array();
     m_entries.reserve(qMin(array.size(), kMaximumEntries));
+    bool sanitizedPersistedEntries = false;
     for (const QJsonValue &value : array)
     {
         if (!value.isObject() || m_entries.size() >= kMaximumEntries)
@@ -410,8 +425,33 @@ void NotificationController::load()
         entry.actionId = object.value(u"actionId"_s).toString();
         if (entry.id.isEmpty() || entry.body.isEmpty() || !entry.timestamp.isValid())
             continue;
+
+        // A transient card has no trustworthy remaining timeout after a
+        // process restart. Keep its history row, but record that its live
+        // presentation ended instead of restoring it as a new Snackbar.
+        if (!isPersistentPresentation(entry.severity)
+            && (!entry.dismissed || !entry.read))
+        {
+            entry.dismissed = true;
+            entry.read = true;
+            sanitizedPersistedEntries = true;
+        }
+
+        // Journal undo applies a specific historical mutation. It is valid
+        // only during the live action window that created it, never after a
+        // restart. Clear the stale affordance even when the history row itself
+        // is retained for auditability.
+        if (isJournalUndoAction(entry.actionId))
+        {
+            entry.actionLabel.clear();
+            entry.actionId.clear();
+            sanitizedPersistedEntries = true;
+        }
         m_entries.append(entry);
     }
+
+    if (sanitizedPersistedEntries)
+        persist();
 #endif
     updateUnreadCount();
 }

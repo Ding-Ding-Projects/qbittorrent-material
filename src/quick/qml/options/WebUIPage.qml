@@ -21,8 +21,8 @@ import qBittorrent
 
     The whole page is one big checkable card (WebUI enabled) containing address /
     port / UPnP, the HTTPS sub-group, Authentication (username / password + the
-    immediately-applied API key with copy / rotate / delete via
-    \c APIKeyConfirmDialog, plus the IP subnet whitelist launcher), alt-WebUI,
+    staged API key with copy / generate / rotate via \c APIKeyConfirmDialog and
+    deletion via \c SuperConfirmDialog, plus the IP subnet whitelist launcher), alt-WebUI,
     Security, custom HTTP headers, reverse-proxy support and DynDNS.
 */
 Flickable {
@@ -221,19 +221,25 @@ Flickable {
                         symbol: Icons.refresh
                         tooltip: OptionsController.apiKeyValid ? qsTr("Rotate API key") : qsTr("Generate API key")
                         onClicked: {
+                            // Rotation is a separate staged replacement route;
+                            // it does not call deleteApiKey().
                             apiKeyDialog.mode = OptionsController.apiKeyValid ? "rotate" : "generate"
                             apiKeyDialog.open()
                         }
                     }
                     IconButton {
+                        id: deleteApiKeyButton
                         property string paletteActionKey: "delete-api-key"
                         property string paletteActionTitle: tooltip
                         symbol: Icons.remove
                         tooltip: qsTr("Delete API key")
                         enabled: OptionsController.apiKeyValid
                         onClicked: {
-                            apiKeyDialog.mode = "delete"
-                            apiKeyDialog.open()
+                            if (apiKeyDeleteConfirm.visible)
+                                return
+                            apiKeyDeleteConfirm.deletionStaged = false
+                            apiKeyDeleteConfirm.originatingControl = deleteApiKeyButton
+                            apiKeyDeleteConfirm.open()
                         }
                     }
                 }
@@ -527,11 +533,34 @@ Flickable {
         id: apiKeyDialog
         onConfirmed: (mode) => {
             Log.info("ui", "WebUI: API key action confirmed: " + mode)
-            if (mode === "delete")
-                OptionsController.deleteApiKey()
-            else
-                OptionsController.rotateApiKey()   // also used for first generation
+            OptionsController.rotateApiKey()   // also used for first generation
         }
+    }
+
+    // Deleting an API key stages a credential revocation. It must pass through
+    // the application-native two-key/full-slider gate before the staged value
+    // changes; persistence remains the outer Options Apply/OK responsibility.
+    SuperConfirmDialog {
+        id: apiKeyDeleteConfirm
+        property bool deletionStaged: false
+
+        actionText: qsTr("Stage deletion of the Web UI API key")
+        affectedText: qsTr("The Web UI API credential and every client configured to use it")
+        consequenceText: qsTr("This prepares the deletion only. Cancel in Options keeps the current saved credential and client access unchanged.")
+        finalityText: qsTr("After a successful Apply or OK, the previous API key cannot be restored and every client using it loses Web UI access.")
+        confirmLabel: qsTr("Slide to stage API-key deletion")
+
+        onAuthorized: {
+            // SuperConfirmDialog emits authorized only once, and this local
+            // guard keeps the persistence-facing delete route exactly once even
+            // if an integration accidentally re-emits the signal.
+            if (deletionStaged || !OptionsController.apiKeyValid)
+                return
+            deletionStaged = true
+            Log.info("ui", "WebUI: API-key deletion authorized and staged")
+            OptionsController.deleteApiKey()
+        }
+        onCancelled: Log.info("ui", "WebUI: API-key deletion cancelled; staged credential unchanged")
     }
 
     Connections {

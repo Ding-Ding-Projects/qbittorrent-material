@@ -1119,6 +1119,10 @@ QVariantMap SearchPluginManager::unofficialCatalogStatus() const
 
 void SearchPluginManager::retryUnofficialCatalogSync()
 {
+    // A manual retry is deliberately distinct from an automatic launch sync:
+    // it may revalidate a quarantined source that was previously incompatible
+    // with the runtime. The one-shot flag is consumed by the next sync.
+    m_catalogRuntimeIncompatibleRetryRequested = true;
     if (m_catalogSyncInProgress)
     {
         m_catalogRetryPending = true;
@@ -1495,6 +1499,7 @@ void SearchPluginManager::startUnofficialCatalogSync()
     m_catalogAutoActivationAttempted = false;
     m_catalogAutoActivationInProgress = false;
     m_catalogActivationTransactions.clear();
+    const bool retryRuntimeIncompatible = std::exchange(m_catalogRuntimeIncompatibleRetryRequested, false);
 
     QFile manifest {UNOFFICIAL_MANIFEST_PATH};
     if (!manifest.open(QIODevice::ReadOnly))
@@ -1712,6 +1717,35 @@ void SearchPluginManager::startUnofficialCatalogSync()
             && isSha256(ledger.expectedHash) && (fileSha256(candidatePath) == ledger.expectedHash);
         const bool ownedActiveVerified = activeExists && hasLedger && ledger.catalogOwned && ledger.trusted
             && isSha256(ledger.activeHash) && (activeHash == ledger.activeHash);
+        const bool runtimeIncompatibleCandidate = hasLedger && !ledger.userRemoved
+            && (ledger.integrityState == u"runtime-incompatible"_s);
+        const bool runtimeIncompatibleForCurrentSource = runtimeIncompatibleCandidate
+            && std::ranges::any_of(entry.sources, [&ledger](const CatalogSource &source)
+            {
+                return (source.url == ledger.sourceUrl) && (source.sha256 == ledger.expectedHash);
+            });
+        const bool preserveRuntimeIncompatibleCandidate = runtimeIncompatibleForCurrentSource
+            && !retryRuntimeIncompatible;
+        // A changed source/pin must get a fresh candidate. Do not let an older
+        // active alternative hide it; likewise, a user explicitly requesting
+        // Retry is allowed to retry the same previously incompatible source.
+        const bool refreshRuntimeIncompatibleCandidate = runtimeIncompatibleCandidate
+            && (!runtimeIncompatibleForCurrentSource || retryRuntimeIncompatible);
+
+        if (preserveRuntimeIncompatibleCandidate)
+        {
+            // The same verified candidate already failed the bundled Nova
+            // capability contract. Keep its durable diagnostic and quarantine
+            // intact across normal launches instead of resetting it to
+            // pending-trust and repeatedly auto-promoting it.
+            if (candidateVerified)
+            {
+                m_catalogStatus[u"alreadyPresent"_s] = m_catalogStatus.value(u"alreadyPresent"_s).toInt() + 1;
+                m_catalogStatus[u"quarantined"_s] = m_catalogStatus.value(u"quarantined"_s).toInt() + 1;
+            }
+            m_catalogStatus[u"completed"_s] = m_catalogStatus.value(u"completed"_s).toInt() + 1;
+            continue;
+        }
 
         if (activeExists)
         {
@@ -1720,7 +1754,7 @@ void SearchPluginManager::startUnofficialCatalogSync()
             if (!seeded.contains(entry.id))
                 seeded.append(entry.id);
 
-            if (activeSource)
+            if (activeSource && !refreshRuntimeIncompatibleCandidate)
             {
                 // A current pinned file already satisfies the catalog. Preserve
                 // pre-ledger installs as trusted external files; never claim
@@ -2319,7 +2353,8 @@ void SearchPluginManager::finishUnofficialCatalogSync()
         const bool activeOwned = activeExists && state.catalogOwned && state.trusted
             && isSha256(state.activeHash) && (activeHash == state.activeHash);
         const bool promotable = candidateVerified && (!activeExists || activeOwned);
-        if (!runtimeUnavailable && promotable && (!state.trusted || (state.activeHash != state.expectedHash)))
+        if (!runtimeUnavailable && promotable && (state.integrityState != u"runtime-incompatible"_s)
+            && (!state.trusted || (state.activeHash != state.expectedHash)))
             ++awaitingTrust;
 
         if (runtimeUnavailable && (activeExists || candidateVerified))

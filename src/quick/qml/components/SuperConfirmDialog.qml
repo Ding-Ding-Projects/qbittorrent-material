@@ -58,6 +58,14 @@ Dialog {
     /*! Extra consequence line; shown verbatim when non-empty. */
     property string consequenceText: ""
 
+    /*!
+        Finality statement shown below \l consequenceText. Most destructive
+        operations use the default. A caller which is deliberately confirming a
+        staged change can replace it with an equally explicit statement of when
+        the irreversible effect actually occurs.
+    */
+    property string finalityText: qsTr("This cannot be undone.")
+
     /*! Label of the final authorizing control. */
     property string confirmLabel: qsTr("Slide to confirm")
 
@@ -230,7 +238,8 @@ Dialog {
 
         Label {
             Layout.fillWidth: true
-            text: qsTr("This cannot be undone.")
+            visible: root.finalityText.length > 0
+            text: root.finalityText
             font: Typography.labelMedium
             color: Theme.color("error")
             wrapMode: Text.WordWrap

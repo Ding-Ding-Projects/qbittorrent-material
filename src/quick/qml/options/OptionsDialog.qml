@@ -39,6 +39,10 @@ Dialog {
     modal: true
     parent: Overlay.overlay
     anchors.centerIn: parent
+    // The Qt default lets Escape and an outside press call close() directly.
+    // Options owns a staged transaction, so every dismissal must pass through
+    // requestDismiss() and its explicit discard decision instead.
+    closePolicy: Popup.NoAutoClose
 
     // Cap to 90% of the window; the pages scroll internally.
     width: Math.min(1040, (parent ? parent.width : 1040) * 0.95)
@@ -88,6 +92,10 @@ Dialog {
     property real paletteHighlightWidth: 0
     property real paletteHighlightHeight: 0
     readonly property int paletteRevision: OptionsController.revision
+    // Guard both the button and shortcut routes while Dialog.reject() is
+    // emitting rejected() and closing. The existing onRejected handler remains
+    // the sole place that resets the staging map.
+    property bool dismissalInFlight: false
 
     function paletteSettingId(pageIndex, settingKey) {
         return "options." + pageIndex + "." + encodeURIComponent(settingKey)
@@ -432,6 +440,35 @@ Dialog {
         }
     }
 
+    function completeDismissal() {
+        if (dismissalInFlight)
+            return
+        dismissalInFlight = true
+        root.reject()
+    }
+
+    function requestDismiss() {
+        if (dismissalInFlight || discardPendingChanges.visible)
+            return
+        if (!OptionsController.modified) {
+            root.completeDismissal()
+            return
+        }
+
+        Log.info("ui", "OptionsDialog dismissal needs an explicit discard decision")
+        discardPendingChanges.open()
+    }
+
+    Shortcut {
+        sequence: "Escape"
+        // Qt.WindowShortcut is otherwise eligible while a child popup owns
+        // focus. Only Options itself may start its own dismissal decision.
+        enabled: root.visible && root.activeFocus
+            && !discardPendingChanges.visible && !root.dismissalInFlight
+        onActivated: root.requestDismiss()
+        onActivatedAmbiguously: root.requestDismiss()
+    }
+
     // Public slot (mirrors the legacy OptionsDialog::showConnectionTab): open the
     // dialog straight on the Connection page (TAB_CONNECTION == index 2). Used by
     // the status-bar connection indicator.
@@ -482,6 +519,33 @@ Dialog {
     onRejected: {
         Log.info("ui", "OptionsDialog Cancel — discarding staged settings")
         OptionsController.reset()
+    }
+
+    ConfirmDialog {
+        id: discardPendingChanges
+
+        // This decision itself must not disappear through Escape or an outside
+        // press; its explicit Keep editing and Discard changes actions are the
+        // only terminal paths.
+        closePolicy: Popup.NoAutoClose
+        title: qsTr("Discard unapplied changes?")
+        text: qsTr("Your Options changes have not been applied. Discard them?")
+        acceptText: qsTr("Discard changes")
+        rejectText: qsTr("Keep editing")
+        destructive: true
+
+        onAccepted: root.completeDismissal()
+        onRejected: Qt.callLater(function() {
+            if (root.visible)
+                cancelButton.forceActiveFocus(Qt.PopupFocusReason)
+        })
+
+        Shortcut {
+            sequence: "Escape"
+            enabled: discardPendingChanges.visible
+            onActivated: discardPendingChanges.reject()
+            onActivatedAmbiguously: discardPendingChanges.reject()
+        }
     }
 
     header: Rectangle {
@@ -691,10 +755,14 @@ Dialog {
         }
 
         Button {
+            id: cancelButton
             implicitHeight: Spacing.controlHeight
             text: qsTr("Cancel")
             flat: true
-            DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            // RejectRole would close this Dialog before the staged transaction
+            // has had its chance to ask whether it may be discarded.
+            DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
+            onClicked: root.requestDismiss()
         }
 
         Button {
@@ -717,6 +785,7 @@ Dialog {
         }
     }
 
+    onOpened: dismissalInFlight = false
     onClosed: highlightedPaletteSetting = ""
 
     Component.onCompleted: {

@@ -150,6 +150,13 @@ public:
     Q_INVOKABLE void deleteApiKey();
     Q_INVOKABLE bool copyApiKeyToClipboard() const;
 
+    /// Validate an exact IPv4 or IPv6 address using the same libtorrent parser
+    /// that filters the staged manual-ban list during Session apply.
+    Q_INVOKABLE bool isValidBannedIPAddress(const QString &address) const;
+    /// Validate an IPv4 or IPv6 subnet using the same parser Preferences uses
+    /// before persisting the Web UI authentication-subnet whitelist.
+    Q_INVOKABLE bool isValidWebUISubnet(const QString &subnet) const;
+
     // Best-effort actions exposed by option pages.
     Q_INVOKABLE void reloadIPFilter();
     Q_INVOKABLE void sendTestEmail();

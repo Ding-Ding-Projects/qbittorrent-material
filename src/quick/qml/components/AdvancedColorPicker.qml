@@ -175,6 +175,11 @@ Popup {
     }
 
     function acceptPicker() {
+        // The translator field is editable independently from selectedColor.
+        // Parse it first so the footer cannot silently accept the previous
+        // selection when a user clicks Apply without pressing Enter or Preview.
+        if (!acceptFormattedColor())
+            return
         acceptedThisOpen = true
         var output = outputColor()
         addRecentColor(output)
@@ -716,23 +721,24 @@ Popup {
 
     function acceptFormattedColor() {
         if (updatingColor)
-            return
+            return true
         var parsed = parsedFormattedColor(colorSpaceCombo.currentIndex, colorFormatField.text)
         if (parsed === null) {
             pendingClip = false
             colorError.text = qsTr("That value is not valid in the selected color space.")
-            return
+            return false
         }
         if (parsingClipped) {
             pendingClippedColor = parsed
             pendingClip = true
             colorError.text = qsTr(
                 "This value is outside the supported range or sRGB gamut. Review it before clipping.")
-            return
+            return false
         }
         pendingClip = false
         colorError.text = ""
         setPickerColor(parsed, true)
+        return true
     }
 
     function acceptClippedColor() {

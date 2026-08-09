@@ -276,6 +276,10 @@ private:
     bool m_catalogPreexisting = false;
     bool m_catalogSyncInProgress = false;
     bool m_catalogRetryPending = false;
+    // A user explicitly requested another catalog run after a stored runtime
+    // incompatibility. Consume this one-shot intent at sync start; background
+    // startup/reconciliation must retain the incompatibility diagnosis.
+    bool m_catalogRuntimeIncompatibleRetryRequested = false;
     bool m_catalogAutoActivationAttempted = false;
     bool m_catalogAutoActivationInProgress = false;
 

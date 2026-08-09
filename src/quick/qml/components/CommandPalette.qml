@@ -33,13 +33,33 @@ Popup {
     property bool fullWindow: false
     property string pendingCommandId: ""
     property string pendingPluginManageId: ""
-    property string pendingPluginTrustId: ""
+    // Trust validation is asynchronous. Keep an immutable-looking list rather
+    // than one global id so two different quarantined plugins can validate at
+    // once while a duplicate click on either stays a no-op.
+    property var pendingPluginTrustIds: []
     property string pendingSettingId: ""
     property var pendingSettingValue
 
+    function isPluginTrustPending(pluginId) {
+        return pendingPluginTrustIds.indexOf(pluginId) !== -1
+    }
+
     function finishPluginTrust(pluginId) {
-        if (pendingPluginTrustId === pluginId)
-            pendingPluginTrustId = ""
+        var next = []
+        for (var i = 0; i < pendingPluginTrustIds.length; ++i) {
+            if (pendingPluginTrustIds[i] !== pluginId)
+                next.push(pendingPluginTrustIds[i])
+        }
+        if (next.length !== pendingPluginTrustIds.length)
+            pendingPluginTrustIds = next
+    }
+
+    function requestPluginTrust(pluginId) {
+        if (!pluginId.length || isPluginTrustPending(pluginId))
+            return false
+        pendingPluginTrustIds = pendingPluginTrustIds.concat([pluginId])
+        pluginTrustRequested(pluginId)
+        return true
     }
 
     function filteredCommands() {
@@ -65,9 +85,14 @@ Popup {
     }
 
     function openPalette() {
-        fullWindow = !!Preferences.value("GUI/CommandPalette/FullWindow", false)
-        search.text = ""
-        open()
+        // Ctrl+Shift+F is also a refocus shortcut. Only reset a fresh palette
+        // session; a second chord while this popup is visible must retain its
+        // current query and keyboard selection.
+        if (!root.visible) {
+            fullWindow = !!Preferences.value("GUI/CommandPalette/FullWindow", false)
+            search.text = ""
+            open()
+        }
         search.forceActiveFocus(Qt.ShortcutFocusReason)
     }
 
@@ -200,9 +225,10 @@ Popup {
                 highlighted: ListView.isCurrentItem
                 hoverEnabled: true
                 Accessible.name: modelData.title
-                Accessible.description: modelData.destination
-                    ? qsTr("Destination: %1").arg(modelData.destination)
-                    : qsTr("Action in %1").arg(modelData.group)
+                Accessible.description: modelData.accessibleDescription
+                    || (modelData.destination
+                        ? qsTr("Destination: %1").arg(modelData.destination)
+                        : qsTr("Action in %1").arg(modelData.group))
                 onHoveredChanged: if (hovered) results.currentIndex = index
                 onClicked: {
                     results.currentIndex = index
@@ -402,19 +428,24 @@ Popup {
                     }
 
                     Button {
-                        visible: modelData.kind === "plugin" && modelData.canTrust === true
-                        text: root.pendingPluginTrustId === modelData.pluginId
+                        readonly property bool trustPending:
+                            root.isPluginTrustPending(modelData.pluginId)
+                        // The backend switches a queued plugin out of canTrust
+                        // while it validates. Keep that row visible so each
+                        // outstanding request remains truthfully disabled.
+                        visible: modelData.kind === "plugin"
+                            && (modelData.canTrust === true || trustPending)
+                        text: trustPending
                             ? qsTr("Trusting…") : qsTr("Trust")
                         flat: true
-                        enabled: root.pendingPluginTrustId !== modelData.pluginId
+                        enabled: !trustPending
                         Accessible.name: qsTr("Review and trust %1 search plugin").arg(modelData.title)
-                        Accessible.description: root.pendingPluginTrustId === modelData.pluginId
+                        Accessible.description: trustPending
                             ? qsTr("Plugin trust validation is in progress.")
                             : qsTr("Validate this quarantined plugin before allowing the search runtime to use it.")
                         onClicked: {
                             results.currentIndex = index
-                            root.pendingPluginTrustId = modelData.pluginId
-                            root.pluginTrustRequested(modelData.pluginId)
+                            root.requestPluginTrust(modelData.pluginId)
                         }
                     }
 

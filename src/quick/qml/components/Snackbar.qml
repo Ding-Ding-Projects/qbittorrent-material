@@ -24,9 +24,10 @@ import qBittorrent
 Item {
     id: root
     anchors.fill: parent
-    // This host belongs to Overlay.overlay, but must remain beneath modal
-    // dialogs and their dimmer rather than intercepting a required decision.
-    z: -1
+    // The primary host shares CentralTabs with the non-modal sheets. It sits
+    // above page content but below Sheet's common layer, while modal dialogs
+    // remain above CentralTabs in Overlay.overlay.
+    z: 100
     visible: primaryHost && activeModel.count > 0
 
     property bool primaryHost: false

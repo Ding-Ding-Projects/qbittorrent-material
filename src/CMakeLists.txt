@@ -120,6 +120,32 @@ if (WIN32)
     target_link_libraries(qbittorrent PRIVATE Advapi32 Shell32)
 endif()
 
+# =============================================================================
+# 6) Opt-in non-GUI update-recovery argument regression
+# =============================================================================
+# Keep the restart argument regression outside the product build. It exercises
+# the shared argument normalizer only, without launching a QML surface or an
+# updater helper.
+if (QBT_BUILD_UPDATE_RECOVERY_TESTS)
+    add_executable(testupdaterecoveryarguments EXCLUDE_FROM_ALL
+        "${CMAKE_SOURCE_DIR}/test/testupdaterecoveryarguments.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/app/updaterecovery.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/app/updaterecovery.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/app/squirrelreleasevalidator.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/app/squirrelreleasevalidator.h"
+    )
+    target_include_directories(testupdaterecoveryarguments PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/app"
+    )
+    target_compile_features(testupdaterecoveryarguments PRIVATE cxx_std_20)
+    target_link_libraries(testupdaterecoveryarguments PRIVATE
+        Qt6::Core
+        OpenSSL::Crypto
+    )
+    add_test(NAME testupdaterecoveryarguments COMMAND testupdaterecoveryarguments)
+endif()
+
 target_include_directories(qbittorrent PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/quick"
@@ -318,9 +344,9 @@ install(SCRIPT "${qbt_deploy_script}")
 # =============================================================================
 # 5) Opt-in non-GUI notification regression
 # =============================================================================
-# Keep this target outside the default build and packaging graph. It exercises
-# the authoritative history model without starting Qt Quick or reading/writing
-# the user's persisted preferences.
+# Keep these targets outside the default build and packaging graph. The pure
+# controller target avoids user preferences; the persistence target instead
+# owns a temporary profile so it can verify restart-time sanitization.
 if (QBT_BUILD_NOTIFICATION_TESTS)
     add_executable(testnotificationcontroller EXCLUDE_FROM_ALL
         "${CMAKE_SOURCE_DIR}/test/testnotificationcontroller.cpp"
@@ -340,4 +366,21 @@ if (QBT_BUILD_NOTIFICATION_TESTS)
         Qt6::Qml
     )
     add_test(NAME testnotificationcontroller COMMAND testnotificationcontroller)
+
+    add_executable(testnotificationpersistence EXCLUDE_FROM_ALL
+        "${CMAKE_SOURCE_DIR}/test/testnotificationpersistence.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/quick/controllers/notificationcontroller.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/quick/controllers/notificationcontroller.h"
+    )
+    target_include_directories(testnotificationpersistence PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/quick/controllers"
+    )
+    target_compile_features(testnotificationpersistence PRIVATE cxx_std_20)
+    target_link_libraries(testnotificationpersistence PRIVATE
+        qbt_base
+        Qt6::Core
+        Qt6::Qml
+    )
+    add_test(NAME testnotificationpersistence COMMAND testnotificationpersistence)
 endif()

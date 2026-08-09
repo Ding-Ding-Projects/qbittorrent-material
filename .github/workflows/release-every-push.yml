@@ -745,28 +745,56 @@ jobs:
             }
           }
 
-          function Get-DraftReleaseByTag {
+          function Get-DraftReleaseByTag([switch]$AllowAbsent) {
             # GitHub keeps a mutable draft reachable to its author through the
             # authenticated release inventory. The public tag endpoint remains
             # unavailable until the draft is published, so never use it here.
-            $inventoryJson = gh api --paginate --slurp `
-              -H "Accept: application/vnd.github+json" `
-              -H "X-GitHub-Api-Version: 2026-03-10" `
-              "repos/$env:GITHUB_REPOSITORY/releases?per_page=100"
-            if ($LASTEXITCODE -ne 0) {
-              throw "Could not enumerate draft releases for $env:RELEASE_TAG."
-            }
-            $inventory = @(
-              (($inventoryJson -join [Environment]::NewLine) | ConvertFrom-Json) |
-                ForEach-Object { $_ }
-            )
-            $matches = @($inventory | Where-Object {
-              [string]$_.tag_name -eq $env:RELEASE_TAG
-            })
-            if ($matches.Count -ne 1) {
-              throw "Expected exactly one authenticated draft-release record for $env:RELEASE_TAG; found $($matches.Count)."
-            }
-            return Convert-ReleaseApiRecord $matches[0]
+            # Draft metadata can take a few seconds to appear in the
+            # authenticated inventory after gh release create returns. Poll a
+            # bounded window and only accept the exact mutable record we just
+            # staged; no public tag endpoint is consulted before publication.
+            $deadline = [DateTimeOffset]::UtcNow.AddSeconds(90)
+            $attempt = 0
+            $lastObservation = 'no authenticated inventory query completed'
+            do {
+              $attempt += 1
+              $inventoryJson = gh api --paginate --slurp `
+                -H "Accept: application/vnd.github+json" `
+                -H "X-GitHub-Api-Version: 2026-03-10" `
+                "repos/$env:GITHUB_REPOSITORY/releases?per_page=100"
+              if ($LASTEXITCODE -ne 0) {
+                throw "Could not enumerate draft releases for $env:RELEASE_TAG."
+              }
+              $inventory = @(
+                (($inventoryJson -join [Environment]::NewLine) | ConvertFrom-Json) |
+                  ForEach-Object { $_ }
+              )
+              $tagMatches = @($inventory | Where-Object {
+                [string]$_.tag_name -eq $env:RELEASE_TAG
+              })
+              $matches = @($tagMatches | Where-Object {
+                $_.draft -and -not $_.immutable -and -not $_.prerelease `
+                  -and [string]$_.target_commitish -eq $env:GITHUB_SHA
+              })
+              if ($tagMatches.Count -eq 1 -and $matches.Count -eq 1) {
+                return Convert-ReleaseApiRecord $matches[0]
+              }
+
+              $lastObservation = "$($tagMatches.Count) tag record(s), $($matches.Count) exact mutable draft record(s)"
+              if ($AllowAbsent -and $tagMatches.Count -eq 0) {
+                return $null
+              }
+              if ($tagMatches.Count -ne 0) {
+                throw "Expected exactly one authenticated mutable draft-release record for $env:RELEASE_TAG at $env:GITHUB_SHA; observed $lastObservation."
+              }
+              if ([DateTimeOffset]::UtcNow -ge $deadline) {
+                break
+              }
+
+              Start-Sleep -Seconds ([Math]::Min(8, $attempt * 2))
+            } while ($true)
+
+            throw "Expected exactly one authenticated mutable draft-release record for $env:RELEASE_TAG at $env:GITHUB_SHA; last observed $lastObservation after $attempt poll(s)."
           }
 
           function Assert-ReleaseAssetsAndSignedFeed(
@@ -1030,19 +1058,25 @@ jobs:
           else {
             Write-Host "Highest master-channel package before publication: $($highestMasterBeforePublish[0].PackageVersionText) ($($highestMasterBeforePublish[0].TagName))."
           }
-          Write-Host "Staging $env:PACKAGE_VERSION on $releaseChannel; latest-channel selection is deferred until publication."
-          gh release create $env:RELEASE_TAG `
-            $releaseAssets `
-            --repo $env:GITHUB_REPOSITORY `
-            --target $env:GITHUB_SHA `
-            --title $env:RELEASE_TITLE `
-            --notes-file $notesPath `
-            --draft
-          if ($LASTEXITCODE -ne 0) {
-            throw "GitHub did not create draft release $env:RELEASE_TAG."
-          }
+          $stagedRelease = Get-DraftReleaseByTag -AllowAbsent
+          if ($null -eq $stagedRelease) {
+            Write-Host "Staging $env:PACKAGE_VERSION on $releaseChannel; latest-channel selection is deferred until publication."
+            gh release create $env:RELEASE_TAG `
+              $releaseAssets `
+              --repo $env:GITHUB_REPOSITORY `
+              --target $env:GITHUB_SHA `
+              --title $env:RELEASE_TITLE `
+              --notes-file $notesPath `
+              --draft
+            if ($LASTEXITCODE -ne 0) {
+              throw "GitHub did not create draft release $env:RELEASE_TAG."
+            }
 
-          $stagedRelease = Get-DraftReleaseByTag
+            $stagedRelease = Get-DraftReleaseByTag
+          }
+          else {
+            Write-Host "Reusing exact mutable draft $env:RELEASE_TAG after a same-run retry; all staged bytes and metadata will be revalidated before publication."
+          }
           if (-not $stagedRelease.isDraft `
               -or $stagedRelease.isImmutable `
               -or $stagedRelease.isPrerelease `

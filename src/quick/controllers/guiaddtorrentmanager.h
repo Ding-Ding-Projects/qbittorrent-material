@@ -246,7 +246,6 @@ private:
 
         return QDir::toNativeSeparators(localFile);
     }
-
     // ---- pipeline steps ----------------------------------------------------
 
     struct PendingDialogRequest
@@ -266,7 +265,6 @@ private:
         QString source;
         std::shared_ptr<TorrentFileGuard> guard;
     };
-
     bool startDialogRequest(const QString &source
             , const BitTorrent::AddTorrentParams &params)
     {
@@ -448,7 +446,6 @@ private:
                     ? tr("Failed to add torrent to the session.") : reason.message);
         }
     }
-
     // Returns true while the serialized pipeline is awaiting either the add
     // dialog or a tracker-merge confirmation.
     bool processTorrent(const QString &source
@@ -526,6 +523,7 @@ private:
 
         const BitTorrent::TorrentDescriptor descr = controller->currentDescriptor();
         addToSession(source, descr, controller->builtParams());
+        m_guards.remove(source);
         scheduleNextDialogRequest();
     }
 

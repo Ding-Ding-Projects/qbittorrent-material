@@ -14,19 +14,25 @@
 
 #include <algorithm>
 
+#include <QAbstractSocket>
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QIcon>
+#include <QLockFile>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QStandardPaths>
+#include <QThread>
 #include <QTimer>
 #include <QTranslator>
 #include <QVariantMap>
+
+#include <stdexcept>
 
 #include "base/logging.h"
 #include "base/logger.h"
@@ -131,27 +137,62 @@ namespace
         return u"qbittorrent-material-"_qs + QString::fromLatin1(digest);
     }
 
-    QString firstActivationArgument(const QStringList &args)
+bool canConnectToInstanceServer(const QString &serverName, const int timeoutMs = 300)
+{
+    QLocalSocket socket;
+    socket.connectToServer(serverName);
+    if (!socket.waitForConnected(timeoutMs))
+        return false;
+
+    socket.disconnectFromServer();
+    return true;
+}
+
+bool waitForInstanceServer(const QString &serverName, const int timeoutMs = 300)
+{
+    constexpr unsigned long retryDelayMs = 25;
+    QElapsedTimer deadline;
+    deadline.start();
+
+    do
     {
-        for (qsizetype i = 1; i < args.size(); ++i)
+        const int remainingMs = timeoutMs - static_cast<int>(deadline.elapsed());
+        if ((remainingMs > 0)
+            && canConnectToInstanceServer(serverName, std::min(50, remainingMs)))
         {
-            const QString &arg = args.at(i);
-            if (arg == u"--profile-root"_s || arg == u"--configuration"_s
-                || arg == u"--capture-ui"_s)
-            {
-                ++i;  // consume the value of a supported separated option
-                continue;
-            }
-            if (arg.startsWith(u"--profile-root="_s)
-                || arg.startsWith(u"--configuration="_s)
-                || arg.startsWith(u"--capture-ui="_s)
-                || arg.startsWith(u"--"_s))
-            {
-                continue;
-            }
-            return arg;
+            return true;
         }
-        return u"activate"_s;
+
+        if (deadline.elapsed() < timeoutMs)
+            QThread::msleep(retryDelayMs);
+    }
+    while (deadline.elapsed() < timeoutMs);
+
+    return false;
+}
+
+QString firstActivationArgument(const QStringList &args)
+{
+    for (qsizetype i = 1; i < args.size(); ++i)
+    {
+        const QString &arg = args.at(i);
+        if (arg == u"--profile-root"_s || arg == u"--configuration"_s
+            || arg == u"--capture-ui"_s)
+        {
+            ++i;  // consume the value of a supported separated option
+            continue;
+        }
+        if (arg.startsWith(u"--profile-root="_s)
+            || arg.startsWith(u"--configuration="_s)
+            || arg.startsWith(u"--capture-ui="_s)
+            || arg.startsWith(u"--"_s))
+        {
+            continue;
+        }
+        return arg;
+    }
+    return u"activate"_s;
+}
     }
 
     QString bundledLicenseNotice()
@@ -202,6 +243,9 @@ Application::~Application()
         delete m_instanceServer;
         m_instanceServer = nullptr;
     }
+
+    // Keep ownership until after the IPC endpoint has stopped accepting work.
+    m_instanceLock.reset();
 }
 
 Application *Application::instance()
@@ -217,45 +261,95 @@ void Application::setupSingleInstance()
     m_instanceId = computeInstanceId();
     qCDebug(lcApp) << "Single-instance id:" << m_instanceId;
 
-    // Probe for an existing primary by trying to connect to its local server.
-    QLocalSocket probe;
-    probe.connectToServer(m_instanceId);
-    if (probe.waitForConnected(300))
-    {
-        qCInfo(lcApp) << "Detected an existing primary instance";
-        probe.disconnectFromServer();
-        m_isPrimaryInstance = false;
-        return;
-    }
+    // The local socket is only the handoff channel; it cannot safely decide
+    // ownership because two launchers can both observe "not listening".  An
+    // atomic, process-lifetime lock makes exactly one launcher the owner.
+    const QString lockPath = QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
+        .filePath(m_instanceId + u".lock"_s);
+    m_instanceLock = std::make_unique<QLockFile>(lockPath);
+    // This is a process-lifetime lock, so age alone must never make a live lock
+    // stale. QLockFile still recovers locks whose owning process has crashed.
+    m_instanceLock->setStaleLockTime(0);
 
-    // Become the primary. Never report primary ownership if the socket cannot
-    // be acquired: otherwise two processes can both accept writes while the
-    // caller has no reliable activation path.
-    m_instanceServer = new QLocalServer(this);
-    if (!m_instanceServer->listen(m_instanceId))
+    if (!m_instanceLock->tryLock(0))
     {
-        QLocalSocket retryProbe;
-        retryProbe.connectToServer(m_instanceId);
-        if (retryProbe.waitForConnected(1000))
+        const QLockFile::LockError error = m_instanceLock->error();
+        if (error == QLockFile::LockFailedError)
         {
-            qCInfo(lcApp) << "Another instance accepted the single-instance socket during startup";
-            delete m_instanceServer;
-            m_instanceServer = nullptr;
+            qCInfo(lcApp) << "Detected an existing primary instance";
+            m_instanceLock.reset();
             m_isPrimaryInstance = false;
             return;
         }
 
-        // No live server answered, so the endpoint is stale (usually left by
-        // a crash). Remove only after the second probe and retry once.
-        QLocalServer::removeServer(m_instanceId);
-        if (!m_instanceServer->listen(m_instanceId))
+        const QString message = u"Unable to establish single-instance ownership using %1 "
+            u"(QLockFile error %2)"_s.arg(lockPath).arg(static_cast<int>(error));
+        qCCritical(lcApp) << message;
+        throw std::runtime_error(message.toUtf8().toStdString());
+    }
+
+    const auto becomeSecondary = [this]
+    {
+        if (m_instanceServer)
         {
-            qCCritical(lcApp) << "Failed to listen on single-instance socket:"
-                              << m_instanceServer->errorString();
+            m_instanceServer->close();
             delete m_instanceServer;
             m_instanceServer = nullptr;
-            m_isPrimaryInstance = false;
+        }
+        m_instanceLock.reset();
+        m_isPrimaryInstance = false;
+    };
+
+    // A pre-lock release may already own the local server. Do not unlink its
+    // live endpoint merely because it cannot own this newer lock protocol.
+    if (canConnectToInstanceServer(m_instanceId))
+    {
+        qCInfo(lcApp) << "Detected an existing primary IPC server";
+        becomeSecondary();
+        return;
+    }
+
+    // Only the proven owner may create the handoff server. Try listening before
+    // any stale cleanup so a live legacy endpoint remains intact.
+    m_instanceServer = new QLocalServer(this);
+    if (!m_instanceServer->listen(m_instanceId))
+    {
+        const QAbstractSocket::SocketError firstError = m_instanceServer->serverError();
+        const QString firstErrorString = m_instanceServer->errorString();
+
+        // Close the race between the compatibility probe and listen().
+        if (waitForInstanceServer(m_instanceId))
+        {
+            qCInfo(lcApp) << "Detected a primary IPC server after listen failed";
+            becomeSecondary();
             return;
+        }
+
+        // Removal is appropriate only for an unreachable, address-in-use
+        // endpoint (the normal artifact left by a crashed local server).
+        if (firstError == QAbstractSocket::AddressInUseError)
+        {
+            QLocalServer::removeServer(m_instanceId);
+            m_instanceServer->listen(m_instanceId);
+        }
+
+        if (!m_instanceServer->isListening())
+        {
+            // A legacy process may have won the endpoint while stale recovery
+            // was in progress. Prefer it over declaring a second primary.
+            if (waitForInstanceServer(m_instanceId))
+            {
+                qCInfo(lcApp) << "Detected a primary IPC server after recovery failed";
+                becomeSecondary();
+                return;
+            }
+
+            const QString errorString = m_instanceServer->errorString().isEmpty()
+                ? firstErrorString : m_instanceServer->errorString();
+            const QString message = u"Failed to create the single-instance IPC server: %1"_s
+                .arg(errorString);
+            qCCritical(lcApp) << message;
+            throw std::runtime_error(message.toUtf8().toStdString());
         }
     }
 
@@ -284,23 +378,63 @@ bool Application::isPrimaryInstance() const
 bool Application::notifyPrimaryInstance()
 {
     qCDebug(lcApp) << "Notifying primary instance of our launch";
-    QLocalSocket socket;
-    socket.connectToServer(m_instanceId);
-    if (socket.waitForConnected(500))
+
+    const QStringList args = QCoreApplication::arguments();
+    const QByteArray payload = (args.size() > 1) ? args.at(1).toUtf8() : QByteArray("activate");
+
+    // The ownership winner may still be between acquiring the lock and calling
+    // listen(). Retry briefly so simultaneous launches do not lose activation.
+    constexpr qint64 handoffTimeoutMs = 2000;
+    constexpr unsigned long retryDelayMs = 25;
+    QElapsedTimer deadline;
+    deadline.start();
+    QString lastError;
+
+    do
     {
-        const QByteArray payload = firstActivationArgument(QCoreApplication::arguments()).toUtf8();
-        socket.write(payload);
-        socket.flush();
-        const bool delivered = socket.waitForBytesWritten(500);
-        socket.disconnectFromServer();
-        qCInfo(lcApp) << (delivered ? "Handoff to primary complete" : "Handoff write failed");
-        return delivered;
+        QLocalSocket socket;
+        socket.connectToServer(m_instanceId);
+        const int remainingMs = static_cast<int>(handoffTimeoutMs - deadline.elapsed());
+        if ((remainingMs > 0) && socket.waitForConnected(std::min(100, remainingMs)))
+        {
+            const qint64 queuedBytes = socket.write(payload);
+            bool payloadWritten = (queuedBytes == payload.size());
+            while (payloadWritten && (socket.bytesToWrite() > 0))
+            {
+                const int writeRemainingMs =
+                    static_cast<int>(handoffTimeoutMs - deadline.elapsed());
+                if ((writeRemainingMs <= 0)
+                    || !socket.waitForBytesWritten(std::min(500, writeRemainingMs)))
+                {
+                    payloadWritten = false;
+                }
+            }
+
+            if (payloadWritten)
+            {
+                socket.disconnectFromServer();
+                qCInfo(lcApp) << "Handoff to primary complete";
+                return true;
+            }
+
+            // Once any bytes have entered the pipe, retrying the entire payload
+            // could duplicate a magnet/file request whose acknowledgement was
+            // merely lost. Report an indeterminate handoff as failure instead.
+            if (queuedBytes > 0)
+            {
+                lastError = socket.errorString();
+                break;
+            }
+        }
+
+        lastError = socket.errorString();
+        if (deadline.elapsed() < handoffTimeoutMs)
+            QThread::msleep(retryDelayMs);
     }
-    else
-    {
-        qCWarning(lcApp) << "Could not reach primary instance:" << socket.errorString();
-        return false;
-    }
+    while (deadline.elapsed() < handoffTimeoutMs);
+
+    qCWarning(lcApp) << "Could not reach primary instance:" << lastError;
+    return false;
 }
 
 // ---------------------------------------------------------------------------

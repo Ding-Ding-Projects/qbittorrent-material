@@ -12,10 +12,13 @@
 
 #pragma once
 
+#include <memory>
+
 #include <QApplication>
 #include <QPointer>
 #include <QString>
 
+class QLockFile;
 class QLocalServer;
 class QQmlApplicationEngine;
 class QTranslator;
@@ -61,7 +64,7 @@ public:
     [[nodiscard]] bool isPrimaryInstance() const;
 
     /// Forward this process' request (command-line/activation) to the primary
-    /// instance, then this process is expected to exit.
+    /// instance, then this process is expected to exit. Returns true only after the complete request was written.
     [[nodiscard]] bool notifyPrimaryInstance();
 
     /// Shared, app-owned QML singleton instances.
@@ -97,6 +100,7 @@ private:
     QPointer<AppController> m_appController;
     QPointer<DesktopIntegration> m_desktopIntegration;
 
+    std::unique_ptr<QLockFile> m_instanceLock;
     QLocalServer *m_instanceServer = nullptr;
     QString m_instanceId;
     bool m_isPrimaryInstance = false;

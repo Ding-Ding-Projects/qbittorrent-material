@@ -192,8 +192,8 @@ The details that make it a gate rather than decoration:
   when that would overflow, and centres only when neither side fits.
 
 It is wired to the one transfer-list path that destroys unrecoverable data:
-erasing downloaded content files. Removing a torrent from the list *without* its
-files stays a single click, because that is recoverable — the torrent can simply
+erasing downloaded content files. Removing a torrent from the list *without*
+its files stays a single click, because that is recoverable — the torrent can simply
 be added again. Gating a reversible action at the same ceremony as an
 irreversible one trains people to slide through both.
 
@@ -245,8 +245,7 @@ All seven verbs are now real:
   the exact string would leave the rest behind and the filter row still
   populated.
 
-Every one reports its outcome through a new `trackerActionFinished(ok, message)`
-signal, and the fetch additionally always emits `trackerListFetchFinished` on
+Every one reports its outcome through a new `trackerActionFinished(ok, message)` signal, and the fetch additionally always emits `trackerListFetchFinished` on
 both paths so the dialog's busy indicator can never be left spinning on a failed
 request. The QML shims are gone; the commands call their controller directly.
 
@@ -304,9 +303,9 @@ Verification:
   new ones: the base filters through the app's regex engine and reaches the
   builder; the width floor and bounded scrolling exist; the base handlers
   survive a deriving menu declaring its own; and **every** `*ContextMenu.qml`
-  derives from `SearchableMenu`, so a future menu cannot quietly ship without a
-  search field. Two older assertions that pinned the now-removed hand-rolled
-  implementations were rewritten against the shared base.
+derives from `SearchableMenu`, so a future menu cannot quietly ship without a
+search field. Two older assertions that pinned the now-removed hand-rolled
+implementations were rewritten against the shared base.
 - `run.ps1 -NoRun -Jobs 8` completed a clean Release compile; every converted
   menu and the new component compiled through qmlcachegen.
 
@@ -424,16 +423,16 @@ Verification:
   machine's Python 3.14.2 before being committed: `nova2.py --capabilities`
   exits 0 and emits a well-formed entry for each.
 - End-to-end on a brand-new profile with the offscreen platform and no user
-  action: `Bundled search plugins seeded: 8 written, 8 known`, followed by
-  `Search plugin discovered:` for all eight, each `enabled: yes`.
-- Both safeguards were then exercised against that same profile: deleting
-  `piratebay.py` and bumping `torlock.py` to a fake version 99.99, the next
-  launch logged `0 written, 8 known`, left `piratebay` uninstalled, and left
-  `torlock` at 99.99.
+  action at all: the manager initialised at startup, extracted all five runtime files plus both `__init__.py` package markers into `<profile>/qBittorrent/data/nova3/`, logged `capabilities probe
+  queued`, then `Python detected: ...\Python314\python.exe version "3.14.2"
+  supported: true` — the registry fallback, not the `WindowsApps` stub the old
+  detector would have accepted — followed by `SearchController constructed;
+  pythonAvailable= true`, `SearchNoPluginsPage shown; blocked=false`, and
+  `Refreshing search engine capabilities via nova2.py --capabilities`.
 
-Note: `jackett` is a meta-plugin that proxies a local Jackett instance at
-`127.0.0.1:9117`. It is bundled because upstream ships it, but it reports no
-results until the user runs Jackett and configures `jackett.json`.
+Note for whoever runs the offscreen smoke locally: `run.ps1`'s `windeployqt` step
+does not deploy `qoffscreen.dll` (CI passes `--include-plugins qoffscreen`), so
+it has to be copied from the Qt install into `build/platforms/` first.
 
 ## 2026-08-02 — the Search tab is on by default
 

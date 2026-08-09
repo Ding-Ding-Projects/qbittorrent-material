@@ -1145,6 +1145,31 @@ Test-Policy ($addTorrentDialog.Contains('function onTorrentAdded(source)') `
         -and $addTorrentDialog.Contains('function onDuplicateTorrent(source, name)')) `
     "add success, failure, and duplicate outcomes reach persistent notifications"
 
+$guiAddManager = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/controllers/guiaddtorrentmanager.h")
+$addTorrentDialog = Get-Content -Raw -LiteralPath `
+    (Get-RepositoryPath "src/quick/qml/addtorrent/AddNewTorrentDialog.qml")
+Test-Policy ($guiAddManager.Contains('QQueue<PendingDialogRequest> m_pendingDialogRequests') `
+        -and $guiAddManager.Contains('m_dialogPipelineBusy') `
+        -and $guiAddManager.Contains('QTimer::singleShot(0, this') `
+        -and $guiAddManager.Contains('scheduleNextDialogRequest()')) `
+    "add-torrent dialogs use one deferred FIFO that advances on every terminal path"
+Test-Policy ($guiAddManager.Contains('request = PendingDownload {params, true}') `
+        -and $guiAddManager.Contains('request = PendingDownload {params, false}') `
+        -and -not $guiAddManager.Contains('m_downloadedTorrents')) `
+    "remote torrent completions retain per-request parameters even for identical URLs"
+Test-Policy ($guiAddManager.Contains('const bool mergingEnabled = m_session->isMergeTrackersEnabled()') `
+        -and $guiAddManager.Contains('!m_session || !m_session->isMergeTrackersEnabled()') `
+        -and $guiAddManager.Contains('!isPrivate && confirmationAvailable') `
+        -and $guiAddManager.Contains('has no responder; declining merge')) `
+    "tracker merging honors global, privacy, response-time, and missing-responder safeguards"
+Test-Policy ($addTorrentDialog.Contains('function onMergeTrackersRequested(source, name, isPrivate)') `
+        -and ([regex]::Matches($addTorrentDialog, 'closePolicy:\s*Popup\.NoAutoClose')).Count -eq 2 `
+        -and ([regex]::Matches($addTorrentDialog, 'onActivated:\s*[^\r\n]*\.reject\(\)')).Count -eq 2 `
+        -and $addTorrentDialog.Contains('GuiAddTorrentManager.respondMergeTrackers(source, true)') `
+        -and $addTorrentDialog.Contains('GuiAddTorrentManager.respondMergeTrackers(source, false)')) `
+    "add and merge dialogs reject explicitly and the merge prompt always responds"
+
 $legacySnackbarCalls = [System.Collections.Generic.List[string]]::new()
 Get-ChildItem -LiteralPath (Get-RepositoryPath "src/quick/qml") -Filter "*.qml" -File -Recurse |
     ForEach-Object {

@@ -93,6 +93,40 @@ Dialog {
                 GuiAddTorrentManager.respondMergeTrackers(source, false)
                 return
             }
+            mergeTrackersDialog.torrentSource = source
+            mergeTrackersDialog.torrentName = name
+            mergeTrackersDialog.open()
+        }
+    }
+
+    ConfirmDialog {
+        id: mergeTrackersDialog
+        property string torrentSource: ""
+        property string torrentName: ""
+
+        closePolicy: Popup.NoAutoClose
+        title: qsTr("Merge trackers?")
+        text: qsTr("The torrent \"%1\" already exists. Merge trackers and web seeds from the new source?").arg(torrentName)
+        acceptText: qsTr("Merge")
+
+        onAccepted: {
+            const source = torrentSource
+            torrentSource = ""
+            GuiAddTorrentManager.respondMergeTrackers(source, true)
+        }
+        onRejected: {
+            const source = torrentSource
+            torrentSource = ""
+            GuiAddTorrentManager.respondMergeTrackers(source, false)
+        }
+
+        Shortcut {
+            sequence: "Escape"
+            enabled: mergeTrackersDialog.visible
+            onActivated: mergeTrackersDialog.reject()
+            onActivatedAmbiguously: mergeTrackersDialog.reject()
+        }
+    }
 
             mergeTrackersDialog.torrentSource = source
             mergeTrackersDialog.torrentName = name

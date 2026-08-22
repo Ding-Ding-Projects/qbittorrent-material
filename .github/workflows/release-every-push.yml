@@ -1145,7 +1145,10 @@ jobs:
           if (Test-Path -LiteralPath $notesPayloadPath) {
             throw "Release-notes payload unexpectedly exists: $notesPayloadPath"
           }
-          [pscustomobject]@{ body = $finalNotes } |
+          # A body-only PATCH resets a draft's tag_name to its untagged-*
+          # placeholder. Include the intended immutable tag in the same
+          # PATCH so the rename survives the timing-evidence update.
+          [pscustomobject]@{ body = $finalNotes; tag_name = $env:RELEASE_TAG } |
             ConvertTo-Json -Compress |
             Set-Content -LiteralPath $notesPayloadPath -Encoding utf8NoBOM
           gh api --method PATCH `

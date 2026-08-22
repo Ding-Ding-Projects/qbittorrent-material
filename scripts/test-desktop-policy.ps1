@@ -2289,7 +2289,7 @@ if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {
             -and $workflow -match 'function Get-DraftReleaseByTag\(\[switch\]\$AllowAbsent\)' `
             -and $workflow -match '\$deadline = \[DateTimeOffset\]::UtcNow\.AddSeconds\(90\)' `
             -and $workflow -match 'Start-Sleep -Seconds \(\[Math\]::Min\(8, \$attempt \* 2\)\)' `
-            -and $workflow -match '\$tagMatches\.Count -eq 1 -and \$matches\.Count -eq 1' `
+            -and $workflow -match '\$tagMatches\.Count -eq 1 -and \$exactDraftMatches\.Count -eq 1' `
             -and $workflow -match '\$_.draft -and -not \$_.immutable -and -not \$_.prerelease' `
             -and $workflow -match '\[string\]\$_\.target_commitish -eq \$env:GITHUB_SHA' `
             -and $draftProbeOffset -ge 0 `

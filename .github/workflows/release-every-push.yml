@@ -770,17 +770,24 @@ jobs:
                   ForEach-Object { $_ }
               )
               $tagMatches = @($inventory | Where-Object {
-                [string]$_.tag_name -eq $env:RELEASE_TAG
+                ([string]$_.tag_name -eq $env:RELEASE_TAG) `
+                  -or (
+                $_.draft `
+                  -and -not $_.immutable `
+                  -and -not $_.prerelease `
+                  -and [string]$_.target_commitish -eq $env:GITHUB_SHA `
+                  -and [string]$_.tag_name.StartsWith('untagged-', [StringComparison]::Ordinal)
+                  )
               })
-              $matches = @($tagMatches | Where-Object {
+              $exactDraftMatches = @($tagMatches | Where-Object {
                 $_.draft -and -not $_.immutable -and -not $_.prerelease `
                   -and [string]$_.target_commitish -eq $env:GITHUB_SHA
               })
-              if ($tagMatches.Count -eq 1 -and $matches.Count -eq 1) {
-                return Convert-ReleaseApiRecord $matches[0]
+              if ($tagMatches.Count -eq 1 -and $exactDraftMatches.Count -eq 1) {
+                return Convert-ReleaseApiRecord $exactDraftMatches[0]
               }
 
-              $lastObservation = "$($tagMatches.Count) tag record(s), $($matches.Count) exact mutable draft record(s)"
+              $lastObservation = "$($tagMatches.Count) tag record(s), $($exactDraftMatches.Count) exact mutable draft record(s)"
               if ($AllowAbsent -and $tagMatches.Count -eq 0) {
                 return $null
               }
@@ -1171,6 +1178,18 @@ jobs:
 
           if ($null -eq $stagedRelease.databaseId -or [int64]$stagedRelease.databaseId -le 0) {
             throw "Staged release is missing its numeric GitHub release identifier."
+          }
+          # A draft created without an existing git ref receives a temporary
+          # untagged-* placeholder. Set the intended immutable tag before the
+          # sole publication transition so the published record is reachable
+          # through its real tag.
+          gh api --method PATCH `
+            -H "Accept: application/vnd.github+json" `
+            -H "X-GitHub-Api-Version: 2026-03-10" `
+            "repos/$env:GITHUB_REPOSITORY/releases/$($stagedRelease.databaseId)" `
+            -f tag_name=$env:RELEASE_TAG | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not set tag_name on staged draft release."
           }
           $makeLatest = if ($isNewestMasterPackage) { 'true' } else { 'false' }
           gh api --method PATCH `

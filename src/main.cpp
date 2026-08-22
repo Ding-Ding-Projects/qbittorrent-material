@@ -136,6 +136,10 @@ int main(int argc, char *argv[])
                     << "Update recovery start acknowledgement failed:" << recoveryError;
             return 1;
         }
+
+        // --- 4. Boot the UI + event loop. ------------------------------------
+        exitCode = app.run();
+        qCInfo(lcApp) << "Event loop returned; exit code =" << exitCode;
     }
     catch (const std::exception &err)
     {

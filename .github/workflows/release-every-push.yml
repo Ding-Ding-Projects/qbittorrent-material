@@ -845,7 +845,7 @@ jobs:
             $publishedSetupPath = Join-Path $verificationRoot $localInstaller[0].Name
             $publishedReleasesPath = Join-Path $verificationRoot $localReleases[0].Name
             $publishedSignaturePath = Join-Path $verificationRoot $localFeedSignature[0].Name
-            gh release download $env:RELEASE_TAG `
+            gh release download $ReleaseApi.tagName `
               --repo $env:GITHUB_REPOSITORY `
               --pattern $localInstaller[0].Name `
               --pattern $localReleases[0].Name `

@@ -2198,7 +2198,7 @@ if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {
         "publication requires an exact-byte RSA-SHA256 RELEASES signature bound to the committed public-key fingerprint"
     Test-Policy ($workflow -match 'publishedAsset\.digest' `
             -and $workflow -match 'publishedAsset\.size' `
-            -and $workflow -match 'gh release download \$env:RELEASE_TAG' `
+            -and $workflow -match 'gh release download \$ReleaseApi\.tagName' `
             -and $workflow -match 'Redownloaded Squirrel Setup differs from the exact locally tested bytes' `
             -and $workflow -match 'Redownloaded RELEASES/signature bytes differ' `
             -and $workflow -match 'Redownloaded RELEASES\.sig failed committed-public-key verification') `

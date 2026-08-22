@@ -2364,7 +2364,7 @@ if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {
             -and $squirrelSmokeSource -match 'Write-SmokeOutput') `
         "installed-package smoke tests assert release plugins and retain launch diagnostics"
     Test-Policy ($workflow -notmatch '(?i)NSIS|\bcpack\b' `
-            -and $workflow -match 'QBT_PACKAGE_VERSION=\$packageVersion' `
+            -and $workflow -match 'QBT_PACKAGE_VERSION=\$env:QBT_PACKAGE_VERSION' `
             -and $workflow -match 'steps\.package\.outputs\.releases' `
             -and $workflow -match 'steps\.package\.outputs\.fullPackage' `
             -and $workflow -match 'steps\.package\.outputs\.deltaPackage') `

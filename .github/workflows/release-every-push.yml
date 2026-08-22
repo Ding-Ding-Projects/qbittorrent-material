@@ -1096,7 +1096,22 @@ jobs:
             if ($LASTEXITCODE -ne 0) {
               throw "Could not set tag_name on staged draft release."
             }
-            $stagedRelease = Get-DraftReleaseByTag
+            # GitHub's release inventory may lag briefly after a
+            # tag_name PATCH. Poll briefly until the record reports the
+            # intended tag before continuing to staged verification.
+            $renameDeadline = [DateTimeOffset]::UtcNow.AddSeconds(30)
+            do {
+              Start-Sleep -Seconds 3
+              $stagedRelease = Get-DraftReleaseByTag -AllowAbsent
+            } while (
+              [DateTimeOffset]::UtcNow -lt $renameDeadline `
+                -and $null -ne $stagedRelease `
+                -and [string]$stagedRelease.tagName -ne $env:RELEASE_TAG
+            )
+            if ($null -eq $stagedRelease `
+                -or [string]$stagedRelease.tagName -ne $env:RELEASE_TAG) {
+              throw "Draft tag_name rename did not propagate within 30 seconds."
+            }
           }
           if (-not $stagedRelease.isDraft `
               -or $stagedRelease.isImmutable `
@@ -1149,7 +1164,19 @@ jobs:
             throw "Could not write final timing evidence into staged release $env:RELEASE_TAG."
           }
 
-          $stagedRelease = Get-DraftReleaseByTag
+          # Re-read the draft after the timing PATCH. GitHub may briefly return
+          # the pre-rename untagged-* placeholder; retry until it reports the
+          # intended immutable tag.
+          $finalReadDeadline = [DateTimeOffset]::UtcNow.AddSeconds(30)
+          do {
+            $stagedRelease = Get-DraftReleaseByTag -AllowAbsent
+            if ([string]$stagedRelease.tagName -eq $env:RELEASE_TAG) { break }
+            Start-Sleep -Seconds 3
+          } while ([DateTimeOffset]::UtcNow -lt $finalReadDeadline)
+          if ([string]$stagedRelease.tagName -ne $env:RELEASE_TAG) {
+            throw "Draft tag_name rename still not visible before publication."
+          }
+
           $requiredAssetNames = @($releaseAssets | ForEach-Object { Split-Path -Leaf $_ })
           $stagedAssetNames = @($stagedRelease.assets | ForEach-Object { $_.name })
           $missingStagedAssetNames = @(

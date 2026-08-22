@@ -193,7 +193,6 @@ QString firstActivationArgument(const QStringList &args)
     }
     return u"activate"_s;
 }
-    }
 
     QString bundledLicenseNotice()
     {

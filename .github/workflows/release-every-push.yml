@@ -1084,6 +1084,20 @@ jobs:
           else {
             Write-Host "Reusing exact mutable draft $env:RELEASE_TAG after a same-run retry; all staged bytes and metadata will be revalidated before publication."
           }
+          if ([string]$stagedRelease.tagName -ne $env:RELEASE_TAG) {
+            # A fresh draft carries a temporary untagged-* placeholder until
+            # the tag exists. Rename it to the intended immutable tag before
+            # any downstream verification or publication step reads tagName.
+            gh api --method PATCH `
+              -H "Accept: application/vnd.github+json" `
+              -H "X-GitHub-Api-Version: 2026-03-10" `
+              "repos/$env:GITHUB_REPOSITORY/releases/$($stagedRelease.databaseId)" `
+              -f tag_name=$env:RELEASE_TAG | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not set tag_name on staged draft release."
+            }
+            $stagedRelease = Get-DraftReleaseByTag
+          }
           if (-not $stagedRelease.isDraft `
               -or $stagedRelease.isImmutable `
               -or $stagedRelease.isPrerelease `
@@ -1178,18 +1192,6 @@ jobs:
 
           if ($null -eq $stagedRelease.databaseId -or [int64]$stagedRelease.databaseId -le 0) {
             throw "Staged release is missing its numeric GitHub release identifier."
-          }
-          # A draft created without an existing git ref receives a temporary
-          # untagged-* placeholder. Set the intended immutable tag before the
-          # sole publication transition so the published record is reachable
-          # through its real tag.
-          gh api --method PATCH `
-            -H "Accept: application/vnd.github+json" `
-            -H "X-GitHub-Api-Version: 2026-03-10" `
-            "repos/$env:GITHUB_REPOSITORY/releases/$($stagedRelease.databaseId)" `
-            -f tag_name=$env:RELEASE_TAG | Out-Null
-          if ($LASTEXITCODE -ne 0) {
-            throw "Could not set tag_name on staged draft release."
           }
           $makeLatest = if ($isNewestMasterPackage) { 'true' } else { 'false' }
           gh api --method PATCH `
